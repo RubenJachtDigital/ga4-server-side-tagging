@@ -139,7 +139,7 @@ class GA4_Server_Side_Tagging {
         
         // Track purchases
         $this->loader->add_action( 'woocommerce_thankyou', $plugin_woocommerce, 'track_purchase', 10, 1 );
-        $this->loader->add_action( 'gform_after_submission_3', $plugin_woocommerce, 'track_quote', 50, 2 );
+        $this->loader->add_action( 'gform_after_submission_3', $plugin_woocommerce, 'track_quote', 60, 3 );
 
     }
 
