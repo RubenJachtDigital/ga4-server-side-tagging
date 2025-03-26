@@ -75,6 +75,7 @@ class GA4_Server_Side_Tagging_WooCommerce
 
         // Track begin checkout
         add_action('woocommerce_before_checkout_form', array($this, 'track_begin_checkout'), 10);
+        add_action('gform_after_submission_3', array($this, 'track_quote'), 60, 3);
     }
 
     /**
@@ -479,7 +480,10 @@ EOTJS;
             return;
         }
 
-
+        // Check if we already processed this order to prevent duplicate events
+        if (get_post_meta($order_number, '_ga4_purchase_tracked', true)) {
+            return;
+        }
 
         foreach ($cart_items as $item) {
             $variation_id = $item['variation_id'];
@@ -507,6 +511,7 @@ EOTJS;
             'shipping' => 0,
             'items' => $items,
         ));
+        update_post_meta($order_number, '_ga4_purchase_tracked', true);
 
         // Add JavaScript to track client-side event
     ?>
@@ -1015,7 +1020,7 @@ EOTJS;
                     // Track select_item events when products are clicked
                     jQuery('.products .product a').on('click', function() {
                         var $product = jQuery(this).closest('.product');
-                        var productId = $product.data('product_id') || $product.find('.add_to_cart_button').data('product_id');
+                        var productId = $product.data('product_id') || $product.find('.add_to_cart_button, .direct-inschrijven, add-request-quote-button').data('product_id');
                         var productIndex = $product.index() + 1;
                         var productName = $product.find('.woocommerce-loop-product__title').text();
 
