@@ -464,42 +464,77 @@ EOTJS;
         }
         return [];
     }
+
     /**
-     * Track purchase event.
+     * Track quote event for Gravity Forms.
      *
-     * @since    1.0.0
-     * @param    int    $order_id    Order ID.
+     * @since    1.1.0
+     * @param    array    $entry     The Gravity Forms entry.
+     * @param    array    $form      The Gravity Forms form object.
+     * @param    mixed    $result    The result of form submission.
      */
-    public function track_quote()
+    public function track_quote($entry, $form)
     {
+        // Log the method call for debugging
+        $this->logger->info('track_quote method called', [
+            'form_id' => $form['id'],
+            'entry_id' => $entry['id']
+        ]);
+
+        // Validate the form ID if needed
+        if ($form['id'] !== 3) {
+            $this->logger->warning('Track quote not triggered - incorrect form ID', [
+                'expected_form_id' => 3,
+                'actual_form_id' => $form['id']
+            ]);
+            return;
+        }
+
         $cart_items = self::get_raq_cart_data();
+
+        // Log cart items for debugging
+        $this->logger->info('Quote cart items retrieved', [
+            'cart_items_count' => count($cart_items)
+        ]);
+
+        if (empty($cart_items)) {
+            $this->logger->warning('No cart items found for quote tracking');
+            return;
+        }
+
         $total = 0;
-        $order_number = random_int(99999999, 99999999999);
-
-        if (! $cart_items) {
-            return;
-        }
-
-        // Check if we already processed this order to prevent duplicate events
-        if (get_post_meta($order_number, '_ga4_purchase_tracked', true)) {
-            return;
-        }
+        $items = [];
+        $order_number = $entry['id']; // Use Gravity Forms entry ID instead of random number
 
         foreach ($cart_items as $item) {
             $variation_id = $item['variation_id'];
-
             $product = wc_get_product($variation_id);
 
-
-            if ($product) {
-                $total += $product->get_price();
+            if (!$product) {
+                $this->logger->warning('Could not retrieve product for variation', [
+                    'variation_id' => $variation_id
+                ]);
+                continue;
             }
 
+            $total += $product->get_price();
             $product_data = $this->get_product_data($product);
             $items[] = $product_data;
         }
 
-        $this->logger->info('Purchase: Order #' . $order_number . ', total: ' . $total);
+        // Prevent duplicate tracking
+        if (get_post_meta($entry['id'], '_ga4_quote_tracked', true)) {
+            $this->logger->info('Quote already tracked', [
+                'entry_id' => $entry['id']
+            ]);
+            return;
+        }
+
+        $this->logger->info('Quote tracked', [
+            'order_number' => $order_number,
+            'total' => $total,
+            'items_count' => count($items)
+        ]);
 
         // Send server-side event
         $this->send_server_side_event('purchase', array(
@@ -511,9 +546,11 @@ EOTJS;
             'shipping' => 0,
             'items' => $items,
         ));
-        update_post_meta($order_number, '_ga4_purchase_tracked', true);
 
-        // Add JavaScript to track client-side event
+        // Mark as tracked
+        update_post_meta($entry['id'], '_ga4_quote_tracked', true);
+
+        // Client-side tracking
     ?>
         <script>
             document.addEventListener('DOMContentLoaded', function() {
@@ -527,12 +564,12 @@ EOTJS;
                         shipping: <?php echo esc_js(0); ?>,
                         items: <?php echo wp_json_encode($items); ?>
                     });
+                    console.log('[GA4] Tracked generate_lead event');
                 }
             });
         </script>
     <?php
     }
-
     /**
      * Track purchase event.
      *
