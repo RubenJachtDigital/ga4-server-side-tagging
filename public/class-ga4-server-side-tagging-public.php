@@ -353,6 +353,70 @@ class GA4_Server_Side_Tagging_Public
                 endif; // if ($order_id)
             endif; // if (is_wc_endpoint_url('order-received') && isset($_GET['key']))
             ?>
+            <?php
+            // Add purchase event tracking on the order received page
+            if (isset($_POST['input_2']) && !empty($_POST['input_2']) && get_the_ID() == 82850) :
+                $order_data = $this->get_order_quote_data_for_tracking();
+                $order_json = wp_json_encode($order_data);
+            ?>
+                // Track purchase event
+                gtag('event', 'purchase', <?php echo $order_json; ?>);
+
+                <?php if ($use_server_side && !empty($cloudflare_worker_url)) : ?>
+                        // Send purchase event to Cloudflare Worker
+                        (function() {
+                            // Get client ID
+                            var clientId = '';
+                            var match = document.cookie.match(/_ga=GA\d\.\d\.(\d+\.\d+)/);
+                            if (match) {
+                                clientId = match[1];
+                            } else {
+                                clientId = Math.random().toString(36).substring(2, 15) +
+                                    Math.random().toString(36).substring(2, 15);
+                            }
+
+                            // Prepare purchase data
+                            var purchaseData = {
+                                name: 'purchase',
+                                params: <?php echo $order_json; ?>
+                            };
+
+                            // Add client ID
+                            purchaseData.params.client_id = clientId;
+
+                            <?php if (is_user_logged_in()) : ?>
+                                // Add user ID for logged-in users
+                                purchaseData.params.user_id = '<?php echo esc_js(get_current_user_id()); ?>';
+                            <?php endif; ?>
+
+                            // Send to Cloudflare Worker
+                            fetch('<?php echo esc_js($cloudflare_worker_url); ?>', {
+                                    method: 'POST',
+                                    headers: {
+                                        'Content-Type': 'application/json'
+                                    },
+                                    body: JSON.stringify(purchaseData)
+                                })
+                                .then(function(response) {
+                                    if (<?php echo $debug_mode ? 'true' : 'false'; ?>) {
+                                        console.log('[GA4 Server-Side Tagging] Purchase event sent to Cloudflare Worker', purchaseData);
+                                        response.json().then(function(data) {
+                                            console.log('[GA4 Server-Side Tagging] Cloudflare Worker response:', data);
+                                        });
+                                    }
+                                })
+                                .catch(function(error) {
+                                    if (<?php echo $debug_mode ? 'true' : 'false'; ?>) {
+                                        console.error('[GA4 Server-Side Tagging] Error sending purchase event to Cloudflare Worker:', error);
+                                    }
+                                });
+                        })();
+                <?php endif; // if ($use_server_side && !empty($cloudflare_worker_url)) 
+                ?>
+
+            <?php
+            endif; // isset($_POST['input_2']) && !empty($_POST['input_2']) && get_the_ID() == 82850
+            ?>
         </script>
         <!-- End GA4 Server-Side Tagging -->
 <?php
@@ -434,6 +498,124 @@ class GA4_Server_Side_Tagging_Public
             $shipping_method = reset($shipping_methods);
             $order_data['shipping_tier'] = $shipping_method->get_method_title();
         }
+
+        return $order_data;
+    }
+
+    private static function get_transient_user_id()
+    {
+        // Get the user's IP address
+        $user_ip = $_SERVER['REMOTE_ADDR'];
+
+        // Optionally, you can add the User-Agent string to make the key more unique
+        $user_agent = $_SERVER['HTTP_USER_AGENT'];
+
+        // Combine IP and User-Agent to create a more unique key
+        $unique_key = md5($user_ip . $user_agent);
+
+        // Generate a unique transient key for the user based on IP/User-Agent
+        $transient_key = 'custom_raq_compuact_cart_' . $unique_key;
+        return $transient_key;
+    }
+
+    private static function get_raq_cart_data()
+    {
+        $transient_key = self::get_transient_user_id();
+        // Retrieve the stored product clicks for the specific user/session
+        $product_clicks = get_transient($transient_key);
+
+        if ($product_clicks !== false && is_array($product_clicks)) {
+            $results = [];
+            foreach ($product_clicks as $variation_id) {
+                // Get the parent product ID for the variation
+                $parent_id = wp_get_post_parent_id($variation_id);
+                $results[] = [
+                    'variation_id' => $variation_id,
+                    'parent_id'    => $parent_id ? $parent_id : $variation_id,
+                ];
+            }
+            return $results;
+        }
+        return [];
+    }
+
+    private function get_order_quote_data_for_tracking()
+    {
+        $total = 0;
+        $items = [];
+        $order_number = date('ym') . sprintf('%08d', mt_rand(10000000, 99999999));
+
+        $this->logger->info('Preparing order data for request a quote event. Order #' . $order_number);
+
+        $cart_items = self::get_raq_cart_data();
+
+        // Log cart items for debugging
+        $this->logger->info('Quote cart items retrieved', [
+            'cart_items_count' => count($cart_items)
+        ]);
+
+        if (empty($cart_items)) {
+            $this->logger->warning('No cart items found for quote tracking');
+            return;
+        }
+
+
+        foreach ($cart_items as $item) {
+            $variation_id = $item['variation_id'];
+            $product = wc_get_product($variation_id);
+
+            if (!$product) {
+                $this->logger->warning('Could not retrieve product for variation', [
+                    'variation_id' => $variation_id
+                ]);
+                continue;
+            }
+
+            $total += $product->get_price();
+            $product_data = [
+                'item_id' => $product->get_id(),
+                'item_name' => $product->get_name(),
+                'price' => (float) $product->get_price(),
+                'quantity' => $product->get_quantity(),
+            ];
+            // Add optional parameters if available
+            if ($product->get_sku()) {
+                $product_data['item_sku'] = $product->get_sku();
+            }
+
+            if ($product->get_category_ids()) {
+                $categories = array();
+                foreach ($product->get_category_ids() as $cat_id) {
+                    $term = get_term_by('id', $cat_id, 'product_cat');
+                    if ($term) {
+                        $categories[] = $term->name;
+                    }
+                }
+                if (! empty($categories)) {
+                    $product_data['item_category'] = $categories[0];
+
+                    // Add additional categories if available
+                    for ($i = 1; $i < min(5, count($categories)); $i++) {
+                        $product_data['item_category' . ($i + 1)] = $categories[$i];
+                    }
+                }
+            }
+
+
+            $items[] = $product_data;
+        }
+        // Get order data
+        $order_data = array(
+            'transaction_id' => $order_number,
+            'value' => (float) $total,
+            'tax' => (float) 0,
+            'shipping' => (float) 0,
+            'currency' => 'EUR',
+            'items' => $items,
+        );
+        $order_data['coupon'] = '';
+        $order_data['payment_type'] = '';
+        $order_data['shipping_tier'] = '';
 
         return $order_data;
     }

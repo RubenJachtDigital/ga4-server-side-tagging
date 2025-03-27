@@ -75,7 +75,7 @@ class GA4_Server_Side_Tagging_WooCommerce
 
         // Track begin checkout
         add_action('woocommerce_before_checkout_form', array($this, 'track_begin_checkout'), 10);
-        add_action('gform_after_submission_3', array($this, 'track_quote'), 60, 3);
+        add_action('gform_after_submission_3', array($this, 'track_quote'), 60, 1);
     }
 
     /**
@@ -428,7 +428,7 @@ EOTJS;
         </script>
     <?php
     }
-    public static function get_transient_user_id()
+    private static function get_transient_user_id()
     {
         // Get the user's IP address
         $user_ip = $_SERVER['REMOTE_ADDR'];
@@ -444,7 +444,7 @@ EOTJS;
         return $transient_key;
     }
 
-    public static function get_raq_cart_data()
+    private static function get_raq_cart_data()
     {
         $transient_key = self::get_transient_user_id();
         // Retrieve the stored product clicks for the specific user/session
