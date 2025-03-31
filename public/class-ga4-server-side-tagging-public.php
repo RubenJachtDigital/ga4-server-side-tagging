@@ -110,6 +110,11 @@ class GA4_Server_Side_Tagging_Public
                 }
             }
         }
+        if (isset($_POST['gform_submit']) && $_POST['gform_submit'] == '3') {
+            $quoteData = $this->get_order_quote_data_for_tracking();
+            $script_data['quoteData'] = $quoteData;
+            $this->logger->info('Added order data for purchase event tracking. Order ID: ' . $quoteData['transaction_id']);
+        }
 
         // Pass data to the script
         wp_localize_script(
@@ -286,12 +291,14 @@ class GA4_Server_Side_Tagging_Public
             <?php
             // Add purchase event tracking on the order received page
             if (is_wc_endpoint_url('order-received') && isset($_GET['key'])) :
+
                 $order_id = wc_get_order_id_by_order_key(wc_clean(wp_unslash($_GET['key'])));
                 if ($order_id) :
                     $order = wc_get_order($order_id);
                     if ($order) :
                         $order_data = $this->get_order_data_for_tracking($order);
                         $order_json = wp_json_encode($order_data);
+                        $this->logger->info('Preparing Order: ' . $order_json);
             ?>
                         // Track purchase event
                         gtag('event', 'purchase', <?php echo $order_json; ?>);
@@ -355,9 +362,10 @@ class GA4_Server_Side_Tagging_Public
             ?>
             <?php
             // Add purchase event tracking on the order received page
-            if (isset($_POST['input_2']) && !empty($_POST['input_2']) && get_the_ID() == 82850) :
+            if (isset($_POST['gform_submit']) && $_POST['gform_submit'] == '3') :
                 $order_data = $this->get_order_quote_data_for_tracking();
                 $order_json = wp_json_encode($order_data);
+                $this->logger->info('Preparing quote: ' . $order_json);
             ?>
                 // Track purchase event
                 gtag('event', 'purchase', <?php echo $order_json; ?>);
