@@ -49,7 +49,7 @@
       // Track form submissions (excluding WooCommerce forms)
       $(document).on(
         "submit",
-        "form:not(.cart, .woocommerce-cart-form, .checkout, .woocommerce-checkout)",
+        "form:not(.cart, .woocommerce-cart-form, .checkout, .woocommerce-checkout, #gform_3)",
         function () {
           // Skip tracking form submissions that are WooCommerce add to cart forms
           if (
@@ -331,9 +331,8 @@
           }
         }
       }
-      document
-        .getElementById("gform_3")
-        .addEventListener("submit", function (event) {
+      if ($("#gform_3")) {
+        $("#gform_3").on("submit", function (event) {
           console.log("request a quote form fired");
           // Check if we have order data from the server
           if (
@@ -377,7 +376,7 @@
             }
           }
         });
-
+      }
       // Track product list views
       if (
         $(".woocommerce .products").length &&

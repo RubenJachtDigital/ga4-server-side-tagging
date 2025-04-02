@@ -39,6 +39,7 @@ class GA4_Server_Side_Tagging_Public
      */
     public function __construct($logger)
     {
+        $this->setup_gravity_form_hooks();
         $this->logger = $logger;
     }
 
@@ -110,10 +111,14 @@ class GA4_Server_Side_Tagging_Public
                 }
             }
         }
-        if (isset($_POST['gform_submit']) && $_POST['gform_submit'] == '3') {
-            $quoteData = $this->get_order_quote_data_for_tracking();
-            $script_data['quoteData'] = $quoteData;
-            $this->logger->info('Added order data for purchase event tracking. Order ID: ' . $quoteData['transaction_id']);
+
+        // Check for quote data from our transient (set by Gravity Forms action)
+        $quote_data = get_transient('form_3_quote_data');
+        if ($quote_data) {
+            $script_data['quoteData'] = $quote_data;
+            $this->logger->info('Added quote data for request a quote event tracking. Order ID: ' . $quote_data['transaction_id']);
+            // Delete the transient after using it
+            delete_transient('form_3_quote_data');
         }
 
         // Pass data to the script
@@ -124,6 +129,26 @@ class GA4_Server_Side_Tagging_Public
         );
     }
 
+    // Add this new method to your class
+    public function setup_gravity_form_hooks()
+    {
+        // Only add the hook if Gravity Forms is active
+        if (class_exists('GFCommon')) {
+            add_action('gform_after_submission_3', array($this, 'process_gravity_form_3_submission'), 80, 2);
+        }
+    }
+
+    // Add this new method to process form submissions
+    public function process_gravity_form_3_submission($entry, $form)
+    {
+        // This will run when form 3 is submitted
+        $quote_data = $this->get_order_quote_data_for_tracking();
+
+        // Store the quote data in a transient
+        set_transient('form_3_quote_data', $quote_data, 60); // Expires after 60 seconds
+
+        $this->logger->info('Gravity Form 3 submitted, quote data prepared for tracking.');
+    }
     /**
      * Add GA4 tracking code to the site header.
      *
@@ -510,7 +535,7 @@ class GA4_Server_Side_Tagging_Public
         return $order_data;
     }
 
-    private static function get_transient_user_id()
+    public function get_transient_user_id()
     {
         // Get the user's IP address
         $user_ip = $_SERVER['REMOTE_ADDR'];
@@ -526,9 +551,9 @@ class GA4_Server_Side_Tagging_Public
         return $transient_key;
     }
 
-    private static function get_raq_cart_data()
+    public function get_raq_cart_data()
     {
-        $transient_key = self::get_transient_user_id();
+        $transient_key = $this->get_transient_user_id();
         // Retrieve the stored product clicks for the specific user/session
         $product_clicks = get_transient($transient_key);
 
@@ -553,9 +578,9 @@ class GA4_Server_Side_Tagging_Public
         $items = [];
         $order_number = date('ym') . sprintf('%08d', mt_rand(10000000, 99999999));
 
-        $this->logger->info('Preparing order data for request a quote event. Order #' . $order_number);
+        $this->logger->info('Preparing quote data for request a quote event. Order #' . $order_number);
 
-        $cart_items = self::get_raq_cart_data();
+        $cart_items = $this->get_raq_cart_data();
 
         // Log cart items for debugging
         $this->logger->info('Quote cart items retrieved', [

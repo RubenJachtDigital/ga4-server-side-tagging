@@ -428,7 +428,7 @@ EOTJS;
         </script>
     <?php
     }
-    private static function get_transient_user_id()
+    public function get_transient_user_id()
     {
         // Get the user's IP address
         $user_ip = $_SERVER['REMOTE_ADDR'];
@@ -444,9 +444,9 @@ EOTJS;
         return $transient_key;
     }
 
-    private static function get_raq_cart_data()
+    public function get_raq_cart_data()
     {
-        $transient_key = self::get_transient_user_id();
+        $transient_key = $this->get_transient_user_id();
         // Retrieve the stored product clicks for the specific user/session
         $product_clicks = get_transient($transient_key);
 
@@ -490,7 +490,7 @@ EOTJS;
             return;
         }
 
-        $cart_items = self::get_raq_cart_data();
+        $cart_items = $this->get_raq_cart_data();
 
         // Log cart items for debugging
         $this->logger->info('Quote cart items retrieved', [
