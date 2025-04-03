@@ -56,10 +56,10 @@ class GA4_Server_Side_Tagging_WooCommerce
         add_action('wp_footer', array($this, 'add_ajax_tracking_script'));
 
         // Track "Buy Now" buttons that go directly to checkout
-        add_action('woocommerce_after_add_to_cart_button', array($this, 'track_buy_now_buttons'));
+        add_action('woocommerce_after_add_to_cart_button', array($this, 'track_buy_now_buttons'), 50);
 
         // Track cart page view
-        add_action('woocommerce_before_cart', array($this, 'track_view_cart'));
+        add_action('woocommerce_before_cart', array($this, 'track_view_cart'), 50);
 
         // Track item removal from cart
         add_action('woocommerce_cart_item_removed', array($this, 'track_remove_from_cart'), 10, 2);
@@ -190,7 +190,7 @@ class GA4_Server_Side_Tagging_WooCommerce
         <script>
             jQuery(function($) {
                 // Add data attributes to Buy Now buttons
-                $('.single_add_to_cart_button.buy-now, input[name="wc-buy-now"]').each(function() {
+                $('.single_add_to_cart_button.buy-now, input[name="wc-buy-now"], .direct-inschrijven, .add-request-quote-button').each(function() {
                     $(this).attr('data-ga4-buy-now', 'true');
                     $(this).attr('data-ga4-product-id', '<?php echo esc_js($product->get_id()); ?>');
                     $(this).attr('data-ga4-product-name', '<?php echo esc_js($product->get_name()); ?>');
@@ -1057,7 +1057,7 @@ EOTJS;
                     // Track select_item events when products are clicked
                     jQuery('.products .product a').on('click', function() {
                         var $product = jQuery(this).closest('.product');
-                        var productId = $product.data('product_id') || $product.find('.add_to_cart_button, .direct-inschrijven, add-request-quote-button').data('product_id');
+                        var productId = $product.data('product_id') || $product.find('.add_to_cart_button, .direct-inschrijven, .add-request-quote-button').data('product_id');
                         var productIndex = $product.index() + 1;
                         var productName = $product.find('.woocommerce-loop-product__title').text();
 

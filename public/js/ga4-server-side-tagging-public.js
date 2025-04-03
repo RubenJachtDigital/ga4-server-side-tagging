@@ -126,7 +126,7 @@
       // Track Buy Now buttons
       $(document).on(
         "click",
-        '.single_add_to_cart_button.buy-now, input[name="wc-buy-now"], .direct-inschrijven, add-request-quote-button',
+        '.single_add_to_cart_button.buy-now, input[name="wc-buy-now"], .direct-inschrijven, .add-request-quote-button',
         function () {
           var $button = $(this);
           var productId = $button.data("ga4-product-id");
