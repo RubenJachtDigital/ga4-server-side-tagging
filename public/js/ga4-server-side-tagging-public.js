@@ -123,7 +123,6 @@
         }
       );
 
-      // Track Buy Now buttons
       $(document).on(
         "click",
         '.single_add_to_cart_button.buy-now, input[name="wc-buy-now"], .direct-inschrijven, .add-request-quote-button',
@@ -133,6 +132,24 @@
           var productName = $button.data("ga4-product-name");
           var productPrice = $button.data("ga4-product-price") || 0;
           var quantity = parseInt($("input.qty").val()) || 1;
+
+          // Check if productId is empty or not found
+          if (!productId) {
+            // Get item_name from h1.bde-heading
+            productName = $("h1.bde-heading").text().trim();
+
+            // Get item_id from body class (postid-XXXXX)
+            var bodyClasses = $("body").attr("class").split(" ");
+            for (var i = 0; i < bodyClasses.length; i++) {
+              if (bodyClasses[i].startsWith("postid-")) {
+                productId = bodyClasses[i].replace("postid-", "");
+                break;
+              }
+            }
+
+            // Set price to 0
+            productPrice = 0;
+          }
 
           self.trackEvent("add_to_cart", {
             item_id: productId,
