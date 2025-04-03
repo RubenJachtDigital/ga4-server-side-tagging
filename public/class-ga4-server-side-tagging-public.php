@@ -39,7 +39,6 @@ class GA4_Server_Side_Tagging_Public
      */
     public function __construct($logger)
     {
-        $this->setup_gravity_form_hooks();
         $this->logger = $logger;
     }
 
@@ -111,14 +110,13 @@ class GA4_Server_Side_Tagging_Public
                 }
             }
         }
-
-        // Check for quote data from our transient (set by Gravity Forms action)
-        $quote_data = get_transient('form_3_quote_data');
-        if ($quote_data) {
+        $quote_data = $this->get_order_quote_data_for_tracking();
+        
+        if (!empty($quote_data['items'])) {
+            $this->logger->info('Quote data:' . json_encode($quote_data));
             $script_data['quoteData'] = $quote_data;
             $this->logger->info('Added quote data for request a quote event tracking. Order ID: ' . $quote_data['transaction_id']);
             // Delete the transient after using it
-            delete_transient('form_3_quote_data');
         }
 
         // Pass data to the script
@@ -129,26 +127,6 @@ class GA4_Server_Side_Tagging_Public
         );
     }
 
-    // Add this new method to your class
-    public function setup_gravity_form_hooks()
-    {
-        // Only add the hook if Gravity Forms is active
-        if (class_exists('GFCommon')) {
-            add_action('gform_after_submission_3', array($this, 'process_gravity_form_3_submission'), 80, 2);
-        }
-    }
-
-    // Add this new method to process form submissions
-    public function process_gravity_form_3_submission($entry, $form)
-    {
-        // This will run when form 3 is submitted
-        $quote_data = $this->get_order_quote_data_for_tracking();
-
-        // Store the quote data in a transient
-        set_transient('form_3_quote_data', $quote_data, 60); // Expires after 60 seconds
-
-        $this->logger->info('Gravity Form 3 submitted, quote data prepared for tracking.');
-    }
     /**
      * Add GA4 tracking code to the site header.
      *
@@ -609,7 +587,7 @@ class GA4_Server_Side_Tagging_Public
                 'item_id' => $product->get_id(),
                 'item_name' => $product->get_name(),
                 'price' => (float) $product->get_price(),
-                'quantity' => $product->get_quantity(),
+                'quantity' => 1,
             ];
             // Add optional parameters if available
             if ($product->get_sku()) {
