@@ -350,7 +350,7 @@
       }
       if ($("#gform_3")) {
         $("#gform_3").on("submit", function (event) {
-          console.log("request a quote form fired");
+          self.log("request a quote form fired");
           // Check if we have order data from the server
           if (
             typeof self.config.quoteData !== "undefined" &&
