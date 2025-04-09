@@ -112,7 +112,7 @@ class GA4_Server_Side_Tagging
 
         $this->loader->add_action('wp_enqueue_scripts', $plugin_public, 'enqueue_styles');
         $this->loader->add_action('wp_enqueue_scripts', $plugin_public, 'enqueue_scripts');
-        // $this->loader->add_action('wp_head', $plugin_public, 'add_ga4_tracking_code');
+        $this->loader->add_action('wp_head', $plugin_public, 'add_ga4_tracking_code');
 
         // Register REST API endpoint
         $plugin_endpoint = new GA4_Server_Side_Tagging_Endpoint($this->logger);

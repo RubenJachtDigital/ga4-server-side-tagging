@@ -490,14 +490,17 @@
       eventParams.event_time = Math.floor(Date.now() / 1000);
 
       // Track with gtag if available
-      if (typeof gtag === "function") {
-        gtag("event", eventName, eventParams);
-        this.log("Sent to gtag: " + eventName);
-      }
-
-      // Send server-side event if enabled
       if (this.config.useServerSide) {
         this.sendServerSideEvent(eventName, eventParams);
+      } else if (typeof gtag === "function") {
+        gtag("event", eventName, eventParams);
+        this.log("Sent to gtag: " + eventName);
+      } else {
+        console.error("[GA4 Server-Side Tagging] Error sending event", {
+          config: this.config,
+          eventName: eventName,
+          eventParams: eventParams,
+        });
       }
     },
 
