@@ -335,6 +335,7 @@
           if (orderId) {
             self.trackEvent("purchase", {
               transaction_id: orderId,
+              affiliation: self.config.siteName || "Website", 
               value: orderTotal,
               currency: self.config.currency || "EUR",
             });

@@ -96,6 +96,7 @@ class GA4_Server_Side_Tagging_Public
             'isEcommerceEnabled' => get_option('ga4_ecommerce_tracking', true),
             'cloudflareWorkerUrl' => get_option('ga4_cloudflare_worker_url', ''),
             'currency' => get_woocommerce_currency(),
+            'siteName' => get_bloginfo('name'),
         );
 
         // Add order data for purchase event if on the order received page
@@ -303,9 +304,6 @@ class GA4_Server_Side_Tagging_Public
                         $order_json = wp_json_encode($order_data);
                         $this->logger->info('Preparing Order: ' . $order_json);
             ?>
-                        // Track purchase event
-                        gtag('event', 'purchase', <?php echo $order_json; ?>);
-
                         <?php if ($use_server_side && !empty($cloudflare_worker_url)) : ?>
                                 // Send purchase event to Cloudflare Worker
                                 (function() {
@@ -355,6 +353,10 @@ class GA4_Server_Side_Tagging_Public
                                             }
                                         });
                                 })();
+                        <?php else: ?>
+                            // Track purchase event
+                            gtag('event', 'purchase', <?php echo $order_json; ?>);
+
                         <?php endif; // if ($use_server_side && !empty($cloudflare_worker_url)) 
                         ?>
 
@@ -370,8 +372,6 @@ class GA4_Server_Side_Tagging_Public
                 $order_json = wp_json_encode($order_data);
                 $this->logger->info('Preparing quote: ' . $order_json);
             ?>
-                // Track purchase event
-                gtag('event', 'purchase', <?php echo $order_json; ?>);
 
                 <?php if ($use_server_side && !empty($cloudflare_worker_url)) : ?>
                         // Send purchase event to Cloudflare Worker
@@ -422,6 +422,10 @@ class GA4_Server_Side_Tagging_Public
                                     }
                                 });
                         })();
+                <?php else: ?>
+                    // Track purchase event
+                    gtag('event', 'purchase', <?php echo $order_json; ?>);
+
                 <?php endif; // if ($use_server_side && !empty($cloudflare_worker_url)) 
                 ?>
 
@@ -488,6 +492,7 @@ class GA4_Server_Side_Tagging_Public
         // Get order data
         $order_data = array(
             'transaction_id' => $order->get_order_number(),
+            'affiliation' => get_bloginfo('name'),
             'value' => (float) $order->get_total(),
             'tax' => (float) $order->get_total_tax(),
             'shipping' => (float) $order->get_shipping_total(),
@@ -618,6 +623,7 @@ class GA4_Server_Side_Tagging_Public
         // Get order data
         $order_data = array(
             'transaction_id' => $order_number,
+            'affiliation' => get_bloginfo('name'),
             'value' => (float) $total,
             'tax' => (float) 0,
             'shipping' => (float) 0,
