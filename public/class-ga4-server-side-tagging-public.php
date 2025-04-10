@@ -185,7 +185,13 @@ class GA4_Server_Side_Tagging_Public
                     'transport_url': '<?php echo esc_js($cloudflare_worker_url); ?>',
                     'first_party_collection': true
                 });
-
+                // Add this helper function to your add_ga4_tracking_code output
+                function getParameterByName(name) {
+                    name = name.replace(/[\[]/, '\\[').replace(/[\]]/, '\\]');
+                    var regex = new RegExp('[\\?&]' + name + '=([^&#]*)');
+                    var results = regex.exec(location.search);
+                    return results === null ? '' : decodeURIComponent(results[1].replace(/\+/g, ' '));
+                }
                 // Send page_view event to Cloudflare Worker
                 (function() {
                     // Get client ID from cookie or generate a new one
@@ -214,7 +220,11 @@ class GA4_Server_Side_Tagging_Public
                                 page_title: '<?php echo esc_js(get_the_title()); ?>',
                                 page_location: '<?php echo esc_js(get_permalink()); ?>',
                                 page_path: '<?php echo esc_js(parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH)); ?>',
-                                client_id: clientId
+                                client_id: clientId,
+                                source: getParameterByName('utm_source'),
+                                medium: getParameterByName('utm_medium'),
+                                campaign: getParameterByName('utm_campaign'),
+                                referrer: document.referrer
                             }
                         };
 
@@ -253,7 +263,11 @@ class GA4_Server_Side_Tagging_Public
                                 page_title: '<?php echo esc_js(get_the_title()); ?>',
                                 page_location: '<?php echo esc_js(get_permalink()); ?>',
                                 page_path: '<?php echo esc_js(parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH)); ?>',
-                                client_id: clientId
+                                client_id: clientId,
+                                source: getParameterByName('utm_source'),
+                                medium: getParameterByName('utm_medium'),
+                                campaign: getParameterByName('utm_campaign'),
+                                referrer: document.referrer
                             }
                         };
 
