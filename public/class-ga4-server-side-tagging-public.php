@@ -156,35 +156,42 @@ class GA4_Server_Side_Tagging_Public
         $this->logger->info('Page view: ' . get_the_title() . ' (' . get_permalink() . ')');
 
         // Output the GA4 tracking code
+        if (!$use_server_side):
 ?>
-        <!-- GA4 Server-Side Tagging -->
-        <script async src="https://www.googletagmanager.com/gtag/js?id=<?php echo esc_attr($measurement_id); ?>"></script>
+            <!-- GA4 Server-Side Tagging -->
+            <script async src="https://www.googletagmanager.com/gtag/js?id=<?php echo esc_attr($measurement_id); ?>"></script>
+        <?php endif; ?>
+
         <script>
-            window.dataLayer = window.dataLayer || [];
+            <?php if (!$use_server_side): ?>
+                window.dataLayer = window.dataLayer || [];
 
-            function gtag() {
-                dataLayer.push(arguments);
-            }
-            gtag('js', new Date());
-
-            <?php if ($anonymize_ip) : ?>
+                function gtag() {
+                    dataLayer.push(arguments);
+                }
+                gtag('js', new Date());
+            <?php endif; ?>
+            <?php if ($anonymize_ip && !$use_server_side) : ?>
                 gtag('set', 'anonymize_ip', true);
             <?php endif; ?>
 
-            <?php if ($debug_mode) : ?>
+            <?php if ($debug_mode  && !$use_server_side) : ?>
                 gtag('config', '<?php echo esc_js($measurement_id); ?>', {
                     'debug_mode': true
                 });
-            <?php else : ?>
+            <?php elseif (!$use_server_side) : ?>
                 gtag('config', '<?php echo esc_js($measurement_id); ?>');
             <?php endif; ?>
 
             <?php if ($use_server_side && ! empty($cloudflare_worker_url)) : ?>
                 // Configure server-side endpoint
-                gtag('config', '<?php echo esc_js($measurement_id); ?>', {
-                    'transport_url': '<?php echo esc_js($cloudflare_worker_url); ?>',
-                    'first_party_collection': true
-                });
+                // gtag('config', '<?php //echo esc_js($measurement_id); 
+                                    ?>', {
+                //     'transport_url': '<?php //  echo esc_js($cloudflare_worker_url); 
+                                            ?>',
+                //     'first_party_collection': true
+                // });
+
                 // Add this helper function to your add_ga4_tracking_code output
                 function getParameterByName(name) {
                     name = name.replace(/[\[]/, '\\[').replace(/[\]]/, '\\]');
@@ -301,7 +308,7 @@ class GA4_Server_Side_Tagging_Public
                 })();
             <?php endif; ?>
 
-            <?php if (is_user_logged_in()) : ?>
+            <?php if (is_user_logged_in() && !$use_server_side) : ?>
                 // Set user ID for logged-in users
                 gtag('set', 'user_id', '<?php echo esc_js(get_current_user_id()); ?>');
             <?php endif; ?>

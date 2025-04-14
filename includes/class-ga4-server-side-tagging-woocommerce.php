@@ -230,7 +230,7 @@ class GA4_Server_Side_Tagging_WooCommerce
                 }
             });
         </script>
-    <?php
+        <?php
     }
 
     /**
@@ -395,6 +395,7 @@ EOTJS;
     {
         $cart_items = array();
         $cart_total = 0;
+        $serverSideMode = get_option('ga4_use_server_side', true);
 
         foreach (WC()->cart->get_cart() as $cart_item) {
             $product = $cart_item['data'];
@@ -405,28 +406,33 @@ EOTJS;
         }
 
         $this->logger->info('Begin checkout: ' . count($cart_items) . ' items, total: ' . $cart_total);
+        if ($serverSideMode) {
 
-        // Send server-side event
-        $this->send_server_side_event('begin_checkout', array(
-            'currency' => get_woocommerce_currency(),
-            'value' => $cart_total,
-            'items' => $cart_items,
-        ));
+            // Send server-side event
+            $this->send_server_side_event('begin_checkout', array(
+                'currency' => get_woocommerce_currency(),
+                'value' => $cart_total,
+                'items' => $cart_items,
+            ));
+        } else {
 
-        // Add JavaScript to track client-side event
-    ?>
-        <script>
-            document.addEventListener('DOMContentLoaded', function() {
-                if (typeof gtag === 'function') {
-                    gtag('event', 'begin_checkout', {
-                        currency: '<?php echo esc_js(get_woocommerce_currency()); ?>',
-                        value: <?php echo esc_js($cart_total); ?>,
-                        items: <?php echo wp_json_encode($cart_items); ?>
-                    });
-                }
-            });
-        </script>
-    <?php
+
+            // Add JavaScript to track client-side event
+        ?>
+            <script>
+                document.addEventListener('DOMContentLoaded', function() {
+                    if (typeof gtag === 'function') {
+                        gtag('event', 'begin_checkout', {
+                            currency: '<?php echo esc_js(get_woocommerce_currency()); ?>',
+                            value: <?php echo esc_js($cart_total); ?>,
+                            items: <?php echo wp_json_encode($cart_items); ?>
+                        });
+                    }
+                });
+            </script>
+
+        <?php
+        }
     }
     public function get_transient_user_id()
     {
@@ -505,6 +511,7 @@ EOTJS;
         $total = 0;
         $items = [];
         $order_number = $entry['id']; // Use Gravity Forms entry ID instead of random number
+        $serverSideMode = get_option('ga4_use_server_side', true);
 
         foreach ($cart_items as $item) {
             $variation_id = $item['variation_id'];
@@ -535,40 +542,42 @@ EOTJS;
             'total' => $total,
             'items_count' => count($items)
         ]);
-
-        // Send server-side event
-        $this->send_server_side_event('purchase', array(
-            'transaction_id' => $order_number,
-            'affiliation' => get_bloginfo('name'),
-            'currency' => 'EUR',
-            'value' => $total,
-            'tax' => 0,
-            'shipping' => 0,
-            'items' => $items,
-        ));
-
-        // Mark as tracked
         update_post_meta($entry['id'], '_ga4_quote_tracked', true);
+        if ($serverSideMode) {
 
-        // Client-side tracking
-    ?>
-        <script>
-            document.addEventListener('DOMContentLoaded', function() {
-                if (typeof gtag === 'function') {
-                    gtag('event', 'purchase', {
-                        transaction_id: '<?php echo esc_js($order_number); ?>',
-                        affiliation: '<?php echo esc_js(get_bloginfo('name')); ?>',
-                        currency: '<?php echo esc_js('EUR'); ?>',
-                        value: <?php echo esc_js($total); ?>,
-                        tax: <?php echo esc_js(0); ?>,
-                        shipping: <?php echo esc_js(0); ?>,
-                        items: <?php echo wp_json_encode($items); ?>
-                    });
-                    console.log('[GA4] Tracked generate_lead event');
-                }
-            });
-        </script>
-    <?php
+            // Send server-side event
+            $this->send_server_side_event('purchase', array(
+                'transaction_id' => $order_number,
+                'affiliation' => get_bloginfo('name'),
+                'currency' => 'EUR',
+                'value' => $total,
+                'tax' => 0,
+                'shipping' => 0,
+                'items' => $items,
+            ));
+        }
+        // Mark as tracked
+        else {
+            // Client-side tracking
+        ?>
+            <script>
+                document.addEventListener('DOMContentLoaded', function() {
+                    if (typeof gtag === 'function') {
+                        gtag('event', 'purchase', {
+                            transaction_id: '<?php echo esc_js($order_number); ?>',
+                            affiliation: '<?php echo esc_js(get_bloginfo('name')); ?>',
+                            currency: '<?php echo esc_js('EUR'); ?>',
+                            value: <?php echo esc_js($total); ?>,
+                            tax: <?php echo esc_js(0); ?>,
+                            shipping: <?php echo esc_js(0); ?>,
+                            items: <?php echo wp_json_encode($items); ?>
+                        });
+                        console.log('[GA4] Tracked generate_lead event');
+                    }
+                });
+            </script>
+        <?php
+        }
     }
     /**
      * Track purchase event.
@@ -596,6 +605,7 @@ EOTJS;
         // Get order items
         $items = array();
         $total_value = 0;
+        $serverSideMode = get_option('ga4_use_server_side', true);
 
         foreach ($order->get_items() as $item) {
             $product = $item->get_product();
@@ -611,39 +621,42 @@ EOTJS;
         }
 
         $this->logger->info('Purchase: Order #' . $order_number . ', total: ' . $total_value);
-
-        // Send server-side event
-        $this->send_server_side_event('purchase', array(
-            'transaction_id' => $order_number,
-            'affiliation' => get_bloginfo('name'),
-            'currency' => $order->get_currency(),
-            'value' => $total_value,
-            'tax' => $order->get_total_tax(),
-            'shipping' => $order->get_shipping_total(),
-            'items' => $items,
-        ));
-
-        // Mark order as tracked
         update_post_meta($order_id, '_ga4_purchase_tracked', true);
+        if ($serverSideMode) {
 
-        // Add JavaScript to track client-side event
-    ?>
-        <script>
-            document.addEventListener('DOMContentLoaded', function() {
-                if (typeof gtag === 'function') {
-                    gtag('event', 'purchase', {
-                        transaction_id: '<?php echo esc_js($order_number); ?>',
-                        affiliation: '<?php echo esc_js(get_bloginfo('name')); ?>',
-                        currency: '<?php echo esc_js($order->get_currency()); ?>',
-                        value: <?php echo esc_js($total_value); ?>,
-                        tax: <?php echo esc_js($order->get_total_tax()); ?>,
-                        shipping: <?php echo esc_js($order->get_shipping_total()); ?>,
-                        items: <?php echo wp_json_encode($items); ?>
-                    });
-                }
-            });
-        </script>
-    <?php
+            // Send server-side event
+            $this->send_server_side_event('purchase', array(
+                'transaction_id' => $order_number,
+                'affiliation' => get_bloginfo('name'),
+                'currency' => $order->get_currency(),
+                'value' => $total_value,
+                'tax' => $order->get_total_tax(),
+                'shipping' => $order->get_shipping_total(),
+                'items' => $items,
+            ));
+        } else {
+
+            // Mark order as tracked
+
+            // Add JavaScript to track client-side event
+        ?>
+            <script>
+                document.addEventListener('DOMContentLoaded', function() {
+                    if (typeof gtag === 'function') {
+                        gtag('event', 'purchase', {
+                            transaction_id: '<?php echo esc_js($order_number); ?>',
+                            affiliation: '<?php echo esc_js(get_bloginfo('name')); ?>',
+                            currency: '<?php echo esc_js($order->get_currency()); ?>',
+                            value: <?php echo esc_js($total_value); ?>,
+                            tax: <?php echo esc_js($order->get_total_tax()); ?>,
+                            shipping: <?php echo esc_js($order->get_shipping_total()); ?>,
+                            items: <?php echo wp_json_encode($items); ?>
+                        });
+                    }
+                });
+            </script>
+        <?php
+        }
     }
 
     /**
@@ -882,6 +895,7 @@ EOTJS;
     {
         $cart_items = array();
         $cart_total = 0;
+        $serverSideMode = get_option('ga4_use_server_side', true);
 
         foreach (WC()->cart->get_cart() as $cart_item) {
             $product = $cart_item['data'];
@@ -892,29 +906,31 @@ EOTJS;
         }
 
         $this->logger->info('View cart: ' . count($cart_items) . ' items, total: ' . $cart_total);
+        if ($serverSideMode) {
+            // Send server-side event
+            $this->send_server_side_event('view_cart', array(
+                'currency' => get_woocommerce_currency(),
+                'value' => $cart_total,
+                'items' => $cart_items,
+            ));
+        } else {
 
-        // Send server-side event
-        $this->send_server_side_event('view_cart', array(
-            'currency' => get_woocommerce_currency(),
-            'value' => $cart_total,
-            'items' => $cart_items,
-        ));
-
-        // Add JavaScript to track client-side event
-    ?>
-        <script>
-            document.addEventListener('DOMContentLoaded', function() {
-                if (typeof gtag === 'function') {
-                    gtag('event', 'view_cart', {
-                        currency: '<?php echo esc_js(get_woocommerce_currency()); ?>',
-                        value: <?php echo esc_js($cart_total); ?>,
-                        items: <?php echo wp_json_encode($cart_items); ?>
-                    });
-                    console.log('[GA4] Tracked view_cart event');
-                }
-            });
-        </script>
-    <?php
+            // Add JavaScript to track client-side event
+        ?>
+            <script>
+                document.addEventListener('DOMContentLoaded', function() {
+                    if (typeof gtag === 'function') {
+                        gtag('event', 'view_cart', {
+                            currency: '<?php echo esc_js(get_woocommerce_currency()); ?>',
+                            value: <?php echo esc_js($cart_total); ?>,
+                            items: <?php echo wp_json_encode($cart_items); ?>
+                        });
+                        console.log('[GA4] Tracked view_cart event');
+                    }
+                });
+            </script>
+        <?php
+        }
     }
 
     /**
@@ -936,6 +952,7 @@ EOTJS;
         $product = $removed_item['data'];
         $product_id = $product->get_id();
         $quantity = $removed_item['quantity'];
+        $serverSideMode = get_option('ga4_use_server_side', true);
 
         if (! is_object($product)) {
             return;
@@ -954,24 +971,28 @@ EOTJS;
             'items' => array($product_data),
         );
 
-        // Send server-side event
-        $this->send_server_side_event('remove_from_cart', $event_data);
+        if ($serverSideMode) {
+            // Send server-side event
+            $this->send_server_side_event('remove_from_cart', $event_data);
+        } else {
 
-        // Add JavaScript for client-side tracking
-    ?>
-        <script>
-            document.addEventListener('DOMContentLoaded', function() {
-                if (typeof gtag === 'function') {
-                    gtag('event', 'remove_from_cart', {
-                        currency: '<?php echo esc_js(get_woocommerce_currency()); ?>',
-                        value: <?php echo esc_js($product_data['price'] * $quantity); ?>,
-                        items: [<?php echo wp_json_encode($product_data); ?>]
-                    });
-                    console.log('[GA4] Tracked remove_from_cart event');
-                }
-            });
-        </script>
-    <?php
+
+            // Add JavaScript for client-side tracking
+        ?>
+            <script>
+                document.addEventListener('DOMContentLoaded', function() {
+                    if (typeof gtag === 'function') {
+                        gtag('event', 'remove_from_cart', {
+                            currency: '<?php echo esc_js(get_woocommerce_currency()); ?>',
+                            value: <?php echo esc_js($product_data['price'] * $quantity); ?>,
+                            items: [<?php echo wp_json_encode($product_data); ?>]
+                        });
+                        console.log('[GA4] Tracked remove_from_cart event');
+                    }
+                });
+            </script>
+        <?php
+        }
     }
 
     /**
@@ -986,6 +1007,7 @@ EOTJS;
         // Get current category or tag name
         $list_name = 'Product List';
         $list_id = '';
+        $serverSideMode = get_option('ga4_use_server_side', true);
 
         if (is_product_category()) {
             $category = get_queried_object();
@@ -1042,44 +1064,48 @@ EOTJS;
             'item_list_id' => $list_id,
             'items' => $items,
         );
+        if ($serverSideMode) {
 
-        // Send server-side event
-        $this->send_server_side_event('view_item_list', $event_data);
+            // Send server-side event
+            $this->send_server_side_event('view_item_list', $event_data);
+        } else {
 
-        // Add JavaScript for client-side tracking
-    ?>
-        <script>
-            document.addEventListener('DOMContentLoaded', function() {
-                if (typeof gtag === 'function') {
-                    gtag('event', 'view_item_list', <?php echo wp_json_encode($event_data); ?>);
-                    console.log('[GA4] Tracked view_item_list event');
 
-                    // Track select_item events when products are clicked
-                    jQuery('.products .product a').on('click', function() {
-                        var $product = jQuery(this).closest('.product');
-                        var productId = $product.data('product_id') || $product.find('.add_to_cart_button, .direct-inschrijven, .add-request-quote-button').data('product_id');
-                        var productIndex = $product.index() + 1;
-                        var productName = $product.find('.woocommerce-loop-product__title').text();
+            // Add JavaScript for client-side tracking
+        ?>
+            <script>
+                document.addEventListener('DOMContentLoaded', function() {
+                    if (typeof gtag === 'function') {
+                        gtag('event', 'view_item_list', <?php echo wp_json_encode($event_data); ?>);
+                        console.log('[GA4] Tracked view_item_list event');
 
-                        if (productId) {
-                            gtag('event', 'select_item', {
-                                item_list_name: '<?php echo esc_js($list_name); ?>',
-                                item_list_id: '<?php echo esc_js($list_id); ?>',
-                                items: [{
-                                    item_id: productId,
-                                    item_name: productName,
-                                    index: productIndex,
+                        // Track select_item events when products are clicked
+                        jQuery('.products .product a').on('click', function() {
+                            var $product = jQuery(this).closest('.product');
+                            var productId = $product.data('product_id') || $product.find('.add_to_cart_button, .direct-inschrijven, .add-request-quote-button').data('product_id');
+                            var productIndex = $product.index() + 1;
+                            var productName = $product.find('.woocommerce-loop-product__title').text();
+
+                            if (productId) {
+                                gtag('event', 'select_item', {
                                     item_list_name: '<?php echo esc_js($list_name); ?>',
-                                    item_list_id: '<?php echo esc_js($list_id); ?>'
-                                }]
-                            });
-                            console.log('[GA4] Tracked select_item event');
-                        }
-                    });
-                }
-            });
-        </script>
-    <?php
+                                    item_list_id: '<?php echo esc_js($list_id); ?>',
+                                    items: [{
+                                        item_id: productId,
+                                        item_name: productName,
+                                        index: productIndex,
+                                        item_list_name: '<?php echo esc_js($list_name); ?>',
+                                        item_list_id: '<?php echo esc_js($list_id); ?>'
+                                    }]
+                                });
+                                console.log('[GA4] Tracked select_item event');
+                            }
+                        });
+                    }
+                });
+            </script>
+        <?php
+        }
     }
 
     /**
@@ -1105,7 +1131,7 @@ EOTJS;
         }
 
         // Add JavaScript to track payment method selection
-    ?>
+        ?>
         <script>
             jQuery(function($) {
                 // Track when payment method is selected
@@ -1159,7 +1185,7 @@ EOTJS;
                 });
             });
         </script>
-    <?php
+        <?php
     }
 
     /**
@@ -1182,6 +1208,7 @@ EOTJS;
         $cart_items = array();
         $cart_total = 0;
         $shipping_tier = '';
+        $serverSideMode = get_option('ga4_use_server_side', true);
 
         // Get selected shipping method
         $chosen_shipping_methods = WC()->session->get('chosen_shipping_methods');
@@ -1210,21 +1237,24 @@ EOTJS;
             'shipping_tier' => $shipping_tier,
             'items' => $cart_items,
         );
+        if ($serverSideMode) {
+            // Send server-side event
+            $this->send_server_side_event('add_shipping_info', $event_data);
+        } else {
 
-        // Send server-side event
-        $this->send_server_side_event('add_shipping_info', $event_data);
 
-        // Add JavaScript for client-side tracking
-    ?>
-        <script>
-            document.addEventListener('DOMContentLoaded', function() {
-                if (typeof gtag === 'function') {
-                    gtag('event', 'add_shipping_info', <?php echo wp_json_encode($event_data); ?>);
-                    console.log('[GA4] Tracked add_shipping_info event');
-                }
-            });
-        </script>
-    <?php
+            // Add JavaScript for client-side tracking
+        ?>
+            <script>
+                document.addEventListener('DOMContentLoaded', function() {
+                    if (typeof gtag === 'function') {
+                        gtag('event', 'add_shipping_info', <?php echo wp_json_encode($event_data); ?>);
+                        console.log('[GA4] Tracked add_shipping_info event');
+                    }
+                });
+            </script>
+        <?php
+        }
     }
 
     /**
@@ -1246,6 +1276,7 @@ EOTJS;
 
         $cart_items = array();
         $cart_total = 0;
+        $serverSideMode = get_option('ga4_use_server_side', true);
 
         foreach (WC()->cart->get_cart() as $cart_item) {
             $product = $cart_item['data'];
@@ -1271,20 +1302,24 @@ EOTJS;
             'value' => $cart_total,
             'items' => $cart_items,
         );
+        if ($serverSideMode) {
 
-        // Send server-side event
-        $this->send_server_side_event('begin_checkout', $event_data);
+            // Send server-side event
+            $this->send_server_side_event('begin_checkout', $event_data);
+        } else {
 
-        // Add JavaScript for client-side tracking
-    ?>
-        <script>
-            document.addEventListener('DOMContentLoaded', function() {
-                if (typeof gtag === 'function') {
-                    gtag('event', 'begin_checkout', <?php echo wp_json_encode($event_data); ?>);
-                    console.log('[GA4] Tracked begin_checkout event');
-                }
-            });
-        </script>
+
+            // Add JavaScript for client-side tracking
+        ?>
+            <script>
+                document.addEventListener('DOMContentLoaded', function() {
+                    if (typeof gtag === 'function') {
+                        gtag('event', 'begin_checkout', <?php echo wp_json_encode($event_data); ?>);
+                        console.log('[GA4] Tracked begin_checkout event');
+                    }
+                });
+            </script>
 <?php
+        }
     }
 }
