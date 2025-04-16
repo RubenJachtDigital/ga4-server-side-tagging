@@ -311,11 +311,19 @@
           typeof self.config.orderData !== "undefined" &&
           self.config.orderData
         ) {
+          // Add attribution data to order data
+          var orderData = self.config.orderData;
+          
+          // Add source attribution parameters
+          orderData.source = self.getUtmSource() || document.referrer || "(direct)";
+          orderData.medium = self.getUtmMedium() || "(none)";
+          orderData.campaign = self.getUtmCampaign() || "(not set)";
+          
           self.log(
-            "Order data found, tracking purchase event",
-            self.config.orderData
+            "Order data found, tracking purchase event with attribution",
+            orderData
           );
-          self.trackEvent("purchase", self.config.orderData);
+          self.trackEvent("purchase", orderData);
         } else {
           // Try to extract order data from the page
           self.log("Attempting to extract order data from the page");
@@ -338,11 +346,18 @@
               affiliation: self.config.siteName || "Website", 
               value: orderTotal,
               currency: self.config.currency || "EUR",
+              // Add attribution data
+              source: self.getUtmSource() || document.referrer || "(direct)",
+              medium: self.getUtmMedium() || "(none)",
+              campaign: self.getUtmCampaign() || "(not set)"
             });
 
-            self.log("Tracked minimal purchase event", {
+            self.log("Tracked minimal purchase event with attribution", {
               transaction_id: orderId,
               value: orderTotal,
+              source: self.getUtmSource() || document.referrer || "(direct)",
+              medium: self.getUtmMedium() || "(none)",
+              campaign: self.getUtmCampaign() || "(not set)"
             });
           } else {
             self.log("Could not extract order data from the page");
@@ -357,11 +372,19 @@
             typeof self.config.quoteData !== "undefined" &&
             self.config.quoteData
           ) {
+            // Add attribution data to quote data
+            var quoteData = self.config.quoteData;
+            
+            // Add source attribution parameters
+            quoteData.source = self.getUtmSource() || document.referrer || "(direct)";
+            quoteData.medium = self.getUtmMedium() || "(none)";
+            quoteData.campaign = self.getUtmCampaign() || "(not set)";
+            
             self.log(
-              "Order data found, tracking purchase event",
-              self.config.quoteData
+              "Quote data found, tracking purchase event with attribution",
+              quoteData
             );
-            self.trackEvent("purchase", self.config.quoteData);
+            self.trackEvent("purchase", quoteData);
           } else {
             // Try to extract order data from the page
             self.log("Attempting to extract order data from the page");
@@ -383,11 +406,18 @@
                 transaction_id: orderId,
                 value: orderTotal,
                 currency: self.config.currency || "EUR",
+                // Add attribution data
+                source: self.getUtmSource() || document.referrer || "(direct)",
+                medium: self.getUtmMedium() || "(none)",
+                campaign: self.getUtmCampaign() || "(not set)"
               });
 
-              self.log("Tracked minimal purchase event", {
+              self.log("Tracked minimal purchase event with attribution", {
                 transaction_id: orderId,
                 value: orderTotal,
+                source: self.getUtmSource() || document.referrer || "(direct)",
+                medium: self.getUtmMedium() || "(none)",
+                campaign: self.getUtmCampaign() || "(not set)"
               });
             } else {
               self.log("Could not extract order data from the page");
@@ -480,6 +510,24 @@
           });
         }
       }
+    },
+
+    // Get UTM parameters from URL
+    getUtmSource: function() {
+      return this.getParameterByName('utm_source');
+    },
+    
+    getUtmMedium: function() {
+      return this.getParameterByName('utm_medium');
+    },
+    
+    getUtmCampaign: function() {
+      return this.getParameterByName('utm_campaign');
+    },
+    
+    getParameterByName: function(name) {
+      var match = RegExp('[?&]' + name + '=([^&]*)').exec(window.location.search);
+      return match && decodeURIComponent(match[1].replace(/\+/g, ' '));
     },
 
     // Track an event
