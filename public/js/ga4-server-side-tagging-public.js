@@ -23,10 +23,52 @@
       // Set up event listeners
       this.setupEventListeners();
 
+      // Set up pageview
+      this.trackPageView();
+
       // Log initialization
-      this.log("GA4 Server-Side Tagging initialized");
+      this.log("GA4 Server-Side Tagging initialized v2");
     },
 
+    trackPageView: function () {
+      // Check if we're on a product page
+      if (this.config.productData) {
+        // We're on a product page, so track view_item instead of page_view
+        var viewItemData = {
+          currency: this.config.currency || "EUR",
+          value: this.config.productData.price,
+          items: [this.config.productData],
+          page_title: document.title,
+          page_location: window.location.href,
+          page_path: window.location.pathname,
+          referrer: document.referrer
+        };
+
+        // Add UTM parameters if available
+        viewItemData.source =
+          this.getUtmSource() || document.referrer || "(direct)";
+        viewItemData.medium = this.getUtmMedium() || "(none)";
+        viewItemData.campaign = this.getUtmCampaign() || "(not set)";
+
+        this.log("Tracking view_item event for product page", viewItemData);
+        this.trackEvent("view_item", viewItemData);
+      }
+      // For regular pages, track page_view
+      else if (this.config.pageViewData) {
+        this.log("Tracking page_view event", this.config.pageViewData);
+        this.trackEvent("page_view", this.config.pageViewData);
+      } else {
+        // Fallback to basic page view tracking if no data available
+        var pageViewData = {
+          page_title: document.title,
+          page_location: window.location.href,
+          page_path: window.location.pathname,
+          referrer: document.referrer
+        };
+        this.log("Tracking basic page_view event", pageViewData);
+        this.trackEvent("page_view", pageViewData);
+      }
+    },
     // Set up event listeners
     setupEventListeners: function () {
       var self = this;
@@ -313,12 +355,13 @@
         ) {
           // Add attribution data to order data
           var orderData = self.config.orderData;
-          
+
           // Add source attribution parameters
-          orderData.source = self.getUtmSource() || document.referrer || "(direct)";
+          orderData.source =
+            self.getUtmSource() || document.referrer || "(direct)";
           orderData.medium = self.getUtmMedium() || "(none)";
           orderData.campaign = self.getUtmCampaign() || "(not set)";
-          
+
           self.log(
             "Order data found, tracking purchase event with attribution",
             orderData
@@ -343,13 +386,13 @@
           if (orderId) {
             self.trackEvent("purchase", {
               transaction_id: orderId,
-              affiliation: self.config.siteName || "Website", 
+              affiliation: self.config.siteName || "Website",
               value: orderTotal,
               currency: self.config.currency || "EUR",
               // Add attribution data
               source: self.getUtmSource() || document.referrer || "(direct)",
               medium: self.getUtmMedium() || "(none)",
-              campaign: self.getUtmCampaign() || "(not set)"
+              campaign: self.getUtmCampaign() || "(not set)",
             });
 
             self.log("Tracked minimal purchase event with attribution", {
@@ -357,7 +400,7 @@
               value: orderTotal,
               source: self.getUtmSource() || document.referrer || "(direct)",
               medium: self.getUtmMedium() || "(none)",
-              campaign: self.getUtmCampaign() || "(not set)"
+              campaign: self.getUtmCampaign() || "(not set)",
             });
           } else {
             self.log("Could not extract order data from the page");
@@ -374,12 +417,13 @@
           ) {
             // Add attribution data to quote data
             var quoteData = self.config.quoteData;
-            
+
             // Add source attribution parameters
-            quoteData.source = self.getUtmSource() || document.referrer || "(direct)";
+            quoteData.source =
+              self.getUtmSource() || document.referrer || "(direct)";
             quoteData.medium = self.getUtmMedium() || "(none)";
             quoteData.campaign = self.getUtmCampaign() || "(not set)";
-            
+
             self.log(
               "Quote data found, tracking purchase event with attribution",
               quoteData
@@ -409,7 +453,7 @@
                 // Add attribution data
                 source: self.getUtmSource() || document.referrer || "(direct)",
                 medium: self.getUtmMedium() || "(none)",
-                campaign: self.getUtmCampaign() || "(not set)"
+                campaign: self.getUtmCampaign() || "(not set)",
               });
 
               self.log("Tracked minimal purchase event with attribution", {
@@ -417,7 +461,7 @@
                 value: orderTotal,
                 source: self.getUtmSource() || document.referrer || "(direct)",
                 medium: self.getUtmMedium() || "(none)",
-                campaign: self.getUtmCampaign() || "(not set)"
+                campaign: self.getUtmCampaign() || "(not set)",
               });
             } else {
               self.log("Could not extract order data from the page");
@@ -513,21 +557,23 @@
     },
 
     // Get UTM parameters from URL
-    getUtmSource: function() {
-      return this.getParameterByName('utm_source');
+    getUtmSource: function () {
+      return this.getParameterByName("utm_source");
     },
-    
-    getUtmMedium: function() {
-      return this.getParameterByName('utm_medium');
+
+    getUtmMedium: function () {
+      return this.getParameterByName("utm_medium");
     },
-    
-    getUtmCampaign: function() {
-      return this.getParameterByName('utm_campaign');
+
+    getUtmCampaign: function () {
+      return this.getParameterByName("utm_campaign");
     },
-    
-    getParameterByName: function(name) {
-      var match = RegExp('[?&]' + name + '=([^&]*)').exec(window.location.search);
-      return match && decodeURIComponent(match[1].replace(/\+/g, ' '));
+
+    getParameterByName: function (name) {
+      var match = RegExp("[?&]" + name + "=([^&]*)").exec(
+        window.location.search
+      );
+      return match && decodeURIComponent(match[1].replace(/\+/g, " "));
     },
 
     // Track an event
