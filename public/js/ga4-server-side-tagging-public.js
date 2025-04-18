@@ -29,7 +29,7 @@
       this.setupEventListeners();
 
       // Log initialization
-      this.log("GA4 Server-Side Tagging initialized v2");
+      this.log("GA4 Server-Side Tagging initialized v3");
     },
 
     trackPageView: function () {
@@ -76,6 +76,8 @@
     trackSessionStart: function () {
       var session = this.getSessionId();
 
+      this.log("Session data:", session);
+      
       if (!session.isNew) {
         this.log("Session already started, skipping session_start");
         return;
