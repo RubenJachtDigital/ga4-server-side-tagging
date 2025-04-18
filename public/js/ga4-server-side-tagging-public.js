@@ -19,12 +19,14 @@
         this.log("Measurement ID not configured");
         return;
       }
-
-      // Set up event listeners
-      this.setupEventListeners();
+      // Set up sessions start
+      this.trackSessionStart();
 
       // Set up pageview
       this.trackPageView();
+
+      // Set up event listeners
+      this.setupEventListeners();
 
       // Log initialization
       this.log("GA4 Server-Side Tagging initialized v2");
@@ -41,7 +43,7 @@
           page_title: document.title,
           page_location: window.location.href,
           page_path: window.location.pathname,
-          referrer: document.referrer
+          referrer: document.referrer,
         };
 
         // Add UTM parameters if available
@@ -63,12 +65,38 @@
           page_title: document.title,
           page_location: window.location.href,
           page_path: window.location.pathname,
-          referrer: document.referrer
+          referrer: document.referrer,
         };
         this.log("Tracking basic page_view event", pageViewData);
         this.trackEvent("page_view", pageViewData);
       }
     },
+
+    // Track session_start event only if not already sent for this session
+    trackSessionStart: function () {
+      var session = this.getSessionId();
+
+      if (!session.isNew) {
+        this.log("Session already started, skipping session_start");
+        return;
+      }
+
+      var sessionStartData = {
+        page_location: window.location.href,
+        page_path: window.location.pathname,
+        page_title: document.title,
+        engagement_time_msec: 1000,
+        session_id: session.id,
+        client_id: this.getClientId(),
+        source: this.getUtmSource() || this.getReferrerSource() || "(direct)",
+        medium: this.getUtmMedium() || this.getReferrerMedium() || "(none)",
+        campaign: this.getUtmCampaign() || "(not set)",
+      };
+
+      this.log("Tracking session_start event", sessionStartData);
+      this.trackEvent("session_start", sessionStartData);
+    },
+
     // Set up event listeners
     setupEventListeners: function () {
       var self = this;
@@ -578,23 +606,50 @@
 
     // Track an event
     trackEvent: function (eventName, eventParams) {
+      // Create a copy of event params to avoid modifying the original
+      var params = Object.assign({}, eventParams);
+
       // Log the event
-      this.log("Tracking event: " + eventName, eventParams);
+      this.log("Tracking event: " + eventName, params);
 
       // Add timestamp to event params
-      eventParams.event_time = Math.floor(Date.now() / 1000);
+      params.event_time = Math.floor(Date.now() / 1000);
 
-      // Track with gtag if available
+      // For server-side tracking, add these important parameters
       if (this.config.useServerSide) {
-        this.sendServerSideEvent(eventName, eventParams);
+        // Add standard attribution parameters if not already present
+        if (!params.source)
+          params.source =
+            this.getUtmSource() || this.getReferrerSource() || "(direct)";
+        if (!params.medium)
+          params.medium =
+            this.getUtmMedium() || this.getReferrerMedium() || "(none)";
+        if (!params.campaign)
+          params.campaign = this.getUtmCampaign() || "(not set)";
+        if (!params.term)
+          params.term = this.getParameterByName("utm_term") || "(not set)";
+        if (!params.content)
+          params.content =
+            this.getParameterByName("utm_content") || "(not set)";
+        if (!params.session_id) {
+          var session = this.getSessionId();
+          params.session_id = session.id; // Use the session ID from the getSessionId() function
+        }
+        if (!params.engagement_time_msec) params.engagement_time_msec = 1000;
+
+        // Make sure user data is included
+        params.client_id = this.getClientId();
+
+        // Send the event server-side
+        this.sendServerSideEvent(eventName, params);
       } else if (typeof gtag === "function") {
-        gtag("event", eventName, eventParams);
+        gtag("event", eventName, params);
         this.log("Sent to gtag: " + eventName);
       } else {
         console.error("[GA4 Server-Side Tagging] Error sending event", {
           config: this.config,
           eventName: eventName,
-          eventParams: eventParams,
+          eventParams: params,
         });
       }
     },
@@ -675,6 +730,108 @@
       });
     },
 
+    // Get referrer source information
+    getReferrerSource: function () {
+      var referrer = document.referrer;
+      if (!referrer) return "(direct)";
+
+      var referrerHostname = new URL(referrer).hostname;
+      var currentHostname = window.location.hostname;
+
+      // If same domain, it's internal
+      if (referrerHostname === currentHostname) return "(internal)";
+
+      // Check for search engines
+      var searchEngines = {
+        google: "google",
+        bing: "bing",
+        yahoo: "yahoo",
+        duckduckgo: "duckduckgo",
+        yandex: "yandex",
+        baidu: "baidu",
+      };
+
+      for (var engine in searchEngines) {
+        if (referrerHostname.indexOf(engine) !== -1) {
+          return searchEngines[engine];
+        }
+      }
+
+      // If not a search engine, use the hostname as source
+      return referrerHostname;
+    },
+
+    getReferrerMedium: function () {
+      var referrer = document.referrer;
+      if (!referrer) return "(none)";
+
+      var referrerHostname = new URL(referrer).hostname;
+      var currentHostname = window.location.hostname;
+
+      // If same domain, it's internal
+      if (referrerHostname === currentHostname) return "(internal)";
+
+      // Check for search engines
+      var searchEngines = {
+        google: "organic",
+        bing: "organic",
+        yahoo: "organic",
+        duckduckgo: "organic",
+        yandex: "organic",
+        baidu: "organic",
+      };
+
+      for (var engine in searchEngines) {
+        if (referrerHostname.indexOf(engine) !== -1) {
+          return searchEngines[engine];
+        }
+      }
+
+      // Social media
+      var socialMedia = {
+        facebook: "social",
+        twitter: "social",
+        instagram: "social",
+        linkedin: "social",
+        reddit: "social",
+        pinterest: "social",
+      };
+
+      for (var site in socialMedia) {
+        if (referrerHostname.indexOf(site) !== -1) {
+          return socialMedia[site];
+        }
+      }
+
+      // Default for all other external sites
+      return "referral";
+    },
+
+    getSessionId: function () {
+      var sessionId = localStorage.getItem("ga4_session_id");
+      var sessionStart = localStorage.getItem("ga4_session_start");
+      var now = Date.now();
+      var isNew = false;
+
+      // If no session or session expired (30 min inactive)
+      if (!sessionId || !sessionStart || now - sessionStart > 30 * 60 * 1000) {
+        sessionId =
+          Math.random().toString(36).substring(2, 15) +
+          Math.random().toString(36).substring(2, 15);
+        localStorage.setItem("ga4_session_id", sessionId);
+        localStorage.setItem("ga4_session_start", now);
+        isNew = true;
+      } else {
+        // Update session timestamp on activity
+        localStorage.setItem("ga4_session_start", now);
+      }
+
+      return {
+        id: sessionId,
+        isNew: isNew,
+      };
+    },
+
     // Get client ID from cookie
     getClientId: function () {
       // Try to get client ID from _ga cookie
@@ -693,8 +850,7 @@
           return storedClientId;
         }
       }
-
-      return null;
+      return this.generateClientId();
     },
 
     // Generate a random client ID and store it
