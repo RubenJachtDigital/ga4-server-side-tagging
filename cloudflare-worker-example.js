@@ -377,11 +377,7 @@ function processEventData(data, request) {
       }
       break;
     case "session_start":
-      // You can optionally set a timestamp or custom parameters here
-      if (!processedData.params.engagement_time_msec) {
-        processedData.params.engagement_time_msec = 1000;
-      }
-
+      
       // Optional debug log
       if (DEBUG_MODE) {
         console.log("Processing session_start event:", processedData);
