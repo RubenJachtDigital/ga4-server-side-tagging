@@ -25,7 +25,7 @@
       this.setupEventListeners();
 
       // Log initialization
-      this.log("GA4 Server-Side Tagging initialized v4");
+      this.log("GA4 Server-Side Tagging initialized v5");
     },
 
     trackSessionAndPageView: function () {
@@ -42,6 +42,7 @@
             engagement_time_msec: 1000,
             engaged_session_event: true,
             session_id: session.id,
+            page_location: window.location.href,
           },
         });
       }
@@ -82,30 +83,38 @@
     },
     sendCombinedEvents: function (clientId, events) {
       const endpoint = this.config.cloudflareWorkerUrl;
-
+    
       if (!endpoint) {
         this.log("No server-side endpoint configured");
         return;
       }
-
+    
+      const debugEnabled = this.config.debugMode === true;
+    
       const payload = {
         client_id: clientId,
         events: events.map((event) => {
+          const params = {
+            ...event.params,
+            event_time: Math.floor(Date.now() / 1000),
+          };
+    
+          if (debugEnabled) {
+            params.debug_mode = true;
+          }
+    
           return {
             name: event.name,
-            params: {
-              ...event.params,
-              event_time: Math.floor(Date.now() / 1000),
-            },
+            params: params,
           };
         }),
       };
-
+    
       this.log("Sending combined events to GA4", payload);
-
+    
       this.sendAjaxPayload(endpoint, payload);
     },
-
+    
     // Set up event listeners
     setupEventListeners: function () {
       var self = this;
@@ -645,9 +654,11 @@
           params.session_id = session.id; // Use the session ID from the getSessionId() function
         }
         if (!params.engagement_time_msec) params.engagement_time_msec = 1000;
+        if (!params.debug_mode && this.config.debugMode) params.debug_mode = true;
 
         // Make sure user data is included
         params.client_id = this.getClientId();
+
 
         // Send the event server-side
         this.sendServerSideEvent(eventName, params);
