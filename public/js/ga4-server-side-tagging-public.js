@@ -52,12 +52,10 @@
         viewItemData.medium = this.getUtmMedium() || "(none)";
         viewItemData.campaign = this.getUtmCampaign() || "(not set)";
 
-        this.log("Tracking view_item event for product page", viewItemData);
         this.trackEvent("view_item", viewItemData);
       }
       // For regular pages, track page_view
       else if (this.config.pageViewData) {
-        this.log("Tracking page_view event", this.config.pageViewData);
         this.trackEvent("page_view", this.config.pageViewData);
       } else {
         // Fallback to basic page view tracking if no data available
@@ -95,7 +93,6 @@
         campaign: this.getUtmCampaign() || "(not set)",
       };
 
-      this.log("Tracking session_start event", sessionStartData);
       this.trackEvent("session_start", sessionStartData);
     },
 
