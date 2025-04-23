@@ -43,6 +43,7 @@
             page_path: window.location.pathname,
             page_title: document.title,
             engagement_time_msec: 1000,
+            engaged_session_event: "1",
             session_id: session.id,
             client_id: clientId,
             source:
