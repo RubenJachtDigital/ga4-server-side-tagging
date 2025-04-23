@@ -39,16 +39,16 @@ async function handleRequest(request) {
     const payload = await request.json();
     let processedData;
     let ga4Payload;
-    
+
     if (!payload.events) {
       // Process event data when payload doesn't contain events
       processedData = processEventData(payload, request);
-    
+
       // Ensure processedData exists and has required properties
       if (!processedData || !processedData.name) {
         throw new Error("Invalid processed data: missing name property");
       }
-    
+
       // Prepare the GA4 payload
       ga4Payload = {
         client_id: processedData.params.client_id,
@@ -59,7 +59,7 @@ async function handleRequest(request) {
           },
         ],
       };
-    
+
       // Add user_id if available
       if (processedData.params.user_id) {
         ga4Payload.user_id = processedData.params.user_id;
@@ -73,7 +73,9 @@ async function handleRequest(request) {
         events: payload.events,
       };
     }
-    
+    if (DEBUG_MODE) {
+      ga4Payload.debug_mode = true;
+    }
     // Send the event to GA4
     const ga4Response = await fetch(
       `${GA4_ENDPOINT}?measurement_id=${GA4_MEASUREMENT_ID}&api_secret=${GA4_API_SECRET}`,
@@ -85,7 +87,7 @@ async function handleRequest(request) {
         body: JSON.stringify(ga4Payload),
       }
     );
-    
+
     // Check if the request was successful
     if (!ga4Response.ok) {
       const errorText = await ga4Response.text();
