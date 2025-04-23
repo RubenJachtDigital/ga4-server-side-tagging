@@ -19,24 +19,54 @@
         this.log("Measurement ID not configured");
         return;
       }
-      // Set up sessions start
-      this.trackSessionStart();
-
-      // Set up pageview
-      this.trackPageView();
+      this.trackSessionAndPageView();
 
       // Set up event listeners
       this.setupEventListeners();
 
       // Log initialization
-      this.log("GA4 Server-Side Tagging initialized v3");
+      this.log("GA4 Server-Side Tagging initialized v4");
     },
 
-    trackPageView: function () {
-      // Check if we're on a product page
+    trackSessionAndPageView: function () {
+      const session = this.getSessionId();
+      const clientId = this.getClientId();
+
+      const events = [];
+
+      // If session is new, push session_start event
+      if (session.isNew) {
+        events.push({
+          name: "session_start",
+          params: {
+            page_location: window.location.href,
+            page_path: window.location.pathname,
+            page_title: document.title,
+            engagement_time_msec: 1000,
+            session_id: session.id,
+            client_id: clientId,
+            source:
+              this.getUtmSource() || this.getReferrerSource() || "(direct)",
+            medium: this.getUtmMedium() || this.getReferrerMedium() || "(none)",
+            campaign: this.getUtmCampaign() || "(not set)",
+          },
+        });
+      }
+
+      // Decide which type of page event
+      let pageEventName = "page_view";
+      let pageEventParams = {
+        page_title: document.title,
+        page_location: window.location.href,
+        page_path: window.location.pathname,
+        referrer: document.referrer,
+        session_id: session.id,
+        engagement_time_msec: 1000,
+      };
+
       if (this.config.productData) {
-        // We're on a product page, so track view_item instead of page_view
-        var viewItemData = {
+        pageEventName = "view_item";
+        pageEventParams = {
           currency: this.config.currency || "EUR",
           value: this.config.productData.price,
           items: [this.config.productData],
@@ -44,56 +74,43 @@
           page_location: window.location.href,
           page_path: window.location.pathname,
           referrer: document.referrer,
+          session_id: session.id,
+          engagement_time_msec: 1000,
         };
-
-        // Add UTM parameters if available
-        viewItemData.source =
-          this.getUtmSource() || document.referrer || "(direct)";
-        viewItemData.medium = this.getUtmMedium() || "(none)";
-        viewItemData.campaign = this.getUtmCampaign() || "(not set)";
-
-        this.trackEvent("view_item", viewItemData);
       }
-      // For regular pages, track page_view
-      else if (this.config.pageViewData) {
-        this.trackEvent("page_view", this.config.pageViewData);
-      } else {
-        // Fallback to basic page view tracking if no data available
-        var pageViewData = {
-          page_title: document.title,
-          page_location: window.location.href,
-          page_path: window.location.pathname,
-          referrer: document.referrer,
-        };
-        this.log("Tracking basic page_view event", pageViewData);
-        this.trackEvent("page_view", pageViewData);
-      }
+
+      events.push({
+        name: pageEventName,
+        params: pageEventParams,
+      });
+
+      // Send both events in one payload
+      this.sendCombinedEvents(clientId, events);
     },
+    sendCombinedEvents: function (clientId, events) {
+      const endpoint = this.config.cloudflareWorkerUrl;
 
-    // Track session_start event only if not already sent for this session
-    trackSessionStart: function () {
-      var session = this.getSessionId();
-
-      this.log("Session data:", session);
-      
-      if (!session.isNew) {
-        this.log("Session already started, skipping session_start");
+      if (!endpoint) {
+        this.log("No server-side endpoint configured");
         return;
       }
 
-      var sessionStartData = {
-        page_location: window.location.href,
-        page_path: window.location.pathname,
-        page_title: document.title,
-        engagement_time_msec: 1000,
-        session_id: session.id,
-        client_id: this.getClientId(),
-        source: this.getUtmSource() || this.getReferrerSource() || "(direct)",
-        medium: this.getUtmMedium() || this.getReferrerMedium() || "(none)",
-        campaign: this.getUtmCampaign() || "(not set)",
+      const payload = {
+        client_id: clientId,
+        events: events.map((event) => {
+          return {
+            name: event.name,
+            params: {
+              ...event.params,
+              event_time: Math.floor(Date.now() / 1000),
+            },
+          };
+        }),
       };
 
-      this.trackEvent("session_start", sessionStartData);
+      this.log("Sending combined events to GA4", payload);
+
+      this.sendAjaxPayload(endpoint, payload);
     },
 
     // Set up event listeners
@@ -702,11 +719,16 @@
         this.log("Using WordPress REST API format", data);
       }
 
+      this.sendAjaxPayload(endpoint, data);
+    },
+    sendAjaxPayload: function (endpoint, payload) {
+      var self = this;
+
       // Send the request
       $.ajax({
         url: endpoint,
         type: "POST",
-        data: JSON.stringify(data),
+        data: JSON.stringify(payload),
         contentType: "application/json",
         beforeSend: function (xhr) {
           // Add nonce for WordPress REST API

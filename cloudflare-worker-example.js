@@ -37,57 +37,43 @@ async function handleRequest(request) {
   try {
     // Parse the request body
     const payload = await request.json();
-
-    // Log the incoming event data
-    if (DEBUG_MODE) {
-      console.log("Received event:", JSON.stringify(payload));
-    }
-
-    // Process the event data
-    const processedData = processEventData(payload, request);
-
-    // Validate required parameters
-    if (!processedData.name) {
-      return new Response(JSON.stringify({ error: "Missing event name" }), {
-        status: 400,
-        headers: {
-          "Content-Type": "application/json",
-          ...getCORSHeaders(request),
-        },
-      });
-    }
-
-    if (!processedData.params || !processedData.params.client_id) {
-      return new Response(
-        JSON.stringify({ error: "Missing client_id parameter" }),
-        {
-          status: 400,
-          headers: {
-            "Content-Type": "application/json",
-            ...getCORSHeaders(request),
+    let processedData;
+    let ga4Payload;
+    
+    if (!payload.events) {
+      // Process event data when payload doesn't contain events
+      processedData = processEventData(payload, request);
+    
+      // Ensure processedData exists and has required properties
+      if (!processedData || !processedData.name) {
+        throw new Error("Invalid processed data: missing name property");
+      }
+    
+      // Prepare the GA4 payload
+      ga4Payload = {
+        client_id: processedData.params.client_id,
+        events: [
+          {
+            name: processedData.name,
+            params: processedData.params,
           },
-        }
-      );
+        ],
+      };
+    
+      // Add user_id if available
+      if (processedData.params.user_id) {
+        ga4Payload.user_id = processedData.params.user_id;
+        // Remove from params to avoid duplication
+        delete processedData.params.user_id;
+      }
+    } else {
+      // Handle the case when payload.events exists
+      ga4Payload = {
+        client_id: payload.client_id,
+        events: payload.events,
+      };
     }
-
-    // Prepare the GA4 payload
-    const ga4Payload = {
-      client_id: processedData.params.client_id,
-      events: [
-        {
-          name: processedData.name,
-          params: processedData.params,
-        },
-      ],
-    };
-
-    // Add user_id if available
-    if (processedData.params.user_id) {
-      ga4Payload.user_id = processedData.params.user_id;
-      // Remove from params to avoid duplication
-      delete processedData.params.user_id;
-    }
-
+    
     // Send the event to GA4
     const ga4Response = await fetch(
       `${GA4_ENDPOINT}?measurement_id=${GA4_MEASUREMENT_ID}&api_secret=${GA4_API_SECRET}`,
@@ -99,7 +85,7 @@ async function handleRequest(request) {
         body: JSON.stringify(ga4Payload),
       }
     );
-
+    
     // Check if the request was successful
     if (!ga4Response.ok) {
       const errorText = await ga4Response.text();
@@ -110,7 +96,7 @@ async function handleRequest(request) {
     return new Response(
       JSON.stringify({
         success: true,
-        event: processedData.name,
+        event: ga4Payload.events,
         ga4_status: ga4Response.status,
         debug: DEBUG_MODE ? ga4Payload : undefined,
       }),
@@ -377,7 +363,6 @@ function processEventData(data, request) {
       }
       break;
     case "session_start":
-      
       // Optional debug log
       if (DEBUG_MODE) {
         console.log("Processing session_start event:", processedData);
