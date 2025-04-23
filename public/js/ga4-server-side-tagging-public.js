@@ -39,17 +39,9 @@
         events.push({
           name: "session_start",
           params: {
-            page_location: window.location.href,
-            page_path: window.location.pathname,
-            page_title: document.title,
             engagement_time_msec: 1000,
-            engaged_session_event: "1",
+            engaged_session_event: true,
             session_id: session.id,
-            client_id: clientId,
-            source:
-              this.getUtmSource() || this.getReferrerSource() || "(direct)",
-            medium: this.getUtmMedium() || this.getReferrerMedium() || "(none)",
-            campaign: this.getUtmCampaign() || "(not set)",
           },
         });
       }
