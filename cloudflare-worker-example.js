@@ -73,9 +73,7 @@ async function handleRequest(request) {
         events: payload.events,
       };
     }
-    if (DEBUG_MODE) {
-      ga4Payload.debug_mode = true;
-    }
+    
     // Send the event to GA4
     const ga4Response = await fetch(
       `${GA4_ENDPOINT}?measurement_id=${GA4_MEASUREMENT_ID}&api_secret=${GA4_API_SECRET}`,
