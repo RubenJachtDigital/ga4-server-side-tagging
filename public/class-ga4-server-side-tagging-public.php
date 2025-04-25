@@ -246,306 +246,45 @@ class GA4_Server_Side_Tagging_Public
         $this->logger->info('Page view: ' . get_the_title() . ' (' . get_permalink() . ')');
 
         // Output the GA4 tracking code
-        if (!$use_server_side):
 ?>
-            <!-- GA4 Server-Side Tagging -->
-            <script async src="https://www.googletagmanager.com/gtag/js?id=<?php echo esc_attr($measurement_id); ?>"></script>
-        <?php endif; ?>
+        <!-- GA4 Server-Side Tagging -->
+        <script async src="https://www.googletagmanager.com/gtag/js?id=<?php echo esc_attr($measurement_id); ?>"></script>
 
         <script>
-            <?php if (!$use_server_side): ?>
-                window.dataLayer = window.dataLayer || [];
+            window.dataLayer = window.dataLayer || [];
 
-                function gtag() {
-                    dataLayer.push(arguments);
-                }
-                gtag('js', new Date());
-            <?php endif; ?>
-            <?php if ($anonymize_ip && !$use_server_side) : ?>
+            function gtag() {
+                dataLayer.push(arguments);
+            }
+            gtag('js', new Date());
+            <?php if ($anonymize_ip) : ?>
                 gtag('set', 'anonymize_ip', true);
             <?php endif; ?>
 
-            <?php if ($debug_mode  && !$use_server_side) : ?>
+            <?php if ($debug_mode) : ?>
                 gtag('config', '<?php echo esc_js($measurement_id); ?>', {
                     'debug_mode': true
                 });
-            <?php elseif (!$use_server_side) : ?>
+            <?php else: ?>
                 gtag('config', '<?php echo esc_js($measurement_id); ?>');
             <?php endif; ?>
 
             <?php if ($use_server_side && !empty($cloudflare_worker_url)) : ?>
                 // Configure server-side endpoint
-                // gtag('config', '<?php //echo esc_js($measurement_id); 
-                                    ?>', {
-                //     'transport_url': '<?php //  echo esc_js($cloudflare_worker_url); 
-                                            ?>',
-                //     'first_party_collection': true
-                // });
+                gtag('config', '<?php echo esc_js($measurement_id); ?>', {
+                    'transport_url': '<?php echo esc_js($cloudflare_worker_url); ?>',
+                    'first_party_collection': true
+                });
+
                 <?php
                 $this->logger->info('Uses Server-Side Tracking');
                 ?>
-
-                // Add this helper function to your add_ga4_tracking_code output
-                function getParameterByName(name) {
-                    name = name.replace(/[\[]/, '\\[').replace(/[\]]/, '\\]');
-                    var regex = new RegExp('[\\?&]' + name + '=([^&#]*)');
-                    var results = regex.exec(location.search);
-                    return results === null ? '' : decodeURIComponent(results[1].replace(/\+/g, ' '));
-                }
-                // Send page_view event to Cloudflare Worker
-                (function() {
-                    // Get client ID from cookie or generate a new one
-                    var clientId = '';
-                    var match = document.cookie.match(/_ga=GA\d\.\d\.(\d+\.\d+)/);
-                    if (match) {
-                        clientId = match[1];
-                    } else {
-                        clientId = Math.random().toString(36).substring(2, 15) +
-                            Math.random().toString(36).substring(2, 15) +
-                            Math.random().toString(36).substring(2, 15) +
-                            Math.random().toString(36).substring(2, 15);
-                    }
-
-                    <?php if (is_product()) : ?>
-                        // For product pages, send view_item event instead of page_view
-                        var productData = <?php echo wp_json_encode($this->get_current_product_data()); ?>;
-
-                        // Prepare view_item event data
-                        var viewItemData = {
-                            name: 'view_item',
-                            params: {
-                                currency: '<?php echo get_woocommerce_currency(); ?>',
-                                value: productData.price,
-                                items: [productData],
-                                page_title: '<?php echo esc_js(get_the_title()); ?>',
-                                page_location: '<?php echo esc_js(get_permalink()); ?>',
-                                page_path: '<?php echo esc_js(parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH)); ?>',
-                                client_id: clientId,
-                                source: getParameterByName('utm_source'),
-                                medium: getParameterByName('utm_medium'),
-                                campaign: getParameterByName('utm_campaign'),
-                                referrer: document.referrer
-                            }
-                        };
-
-                        <?php if (is_user_logged_in()) : ?>
-                            // Add user ID for logged-in users
-                            viewItemData.params.user_id = '<?php echo esc_js(get_current_user_id()); ?>';
-                        <?php endif; ?>
-
-                        // Send to Cloudflare Worker
-                        fetch('<?php echo esc_js(get_option('ga4_cloudflare_worker_url', '')); ?>', {
-                                method: 'POST',
-                                headers: {
-                                    'Content-Type': 'application/json'
-                                },
-                                body: JSON.stringify(viewItemData)
-                            })
-                            .then(function(response) {
-                                if (<?php echo get_option('ga4_server_side_tagging_debug_mode', false) ? 'true' : 'false'; ?>) {
-                                    console.log('[GA4 Server-Side Tagging] View item event sent to Cloudflare Worker', viewItemData);
-                                    response.json().then(function(data) {
-                                        console.log('[GA4 Server-Side Tagging] Cloudflare Worker response:', data);
-                                    });
-                                }
-                            })
-                            .catch(function(error) {
-                                if (<?php echo get_option('ga4_server_side_tagging_debug_mode', false) ? 'true' : 'false'; ?>) {
-                                    console.error('[GA4 Server-Side Tagging] Error sending view item to Cloudflare Worker:', error);
-                                }
-                            });
-                    <?php else : ?>
-                        // For non-product pages, send regular page_view event
-                        // Prepare page view data
-                        var pageViewData = {
-                            name: 'page_view',
-                            params: {
-                                page_title: '<?php echo esc_js(get_the_title()); ?>',
-                                page_location: '<?php echo esc_js(get_permalink()); ?>',
-                                page_path: '<?php echo esc_js(parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH)); ?>',
-                                client_id: clientId,
-                                source: getParameterByName('utm_source'),
-                                medium: getParameterByName('utm_medium'),
-                                campaign: getParameterByName('utm_campaign'),
-                                referrer: document.referrer
-                            }
-                        };
-
-                        <?php if (is_user_logged_in()) : ?>
-                            // Add user ID for logged-in users
-                            pageViewData.params.user_id = '<?php echo esc_js(get_current_user_id()); ?>';
-                        <?php endif; ?>
-
-                        // Send to Cloudflare Worker
-                        fetch('<?php echo esc_js(get_option('ga4_cloudflare_worker_url', '')); ?>', {
-                                method: 'POST',
-                                headers: {
-                                    'Content-Type': 'application/json'
-                                },
-                                body: JSON.stringify(pageViewData)
-                            })
-                            .then(function(response) {
-                                if (<?php echo get_option('ga4_server_side_tagging_debug_mode', false) ? 'true' : 'false'; ?>) {
-                                    console.log('[GA4 Server-Side Tagging] Page view sent to Cloudflare Worker', pageViewData);
-                                    response.json().then(function(data) {
-                                        console.log('[GA4 Server-Side Tagging] Cloudflare Worker response:', data);
-                                    });
-                                }
-                            })
-                            .catch(function(error) {
-                                if (<?php echo get_option('ga4_server_side_tagging_debug_mode', false) ? 'true' : 'false'; ?>) {
-                                    console.error('[GA4 Server-Side Tagging] Error sending page view to Cloudflare Worker:', error);
-                                }
-                            });
-                    <?php endif; ?>
-                })();
             <?php endif; ?>
 
             <?php if (is_user_logged_in() && !$use_server_side) : ?>
                 // Set user ID for logged-in users
                 gtag('set', 'user_id', '<?php echo esc_js(get_current_user_id()); ?>');
             <?php endif; ?>
-
-            <?php
-            // Add purchase event tracking on the order received page
-            if (is_wc_endpoint_url('order-received') && isset($_GET['key'])) :
-
-                $order_id = wc_get_order_id_by_order_key(wc_clean(wp_unslash($_GET['key'])));
-                if ($order_id) :
-                    $order = wc_get_order($order_id);
-                    if ($order) :
-                        $order_data = $this->get_order_data_for_tracking($order);
-                        $order_json = wp_json_encode($order_data);
-                        $this->logger->info('Preparing Order: ' . $order_json);
-            ?>
-                        <?php if ($use_server_side && !empty($cloudflare_worker_url)) : ?>
-                                // Send purchase event to Cloudflare Worker
-                                (function() {
-                                    // Get client ID
-                                    var clientId = '';
-                                    var match = document.cookie.match(/_ga=GA\d\.\d\.(\d+\.\d+)/);
-                                    if (match) {
-                                        clientId = match[1];
-                                    } else {
-                                        clientId = Math.random().toString(36).substring(2, 15) +
-                                            Math.random().toString(36).substring(2, 15);
-                                    }
-
-                                    // Prepare purchase data
-                                    var purchaseData = {
-                                        name: 'purchase',
-                                        params: <?php echo $order_json; ?>
-                                    };
-
-                                    // Add client ID
-                                    purchaseData.params.client_id = clientId;
-
-                                    <?php if (is_user_logged_in()) : ?>
-                                        // Add user ID for logged-in users
-                                        purchaseData.params.user_id = '<?php echo esc_js(get_current_user_id()); ?>';
-                                    <?php endif; ?>
-
-                                    // Send to Cloudflare Worker
-                                    fetch('<?php echo esc_js($cloudflare_worker_url); ?>', {
-                                            method: 'POST',
-                                            headers: {
-                                                'Content-Type': 'application/json'
-                                            },
-                                            body: JSON.stringify(purchaseData)
-                                        })
-                                        .then(function(response) {
-                                            if (<?php echo $debug_mode ? 'true' : 'false'; ?>) {
-                                                console.log('[GA4 Server-Side Tagging] Purchase event sent to Cloudflare Worker', purchaseData);
-                                                response.json().then(function(data) {
-                                                    console.log('[GA4 Server-Side Tagging] Cloudflare Worker response:', data);
-                                                });
-                                            }
-                                        })
-                                        .catch(function(error) {
-                                            if (<?php echo $debug_mode ? 'true' : 'false'; ?>) {
-                                                console.error('[GA4 Server-Side Tagging] Error sending purchase event to Cloudflare Worker:', error);
-                                            }
-                                        });
-                                })();
-                        <?php else: ?>
-                            // Track purchase event
-                            gtag('event', 'purchase', <?php echo $order_json; ?>);
-
-                        <?php endif; // if ($use_server_side && !empty($cloudflare_worker_url)) 
-                        ?>
-
-            <?php
-                    endif; // if ($order)
-                endif; // if ($order_id)
-            endif; // if (is_wc_endpoint_url('order-received') && isset($_GET['key']))
-            ?>
-            <?php
-            // Add purchase event tracking on the order received page
-            if (isset($_POST['gform_submit']) && $_POST['gform_submit'] == '3') :
-                $order_data = $this->get_order_quote_data_for_tracking();
-                $order_json = wp_json_encode($order_data);
-                $this->logger->info('Preparing quote: ' . $order_json);
-            ?>
-
-                <?php if ($use_server_side && !empty($cloudflare_worker_url)) : ?>
-                        // Send purchase event to Cloudflare Worker
-                        (function() {
-                            // Get client ID
-                            var clientId = '';
-                            var match = document.cookie.match(/_ga=GA\d\.\d\.(\d+\.\d+)/);
-                            if (match) {
-                                clientId = match[1];
-                            } else {
-                                clientId = Math.random().toString(36).substring(2, 15) +
-                                    Math.random().toString(36).substring(2, 15);
-                            }
-
-                            // Prepare purchase data
-                            var purchaseData = {
-                                name: 'purchase',
-                                params: <?php echo $order_json; ?>
-                            };
-
-                            // Add client ID
-                            purchaseData.params.client_id = clientId;
-
-                            <?php if (is_user_logged_in()) : ?>
-                                // Add user ID for logged-in users
-                                purchaseData.params.user_id = '<?php echo esc_js(get_current_user_id()); ?>';
-                            <?php endif; ?>
-
-                            // Send to Cloudflare Worker
-                            fetch('<?php echo esc_js($cloudflare_worker_url); ?>', {
-                                    method: 'POST',
-                                    headers: {
-                                        'Content-Type': 'application/json'
-                                    },
-                                    body: JSON.stringify(purchaseData)
-                                })
-                                .then(function(response) {
-                                    if (<?php echo $debug_mode ? 'true' : 'false'; ?>) {
-                                        console.log('[GA4 Server-Side Tagging] Purchase event sent to Cloudflare Worker', purchaseData);
-                                        response.json().then(function(data) {
-                                            console.log('[GA4 Server-Side Tagging] Cloudflare Worker response:', data);
-                                        });
-                                    }
-                                })
-                                .catch(function(error) {
-                                    if (<?php echo $debug_mode ? 'true' : 'false'; ?>) {
-                                        console.error('[GA4 Server-Side Tagging] Error sending purchase event to Cloudflare Worker:', error);
-                                    }
-                                });
-                        })();
-                <?php else: ?>
-                    // Track purchase event
-                    gtag('event', 'purchase', <?php echo $order_json; ?>);
-
-                <?php endif; // if ($use_server_side && !empty($cloudflare_worker_url)) 
-                ?>
-
-            <?php
-            endif; // isset($_POST['input_2']) && !empty($_POST['input_2']) && get_the_ID() == 82850
-            ?>
         </script>
         <!-- End GA4 Server-Side Tagging -->
 <?php
