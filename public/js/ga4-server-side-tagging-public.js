@@ -19,48 +19,22 @@
         this.log("Measurement ID not configured");
         return;
       }
-      this.trackSessionAndPageView();
+      // this.trackSessionAndPageView();
+
+      this.trackSessionStart();
+      this.trackPageView();
 
       // Set up event listeners
       this.setupEventListeners();
 
       // Log initialization
-      this.log("GA4 Server-Side Tagging initialized v5");
+      this.log("GA4 Server-Side Tagging initialized v6");
     },
-
-    trackSessionAndPageView: function () {
-      const session = this.getSessionId();
-      const clientId = this.getClientId();
-
-      const events = [];
-
-      // If session is new, push session_start event
-      if (session.isNew) {
-        events.push({
-          name: "session_start",
-          params: {
-            engagement_time_msec: 1000,
-            engaged_session_event: true,
-            session_id: session.id,
-            page_location: window.location.href,
-          },
-        });
-      }
-
-      // Decide which type of page event
-      let pageEventName = "page_view";
-      let pageEventParams = {
-        page_title: document.title,
-        page_location: window.location.href,
-        page_path: window.location.pathname,
-        referrer: document.referrer,
-        session_id: session.id,
-        engagement_time_msec: 1000,
-      };
-
+    trackPageView: function () {
+      // Check if we're on a product page
       if (this.config.productData) {
-        pageEventName = "view_item";
-        pageEventParams = {
+        // We're on a product page, so track view_item instead of page_view
+        var viewItemData = {
           currency: this.config.currency || "EUR",
           value: this.config.productData.price,
           items: [this.config.productData],
@@ -68,53 +42,52 @@
           page_location: window.location.href,
           page_path: window.location.pathname,
           referrer: document.referrer,
-          session_id: session.id,
-          engagement_time_msec: 1000,
         };
+
+        // Add UTM parameters if available
+        viewItemData.source =
+          this.getUtmSource() || document.referrer || "(direct)";
+        viewItemData.medium = this.getUtmMedium() || "(none)";
+        viewItemData.campaign = this.getUtmCampaign() || "(not set)";
+
+        this.trackEvent("view_item", viewItemData);
       }
-
-      events.push({
-        name: pageEventName,
-        params: pageEventParams,
-      });
-
-      // Send both events in one payload
-      this.sendCombinedEvents(clientId, events);
+      // For regular pages, track page_view
+      else if (this.config.pageViewData) {
+        this.trackEvent("page_view", this.config.pageViewData);
+      } else {
+        // Fallback to basic page view tracking if no data available
+        var pageViewData = {
+          page_title: document.title,
+          page_location: window.location.href,
+          page_path: window.location.pathname,
+          referrer: document.referrer,
+        };
+        this.trackEvent("page_view", pageViewData);
+      }
     },
-    sendCombinedEvents: function (clientId, events) {
-      const endpoint = this.config.cloudflareWorkerUrl;
-    
-      if (!endpoint) {
-        this.log("No server-side endpoint configured");
+
+    // Track session_start event only if not already sent for this session
+    trackSessionStart: function () {
+      var session = this.getSessionId();
+
+      this.log("Session data:", session);
+
+      if (!session.isNew) {
+        this.log("Session already started, skipping session_start");
         return;
       }
-    
-      const debugEnabled = this.config.debugMode === true;
-    
-      const payload = {
-        client_id: clientId,
-        events: events.map((event) => {
-          const params = {
-            ...event.params,
-            event_time: Math.floor(Date.now() / 1000),
-          };
-    
-          if (debugEnabled) {
-            params.debug_mode = true;
-          }
-    
-          return {
-            name: event.name,
-            params: params,
-          };
-        }),
+
+      var sessionStartData = {
+        engagement_time_msec: 1000,
+        engaged_session_event: true,
+        session_id: session.id,
+        page_location: window.location.href,
       };
-    
-      this.log("Sending combined events to GA4", payload);
-    
-      this.sendAjaxPayload(endpoint, payload);
+
+      this.trackEvent("session_start", sessionStartData);
     },
-    
+
     // Set up event listeners
     setupEventListeners: function () {
       var self = this;
@@ -632,8 +605,6 @@
 
       // Add timestamp to event params
       params.event_time = Math.floor(Date.now() / 1000);
-
-      // For server-side tracking, add these important parameters
       if (this.config.useServerSide) {
         // Add standard attribution parameters if not already present
         if (!params.source)
@@ -654,11 +625,11 @@
           params.session_id = session.id; // Use the session ID from the getSessionId() function
         }
         if (!params.engagement_time_msec) params.engagement_time_msec = 1000;
-        if (!params.debug_mode && this.config.debugMode) params.debug_mode = true;
+        if (!params.debug_mode && this.config.debugMode)
+          params.debug_mode = true;
 
         // Make sure user data is included
         params.client_id = this.getClientId();
-
 
         // Send the event server-side
         this.sendServerSideEvent(eventName, params);
