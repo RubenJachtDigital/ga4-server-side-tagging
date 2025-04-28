@@ -9,8 +9,10 @@
 // Configuration
 const GA4_MEASUREMENT_ID = "G-xx"; // Your GA4 Measurement ID
 const GA4_API_SECRET = "xx"; // Your GA4 API Secret
-const GA4_ENDPOINT = "https://www.google-analytics.com/mp/collect";
 const DEBUG_MODE = true; // Set to true to enable debug logging
+const GA4_ENDPOINT = DEBUG_MODE
+  ? "https://www.google-analytics.com/debug/mp/collect"
+  : "https://www.google-analytics.com/mp/collect";
 
 addEventListener("fetch", (event) => {
   event.respondWith(handleRequest(event.request));
@@ -51,7 +53,7 @@ async function handleRequest(request) {
 
       // Prepare the GA4 payload
       ga4Payload = {
-        client_id: processedData.params.client_id,
+        client_id: processedData.params?.client_id,
         events: [
           {
             name: processedData.name,
@@ -60,20 +62,28 @@ async function handleRequest(request) {
         ],
       };
 
-      // Add user_id if available
-      if (processedData.params.user_id) {
-        ga4Payload.user_id = processedData.params.user_id;
-        // Remove from params to avoid duplication
-        delete processedData.params.user_id;
+
+      // Remove client_id from params to avoid duplication
+      if (processedData.params?.client_id) {
+        delete processedData.params.client_id;
       }
     } else {
       // Handle the case when payload.events exists
       ga4Payload = {
         client_id: payload.client_id,
-        events: payload.events,
+        events: payload.events.map((event) => {
+          // Defensive check for event.params existence
+          if (event.params && typeof event.params === "object") {
+            if (event.params.client_id) {
+              delete event.params.client_id;
+            }
+          }
+          return event;
+        }),
       };
+
     }
-    
+
     // Send the event to GA4
     const ga4Response = await fetch(
       `${GA4_ENDPOINT}?measurement_id=${GA4_MEASUREMENT_ID}&api_secret=${GA4_API_SECRET}`,

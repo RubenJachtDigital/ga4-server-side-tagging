@@ -227,6 +227,13 @@ class GA4_Server_Side_Tagging_Public
     {
         // Only add tracking code if we have a measurement ID
         $measurement_id = get_option('ga4_measurement_id', '');
+
+        // Get settings
+        $use_server_side = get_option('ga4_use_server_side', true);
+        $anonymize_ip = get_option('ga4_anonymize_ip', true);
+        $debug_mode = get_option('ga4_server_side_tagging_debug_mode', false);
+        $cloudflare_worker_url = get_option('ga4_cloudflare_worker_url', '');
+
         if (empty($measurement_id)) {
             return;
         }
@@ -235,12 +242,11 @@ class GA4_Server_Side_Tagging_Public
         if (is_user_logged_in() && ! get_option('ga4_track_logged_in_users', true)) {
             return;
         }
+        
+        if ($use_server_side !== true) {
+            return;
+        }
 
-        // Get settings
-        $use_server_side = get_option('ga4_use_server_side', true);
-        $anonymize_ip = get_option('ga4_anonymize_ip', true);
-        $debug_mode = get_option('ga4_server_side_tagging_debug_mode', false);
-        $cloudflare_worker_url = get_option('ga4_cloudflare_worker_url', '');
 
         // Log page view
         $this->logger->info('Page view: ' . get_the_title() . ' (' . get_permalink() . ')');
@@ -273,7 +279,8 @@ class GA4_Server_Side_Tagging_Public
                 // Configure server-side endpoint
                 gtag('config', '<?php echo esc_js($measurement_id); ?>', {
                     'transport_url': '<?php echo esc_js($cloudflare_worker_url); ?>',
-                    'first_party_collection': true
+                    'first_party_collection': true,
+                    'send_page_view': false, // This prevents automatic page view tracking
                 });
 
                 <?php
