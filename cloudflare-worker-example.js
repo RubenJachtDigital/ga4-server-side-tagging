@@ -62,7 +62,6 @@ async function handleRequest(request) {
         ],
       };
 
-
       // Remove client_id from params to avoid duplication
       if (processedData.params?.client_id) {
         delete processedData.params.client_id;
@@ -81,12 +80,11 @@ async function handleRequest(request) {
           return event;
         }),
       };
-
     }
 
     // Send the event to GA4
     const ga4Response = await fetch(
-      `${GA4_ENDPOINT}?measurement_id=${GA4_MEASUREMENT_ID}&api_secret=${GA4_API_SECRET}`,
+      `${GA4_ENDPOINT}?measurement_id=${GA4_MEASUREMENT_ID}&api_secret=${GA4_API_SECRET}&validationBehavior=ENFORCE_REJECT`,
       {
         method: "POST",
         headers: {
@@ -96,11 +94,20 @@ async function handleRequest(request) {
       }
     );
 
-    // Check if the request was successful
+    // Always parse response
+    const ga4Result = await ga4Response.json();
+
     if (!ga4Response.ok) {
-      const errorText = await ga4Response.text();
-      throw new Error(`GA4 API error: ${ga4Response.status} ${errorText}`);
+      console.error("GA4 API error:", ga4Result);
+      throw new Error(`GA4 API error: ${ga4Response.status}`);
     }
+
+    if (ga4Result.validationMessages?.length > 0) {
+      console.error("GA4 validationMessages:", ga4Result.validationMessages);
+      throw new Error("GA4 validation error - see validationMessages");
+    }
+
+    console.log("[GA4] Event successfully sent:", ga4Result);
 
     // Return success response
     return new Response(
