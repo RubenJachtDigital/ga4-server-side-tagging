@@ -9,8 +9,8 @@
 // Configuration
 const GA4_MEASUREMENT_ID = "G-xx"; // Your GA4 Measurement ID
 const GA4_API_SECRET = "xx"; // Your GA4 API Secret
-const DEBUG_MODE = true; // Set to true to enable debug logging
 const GA4_ENDPOINT = "https://www.google-analytics.com/mp/collect";
+const DEBUG_MODE = true; // Set to true to enable debug logging
 
 addEventListener("fetch", (event) => {
   event.respondWith(handleRequest(event.request));
@@ -51,7 +51,7 @@ async function handleRequest(request) {
 
       // Prepare the GA4 payload
       ga4Payload = {
-        client_id: processedData.params?.client_id,
+        client_id: processedData.params.client_id,
         events: [
           {
             name: processedData.name,
@@ -60,29 +60,23 @@ async function handleRequest(request) {
         ],
       };
 
-      // Remove client_id from params to avoid duplication
-      if (processedData.params?.client_id) {
-        delete processedData.params.client_id;
+      // Add user_id if available
+      if (processedData.params.user_id) {
+        ga4Payload.user_id = processedData.params.user_id;
+        // Remove from params to avoid duplication
+        delete processedData.params.user_id;
       }
     } else {
       // Handle the case when payload.events exists
       ga4Payload = {
         client_id: payload.client_id,
-        events: payload.events.map((event) => {
-          // Defensive check for event.params existence
-          if (event.params && typeof event.params === "object") {
-            if (event.params.client_id) {
-              delete event.params.client_id;
-            }
-          }
-          return event;
-        }),
+        events: payload.events,
       };
     }
-
+    
     // Send the event to GA4
     const ga4Response = await fetch(
-      `${GA4_ENDPOINT}?measurement_id=${GA4_MEASUREMENT_ID}&api_secret=${GA4_API_SECRET}&validationBehavior=ENFORCE_REJECT`,
+      `${GA4_ENDPOINT}?measurement_id=${GA4_MEASUREMENT_ID}&api_secret=${GA4_API_SECRET}`,
       {
         method: "POST",
         headers: {
@@ -92,20 +86,11 @@ async function handleRequest(request) {
       }
     );
 
-    // Always parse response
-    const ga4Result = await ga4Response.json();
-
+    // Check if the request was successful
     if (!ga4Response.ok) {
-      console.error("GA4 API error:", ga4Result);
-      throw new Error(`GA4 API error: ${ga4Response.status}`);
+      const errorText = await ga4Response.text();
+      throw new Error(`GA4 API error: ${ga4Response.status} ${errorText}`);
     }
-
-    if (ga4Result.validationMessages?.length > 0) {
-      console.error("GA4 validationMessages:", ga4Result.validationMessages);
-      throw new Error("GA4 validation error - see validationMessages");
-    }
-
-    console.log("[GA4] Event successfully sent:", ga4Result);
 
     // Return success response
     return new Response(
