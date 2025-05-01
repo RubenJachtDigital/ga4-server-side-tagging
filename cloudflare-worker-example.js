@@ -10,9 +10,7 @@
 const GA4_MEASUREMENT_ID = "G-xx"; // Your GA4 Measurement ID
 const GA4_API_SECRET = "xx"; // Your GA4 API Secret
 const DEBUG_MODE = true; // Set to true to enable debug logging
-const GA4_ENDPOINT = DEBUG_MODE
-  ? "https://www.google-analytics.com/debug/mp/collect"
-  : "https://www.google-analytics.com/mp/collect";
+const GA4_ENDPOINT = "https://www.google-analytics.com/mp/collect";
 
 addEventListener("fetch", (event) => {
   event.respondWith(handleRequest(event.request));
