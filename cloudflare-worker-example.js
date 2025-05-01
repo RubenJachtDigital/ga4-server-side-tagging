@@ -60,12 +60,6 @@ async function handleRequest(request) {
         ],
       };
 
-      // Add user_id if available
-      if (processedData.params.user_id) {
-        ga4Payload.user_id = processedData.params.user_id;
-        // Remove from params to avoid duplication
-        delete processedData.params.user_id;
-      }
     } else {
       // Handle the case when payload.events exists
       ga4Payload = {

@@ -610,6 +610,8 @@
         if (!params.source)
           params.source =
             this.getUtmSource() || this.getReferrerSource() || "(direct)";
+        if (!params.referrer)
+          params.referrer = this.getReferrerSource() || "(direct)";
         if (!params.medium)
           params.medium =
             this.getUtmMedium() || this.getReferrerMedium() || "(none)";
@@ -625,8 +627,9 @@
           params.session_id = session.id; // Use the session ID from the getSessionId() function
         }
         if (!params.engagement_time_msec) params.engagement_time_msec = 1000;
-        if (!params.debug_mode && this.config.debugMode)
+        if (!params.debug_mode && this.config.debugMode) {
           params.debug_mode = true;
+        }
 
         // Make sure user data is included
         params.client_id = this.getClientId();
@@ -732,10 +735,10 @@
       if (!referrer) return "(direct)";
 
       var referrerHostname = new URL(referrer).hostname;
-      var currentHostname = window.location.hostname;
+      // var currentHostname = window.location.hostname;
 
       // If same domain, it's internal
-      if (referrerHostname === currentHostname) return "(internal)";
+      // if (referrerHostname === currentHostname) return "(internal)";
 
       // Check for search engines
       var searchEngines = {
