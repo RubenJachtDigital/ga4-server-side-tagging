@@ -82,6 +82,7 @@
         engagement_time_msec: 1000,
         engaged_session_event: true,
         session_id: session.id,
+        ga_session_id: session.id,
         page_location: window.location.href,
       };
 
@@ -625,6 +626,10 @@
         if (!params.session_id) {
           var session = this.getSessionId();
           params.session_id = session.id; // Use the session ID from the getSessionId() function
+        }
+        if (!params.ga_session_id) {
+          var session = this.getSessionId();
+          params.ga_session_id = session.id; // Use the session ID from the getSessionId() function
         }
         if (!params.engagement_time_msec) params.engagement_time_msec = 1000;
         if (!params.debug_mode && this.config.debugMode) {
