@@ -97,7 +97,15 @@ class GA4_Server_Side_Tagging_Public
             'cloudflareWorkerUrl' => get_option('ga4_cloudflare_worker_url', ''),
             'currency' => get_woocommerce_currency(),
         );
-
+        // Add page view data
+        $script_data['pageViewData'] = $this->get_page_view_data();
+        // Add product data if we're on a product page
+        if (is_product()) {
+            global $product;
+            if ($product) {
+                $script_data['productData'] = $this->get_current_product_data($product);
+            }
+        }
         // Add order data for purchase event if on the order received page
         if (is_wc_endpoint_url('order-received') && isset($_GET['key'])) {
             $order_id = wc_get_order_id_by_order_key(wc_clean(wp_unslash($_GET['key'])));
