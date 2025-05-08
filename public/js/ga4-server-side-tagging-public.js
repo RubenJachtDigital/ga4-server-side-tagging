@@ -24,7 +24,7 @@
       this.setupEventListeners();
 
       // Log initialization
-      this.log("GA4 Server-Side Tagging initialized");
+      this.log("GA4 Server-Side Tagging initialized v1");
     },
 
     // Set up event listeners
@@ -471,16 +471,12 @@
 
       // Add timestamp to event params
       eventParams.event_time = Math.floor(Date.now() / 1000);
-
-      // Track with gtag if available
-      if (typeof gtag === "function") {
-        gtag("event", eventName, eventParams);
-        this.log("Sent to gtag: " + eventName);
-      }
-
       // Send server-side event if enabled
       if (this.config.useServerSide) {
         this.sendServerSideEvent(eventName, eventParams);
+      } else if (typeof gtag === "function") {
+        gtag("event", eventName, eventParams);
+        this.log("Sent to gtag: " + eventName);
       }
     },
 

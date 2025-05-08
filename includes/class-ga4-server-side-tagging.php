@@ -109,10 +109,14 @@ class GA4_Server_Side_Tagging
     private function define_public_hooks()
     {
         $plugin_public = new GA4_Server_Side_Tagging_Public($this->logger);
+        $use_server_side = get_option('ga4_use_server_side', true);
 
         $this->loader->add_action('wp_enqueue_scripts', $plugin_public, 'enqueue_styles');
         $this->loader->add_action('wp_enqueue_scripts', $plugin_public, 'enqueue_scripts');
-        $this->loader->add_action('wp_head', $plugin_public, 'add_ga4_tracking_code');
+
+        if ($use_server_side === false) {
+            $this->loader->add_action('wp_head', $plugin_public, 'add_ga4_tracking_code');
+        }
 
         // Register REST API endpoint
         $plugin_endpoint = new GA4_Server_Side_Tagging_Endpoint($this->logger);
