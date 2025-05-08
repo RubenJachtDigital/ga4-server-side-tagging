@@ -7,11 +7,14 @@
  */
 
 // Configuration
+var GA4_ENDPOINT = "https://www.google-analytics.com/mp/collect";
 const GA4_MEASUREMENT_ID = "G-xx"; // Your GA4 Measurement ID
 const GA4_API_SECRET = "xx"; // Your GA4 API Secret
-const GA4_ENDPOINT = "https://www.google-analytics.com/mp/collect";
 const DEBUG_MODE = true; // Set to true to enable debug logging
 
+if (DEBUG_MODE) {
+  GA4_ENDPOINT = "https://www.google-analytics.com/debug/mp/collect"; // Debug endpoint
+}
 addEventListener("fetch", (event) => {
   event.respondWith(handleRequest(event.request));
 });
@@ -80,7 +83,7 @@ async function handleRequest(request) {
         },
       ],
     };
-    
+
     // Remove client_id from params to avoid duplication, only if it exists
     if (ga4Payload.events[0].params.hasOwnProperty("client_id")) {
       delete ga4Payload.events[0].params.client_id;

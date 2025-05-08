@@ -19,80 +19,64 @@
         return;
       }
 
-      this.trackSessionStart();
-      // Then track page view after a small delay
-      setTimeout(
-        function () {
-          this.trackPageView();
-        }.bind(this),
-        100
-      );
+      this.trackPageView();
+
       // Set up event listeners
       this.setupEventListeners();
 
       // Log initialization
-      this.log("GA4 Server-Side Tagging initialized v6");
+      this.log("GA4 Server-Side Tagging initialized v8");
     },
-    // Track session_start event only if not already sent for this session
-    trackSessionStart: function () {
+
+    trackPageView: function () {
+      // Get current session information
       var session = this.getSession();
 
-      this.log("Session data:", session);
-
-      if (!session.isNew) {
-        this.log("Session already started, skipping session_start");
-        return;
-      }
-
-      var sessionStartData = {
-        session_engaged: true,
-        engaged_session_event: true,
-
+      // Common session parameters needed for all page view events
+      var sessionParams = {
         // Session identification
         session_id: session.id,
         ga_session_id: session.id,
         ga_session_number: session.sessionCount,
 
-        // Session flags
+        // Critical for GA4 real-time reporting
+        engagement_time_msec: 1000,
+
+        // Session state flags
+        session_engaged: true,
+        engaged_session_event: true,
+
+        // First visit indicators for new users
         first_visit: session.isFirstVisit ? 1 : 0,
         new_visitor: session.sessionCount === 1 ? 1 : 0,
-
-        // Page information
-        page_location: window.location.href,
-        page_title: document.title,
-        page_referrer: document.referrer,
 
         // Client information
         client_id: this.getClientId(),
 
-        // Technical information
+        // Device information
         user_agent: navigator.userAgent,
+        language: navigator.language || "",
+        screen_resolution: window.screen
+          ? window.screen.width + "x" + window.screen.height
+          : "",
       };
 
-      // Add language if available
-      if (navigator.language) {
-        sessionStartData.language = navigator.language;
-      }
-
-      // Add screen resolution if available
-      if (window.screen) {
-        sessionStartData.screen_resolution =
-          window.screen.width + "x" + window.screen.height;
-      }
-
-      // Track the session_start event
-      this.trackEvent("session_start", sessionStartData);
-    },
-    trackPageView: function () {
       // Check if we're on a product page
       if (this.config.productData) {
         this.log(this.config.productData);
         var productData = JSON.parse(this.config.productData);
+
         // We're on a product page, so track view_item instead of page_view
         var viewItemData = {
+          // Include all session parameters
+          ...sessionParams,
+
+          // Product-specific data
           currency: this.config.currency || "EUR",
           value: productData.price,
           items: [productData],
+
+          // Page information
           page_title: document.title,
           page_location: window.location.href,
           page_path: window.location.pathname,
@@ -107,13 +91,34 @@
 
         this.trackEvent("view_item", viewItemData);
       } else {
-        // Fallback to basic page view tracking if no data available
+        // Fallback to basic page view tracking if no product data available
         var pageViewData = {
+          // Include all session parameters
+          ...sessionParams,
+
+          // Page information
           page_title: document.title,
           page_location: window.location.href,
           page_path: window.location.pathname,
-          referrer: document.referrer,
+          page_referrer: document.referrer,
         };
+
+        // If this is a new session, add special flags for session start
+        if (session.isNew) {
+          // These internal flags help GA4 know this is a session start event
+          pageViewData._ss = 1;
+
+          if (session.isFirstVisit) {
+            pageViewData._fv = 1;
+          }
+
+          this.log("Sending page_view with session start flags", {
+            session_id: session.id,
+            is_new: session.isNew,
+            is_first_visit: session.isFirstVisit,
+          });
+        }
+
         this.trackEvent("page_view", pageViewData);
       }
     },
@@ -595,6 +600,7 @@
     trackEvent: function (eventName, eventParams = {}) {
       // Log the event
       this.log("Tracking event: " + eventName, eventParams);
+      var session = this.getSession();
 
       // Add debug_mode to event params if not already present and ensure it's a boolean
       if (!eventParams.hasOwnProperty("debug_mode")) {
@@ -613,13 +619,16 @@
       }
       // Add session_id to event params if not already present
       if (!eventParams.hasOwnProperty("session_id")) {
-        var session = this.getSession();
         eventParams.session_id = session.id;
 
         // Add session number if not already present
         if (!eventParams.hasOwnProperty("ga_session_number")) {
           eventParams.ga_session_number = session.sessionCount;
         }
+      }
+      // Add session_id to event params if not already present
+      if (!eventParams.hasOwnProperty("ga_session_id")) {
+        eventParams.ga_session_id = session.id;
       }
       if (!eventParams.hasOwnProperty("event_timestamp")) {
         // Add timestamp to event params
@@ -763,12 +772,7 @@
 
     // Helper function to generate a unique ID
     generateUniqueId: function () {
-      return (
-        Date.now().toString(36) +
-        "-" +
-        Math.random().toString(36).substring(2, 15) +
-        Math.random().toString(36).substring(2, 15)
-      );
+      return Date.now().toString();
     },
     // Get client ID from cookie
     getClientId: function () {
