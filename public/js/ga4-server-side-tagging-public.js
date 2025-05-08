@@ -12,19 +12,80 @@
     // Configuration
     config: window.ga4ServerSideTagging || {},
 
-    // Initialize
     init: function () {
       // Check if we have the required configuration
       if (!this.config.measurementId) {
         this.log("Measurement ID not configured");
         return;
       }
+      // this.trackSessionAndPageView();
+
+      this.trackSessionStart();
+      this.trackPageView();
 
       // Set up event listeners
       this.setupEventListeners();
 
       // Log initialization
-      this.log("GA4 Server-Side Tagging initialized v1");
+      this.log("GA4 Server-Side Tagging initialized v6");
+    },
+    trackPageView: function () {
+      // Check if we're on a product page
+      if (this.config.productData) {
+        // We're on a product page, so track view_item instead of page_view
+        var viewItemData = {
+          currency: this.config.currency || "EUR",
+          value: this.config.productData.price,
+          items: [this.config.productData],
+          page_title: document.title,
+          page_location: window.location.href,
+          page_path: window.location.pathname,
+          referrer: document.referrer,
+        };
+
+        // Add UTM parameters if available
+        viewItemData.source =
+          this.getUtmSource() || document.referrer || "(direct)";
+        viewItemData.medium = this.getUtmMedium() || "(none)";
+        viewItemData.campaign = this.getUtmCampaign() || "(not set)";
+
+        this.trackEvent("view_item", viewItemData);
+      }
+      // For regular pages, track page_view
+      else if (this.config.pageViewData) {
+        this.trackEvent("page_view", this.config.pageViewData);
+      } else {
+        // Fallback to basic page view tracking if no data available
+        var pageViewData = {
+          page_title: document.title,
+          page_location: window.location.href,
+          page_path: window.location.pathname,
+          referrer: document.referrer,
+        };
+        this.trackEvent("page_view", pageViewData);
+      }
+    },
+
+    // Track session_start event only if not already sent for this session
+    trackSessionStart: function () {
+      var session = this.getSessionId();
+
+      this.log("Session data:", session);
+
+      if (!session.isNew) {
+        this.log("Session already started, skipping session_start");
+        return;
+      }
+
+      var sessionStartData = {
+        engagement_time_msec: 1000,
+        engaged_session_event: true,
+        session_id: session.id,
+        ga_session_id: session.id,
+        page_location: window.location.href,
+      };
+
+      this.trackEvent("session_start", sessionStartData);
     },
 
     // Set up event listeners
