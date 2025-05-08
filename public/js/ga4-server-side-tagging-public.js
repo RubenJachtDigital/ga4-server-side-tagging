@@ -526,12 +526,18 @@
     },
 
     // Track an event
-    trackEvent: function (eventName, eventParams) {
+    trackEvent: function (eventName, eventParams = {}) {
       // Log the event
       this.log("Tracking event: " + eventName, eventParams);
 
+      // Add debug_mode to event params if not already present
+      eventParams.debug_mode = eventParams.hasOwnProperty("debug_mode")
+        ? eventParams.debug_mode
+        : this.config.debugMode ?? false;
+
       // Add timestamp to event params
       eventParams.event_time = Math.floor(Date.now() / 1000);
+
       // Send server-side event if enabled
       if (this.config.useServerSide) {
         this.sendServerSideEvent(eventName, eventParams);
