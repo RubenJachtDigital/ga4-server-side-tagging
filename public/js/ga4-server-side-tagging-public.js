@@ -18,10 +18,6 @@
         this.log("Measurement ID not configured");
         return;
       }
-      // this.trackSessionAndPageView();
-
-      this.trackSessionStart();
-      this.trackPageView();
 
       this.trackPageView();
 
