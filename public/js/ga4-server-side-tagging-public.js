@@ -27,7 +27,28 @@
       this.setupEventListeners();
 
       // Log initialization
-      this.log("GA4 Server-Side Tagging initialized v6");
+      this.log("GA4 Server-Side Tagging initialized v2");
+    },
+    // Track session_start event only if not already sent for this session
+    trackSessionStart: function () {
+      var session = this.getSession();
+
+      this.log("Session data:", session);
+
+      if (!session.isNew) {
+        this.log("Session already started, skipping session_start");
+        return;
+      }
+
+      var sessionStartData = {
+        engagement_time_msec: 1000,
+        engaged_session_event: true,
+        session_id: session.id,
+        ga_session_id: session.id,
+        page_location: window.location.href,
+      };
+
+      this.trackEvent("session_start", sessionStartData);
     },
     trackPageView: function () {
       // Check if we're on a product page
@@ -64,28 +85,6 @@
         };
         this.trackEvent("page_view", pageViewData);
       }
-    },
-
-    // Track session_start event only if not already sent for this session
-    trackSessionStart: function () {
-      var session = this.getSessionId();
-
-      this.log("Session data:", session);
-
-      if (!session.isNew) {
-        this.log("Session already started, skipping session_start");
-        return;
-      }
-
-      var sessionStartData = {
-        engagement_time_msec: 1000,
-        engaged_session_event: true,
-        session_id: session.id,
-        ga_session_id: session.id,
-        page_location: window.location.href,
-      };
-
-      this.trackEvent("session_start", sessionStartData);
     },
 
     // Set up event listeners
