@@ -99,10 +99,7 @@ class GA4_Server_Side_Tagging_Public
         );
         // Add product data if we're on a product page
         if (is_product()) {
-            global $product;
-            if ($product) {
-                $script_data['productData'] = $this->get_current_product_data($product);
-            }
+            $script_data['productData'] = wp_json_encode($this->get_current_product_data());
         }
         // Add order data for purchase event if on the order received page
         if (is_wc_endpoint_url('order-received') && isset($_GET['key'])) {

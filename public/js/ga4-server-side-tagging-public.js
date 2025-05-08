@@ -31,7 +31,7 @@
       this.setupEventListeners();
 
       // Log initialization
-      this.log("GA4 Server-Side Tagging initialized v3");
+      this.log("GA4 Server-Side Tagging initialized v6");
     },
     // Track session_start event only if not already sent for this session
     trackSessionStart: function () {
@@ -86,11 +86,13 @@
     trackPageView: function () {
       // Check if we're on a product page
       if (this.config.productData) {
+        this.log(this.config.productData);
+        var productData = JSON.parse(this.config.productData);
         // We're on a product page, so track view_item instead of page_view
         var viewItemData = {
           currency: this.config.currency || "EUR",
-          value: this.config.productData.price,
-          items: [this.config.productData],
+          value: productData.price,
+          items: [productData],
           page_title: document.title,
           page_location: window.location.href,
           page_path: window.location.pathname,
@@ -222,6 +224,24 @@
           var productName = $button.data("ga4-product-name");
           var productPrice = $button.data("ga4-product-price") || 0;
           var quantity = parseInt($("input.qty").val()) || 1;
+
+          // Check if productId is empty or not found
+          if (!productId) {
+            // Get item_name from h1.bde-heading
+            productName = $("h1.bde-heading").text().trim();
+
+            // Get item_id from body class (postid-XXXXX)
+            var bodyClasses = $("body").attr("class").split(" ");
+            for (var i = 0; i < bodyClasses.length; i++) {
+              if (bodyClasses[i].startsWith("postid-")) {
+                productId = bodyClasses[i].replace("postid-", "");
+                break;
+              }
+            }
+
+            // Set price to 0
+            productPrice = 0;
+          }
 
           self.trackEvent("add_to_cart", {
             item_id: productId,
