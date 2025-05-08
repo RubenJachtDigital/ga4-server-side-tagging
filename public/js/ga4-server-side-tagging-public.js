@@ -572,7 +572,25 @@
         }
       }
     },
+    // Get UTM parameters from URL
+    getUtmSource: function () {
+      return this.getParameterByName("utm_source");
+    },
 
+    getUtmMedium: function () {
+      return this.getParameterByName("utm_medium");
+    },
+
+    getUtmCampaign: function () {
+      return this.getParameterByName("utm_campaign");
+    },
+
+    getParameterByName: function (name) {
+      var match = RegExp("[?&]" + name + "=([^&]*)").exec(
+        window.location.search
+      );
+      return match && decodeURIComponent(match[1].replace(/\+/g, " "));
+    },
     // Track an event
     trackEvent: function (eventName, eventParams = {}) {
       // Log the event
