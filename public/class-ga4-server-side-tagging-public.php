@@ -97,8 +97,6 @@ class GA4_Server_Side_Tagging_Public
             'cloudflareWorkerUrl' => get_option('ga4_cloudflare_worker_url', ''),
             'currency' => get_woocommerce_currency(),
         );
-        // Add page view data
-        $script_data['pageViewData'] = $this->get_page_view_data();
         // Add product data if we're on a product page
         if (is_product()) {
             global $product;
@@ -135,74 +133,6 @@ class GA4_Server_Side_Tagging_Public
         );
     }
 
-    private function get_page_view_data()
-    {
-        $page_data = array(
-            'page_title' => wp_get_document_title(),
-            'page_location' => (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on' ? "https" : "http") . "://$_SERVER[HTTP_HOST]$_SERVER[REQUEST_URI]",
-            'page_path' => parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH),
-        );
-
-        // Get referrer if available
-        if (!empty($_SERVER['HTTP_REFERER'])) {
-            $page_data['referrer'] = $_SERVER['HTTP_REFERER'];
-        }
-
-        // Get UTM parameters if available
-        foreach (['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content'] as $utm_param) {
-            if (isset($_GET[$utm_param]) && !empty($_GET[$utm_param])) {
-                $page_data[$utm_param] = sanitize_text_field($_GET[$utm_param]);
-            }
-        }
-
-        // Add page type info
-        if (is_front_page()) {
-            $page_data['page_type'] = 'home';
-        } elseif (is_single()) {
-            $page_data['page_type'] = 'post';
-            $page_data['post_id'] = get_the_ID();
-            $page_data['post_type'] = get_post_type();
-        } elseif (is_page()) {
-            $page_data['page_type'] = 'page';
-            $page_data['page_id'] = get_the_ID();
-        } elseif (is_archive()) {
-            $page_data['page_type'] = 'archive';
-            if (is_category()) {
-                $page_data['category'] = single_cat_title('', false);
-            } elseif (is_tag()) {
-                $page_data['tag'] = single_tag_title('', false);
-            } elseif (is_author()) {
-                $page_data['author'] = get_the_author();
-            }
-        } elseif (is_search()) {
-            $page_data['page_type'] = 'search';
-            $page_data['search_term'] = get_search_query();
-        }
-
-        // Add WooCommerce specific data if available
-        if (function_exists('is_shop') && is_shop()) {
-            $page_data['page_type'] = 'shop';
-        } elseif (function_exists('is_product_category') && is_product_category()) {
-            $page_data['page_type'] = 'product_category';
-            $page_data['category'] = single_term_title('', false);
-        } elseif (function_exists('is_product_tag') && is_product_tag()) {
-            $page_data['page_type'] = 'product_tag';
-            $page_data['tag'] = single_term_title('', false);
-        } elseif (function_exists('is_product') && is_product()) {
-            $page_data['page_type'] = 'product';
-        } elseif (function_exists('is_cart') && is_cart()) {
-            $page_data['page_type'] = 'cart';
-        } elseif (function_exists('is_checkout') && is_checkout()) {
-            $page_data['page_type'] = 'checkout';
-            if (is_wc_endpoint_url('order-received')) {
-                $page_data['page_type'] = 'order_confirmation';
-            }
-        } elseif (function_exists('is_account_page') && is_account_page()) {
-            $page_data['page_type'] = 'account';
-        }
-
-        return $page_data;
-    }
 
     /**
      * Add GA4 tracking code to the site header.
