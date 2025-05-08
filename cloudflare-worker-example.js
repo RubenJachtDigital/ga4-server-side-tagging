@@ -8,13 +8,10 @@
 
 // Configuration
 var GA4_ENDPOINT = "https://www.google-analytics.com/mp/collect";
+var DEBUG_MODE = false; // Set to true to enable debug logging
 const GA4_MEASUREMENT_ID = "G-xx"; // Your GA4 Measurement ID
 const GA4_API_SECRET = "xx"; // Your GA4 API Secret
-const DEBUG_MODE = true; // Set to true to enable debug logging
 
-if (DEBUG_MODE) {
-  GA4_ENDPOINT = "https://www.google-analytics.com/debug/mp/collect"; // Debug endpoint
-}
 addEventListener("fetch", (event) => {
   event.respondWith(handleRequest(event.request));
 });
@@ -41,6 +38,12 @@ async function handleRequest(request) {
     // Parse the request body
     const payload = await request.json();
 
+    if (payload.params.debug_mode) {
+      DEBUG_MODE = payload.params.debug_mode;
+    }
+    if (DEBUG_MODE) {
+      GA4_ENDPOINT = "https://www.google-analytics.com/debug/mp/collect"; // Debug endpoint
+    }
     // Log the incoming event data
     if (DEBUG_MODE) {
       console.log("Received event:", JSON.stringify(payload));

@@ -25,7 +25,7 @@
       this.setupEventListeners();
 
       // Log initialization
-      this.log("GA4 Server-Side Tagging initialized v8");
+      this.log("GA4 Server-Side Tagging initialized v9");
     },
 
     trackPageView: function () {
@@ -636,18 +636,9 @@
 
       // Add debug_mode to event params if not already present and ensure it's a boolean
       if (!eventParams.hasOwnProperty("debug_mode")) {
-        const debugMode = this.config.debugMode;
-        eventParams.debug_mode =
-          debugMode === "1" ||
-          debugMode === 1 ||
-          debugMode === "true" ||
-          Boolean(debugMode);
-      } else if (
-        eventParams.debug_mode === "1" ||
-        eventParams.debug_mode === 1 ||
-        eventParams.debug_mode === "true"
-      ) {
-        eventParams.debug_mode = true;
+        if (Boolean(this.config.debugMode) === true) {
+          eventParams.debug_mode = Boolean(this.config.debugMode);
+        }
       }
       // Add session_id to event params if not already present
       if (!eventParams.hasOwnProperty("session_id")) {
