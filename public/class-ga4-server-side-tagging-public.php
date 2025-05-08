@@ -98,15 +98,10 @@ class GA4_Server_Side_Tagging_Public
             'currency' => get_woocommerce_currency(),
             'siteName' => get_bloginfo('name'),
         );
-
-        // Add user ID for logged-in users if enabled
-        if (is_user_logged_in() && get_option('ga4_track_user_id', true)) {
-            $script_data['userId'] = get_current_user_id();
+        // Add product data if we're on a product page
+        if (is_product()) {
+            $script_data['productData'] = wp_json_encode($this->get_current_product_data());
         }
-
-        // Add page view data
-        $script_data['pageViewData'] = $this->get_page_view_data();
-
         // Add order data for purchase event if on the order received page
         if (is_wc_endpoint_url('order-received') && isset($_GET['key'])) {
             $order_id = wc_get_order_id_by_order_key(wc_clean(wp_unslash($_GET['key'])));
@@ -143,6 +138,7 @@ class GA4_Server_Side_Tagging_Public
             $script_data
         );
     }
+
 
     /**
      * Get current page view data for tracking

@@ -7,11 +7,14 @@
  */
 
 // Configuration
+var GA4_ENDPOINT = "https://www.google-analytics.com/mp/collect";
 const GA4_MEASUREMENT_ID = "G-xx"; // Your GA4 Measurement ID
 const GA4_API_SECRET = "xx"; // Your GA4 API Secret
-const GA4_ENDPOINT = "https://www.google-analytics.com/mp/collect";
 const DEBUG_MODE = true; // Set to true to enable debug logging
 
+if (DEBUG_MODE) {
+  GA4_ENDPOINT = "https://www.google-analytics.com/debug/mp/collect"; // Debug endpoint
+}
 addEventListener("fetch", (event) => {
   event.respondWith(handleRequest(event.request));
 });
@@ -37,37 +40,62 @@ async function handleRequest(request) {
   try {
     // Parse the request body
     const payload = await request.json();
-    let processedData;
-    let ga4Payload;
 
-    if (!payload.events) {
-      // Process event data when payload doesn't contain events
-      processedData = processEventData(payload, request);
-
-      // Ensure processedData exists and has required properties
-      if (!processedData || !processedData.name) {
-        throw new Error("Invalid processed data: missing name property");
-      }
-
-      // Prepare the GA4 payload
-      ga4Payload = {
-        client_id: processedData.params.client_id,
-        events: [
-          {
-            name: processedData.name,
-            params: processedData.params,
-          },
-        ],
-      };
-
-    } else {
-      // Handle the case when payload.events exists
-      ga4Payload = {
-        client_id: payload.client_id,
-        events: payload.events,
-      };
+    // Log the incoming event data
+    if (DEBUG_MODE) {
+      console.log("Received event:", JSON.stringify(payload));
     }
-    
+
+    // Process the event data
+    const processedData = processEventData(payload, request);
+
+    // Validate required parameters
+    if (!processedData.name) {
+      return new Response(JSON.stringify({ error: "Missing event name" }), {
+        status: 400,
+        headers: {
+          "Content-Type": "application/json",
+          ...getCORSHeaders(request),
+        },
+      });
+    }
+
+    if (!processedData.params || !processedData.params.client_id) {
+      return new Response(
+        JSON.stringify({ error: "Missing client_id parameter" }),
+        {
+          status: 400,
+          headers: {
+            "Content-Type": "application/json",
+            ...getCORSHeaders(request),
+          },
+        }
+      );
+    }
+
+    // Prepare the GA4 payload
+    const ga4Payload = {
+      client_id: processedData.params.client_id,
+      events: [
+        {
+          name: processedData.name,
+          params: processedData.params,
+        },
+      ],
+    };
+
+    // Remove client_id from params to avoid duplication, only if it exists
+    if (ga4Payload.events[0].params.hasOwnProperty("client_id")) {
+      delete ga4Payload.events[0].params.client_id;
+    }
+
+    // Add user_id if available
+    if (processedData.params.user_id) {
+      ga4Payload.user_id = processedData.params.user_id;
+      // Remove from params to avoid duplication
+      delete processedData.params.user_id;
+    }
+
     // Send the event to GA4
     const ga4Response = await fetch(
       `${GA4_ENDPOINT}?measurement_id=${GA4_MEASUREMENT_ID}&api_secret=${GA4_API_SECRET}`,
@@ -90,7 +118,7 @@ async function handleRequest(request) {
     return new Response(
       JSON.stringify({
         success: true,
-        event: ga4Payload.events,
+        event: processedData.name,
         ga4_status: ga4Response.status,
         debug: DEBUG_MODE ? ga4Payload : undefined,
       }),
@@ -354,12 +382,6 @@ function processEventData(data, request) {
       } else {
         // Create empty items array if missing
         processedData.params.items = [];
-      }
-      break;
-    case "session_start":
-      // Optional debug log
-      if (DEBUG_MODE) {
-        console.log("Processing session_start event:", processedData);
       }
       break;
     case "select_item":
@@ -635,7 +657,7 @@ function processEventData(data, request) {
   }
 
   // Add engagement parameters for all events
-  processedData.params.engagement_time_msec = 100;
+  processedData.params.engagement_time_msec = 1000;
 
   // Log the processed event data
   if (DEBUG_MODE) {

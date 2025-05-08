@@ -12,7 +12,6 @@
     // Configuration
     config: window.ga4ServerSideTagging || {},
 
-    // Initialize
     init: function () {
       // Check if we have the required configuration
       if (!this.config.measurementId) {
@@ -24,24 +23,68 @@
       this.trackSessionStart();
       this.trackPageView();
 
+      this.trackPageView();
+
       // Set up event listeners
       this.setupEventListeners();
 
       // Log initialization
-      this.log("GA4 Server-Side Tagging initialized v6");
+      this.log("GA4 Server-Side Tagging initialized v8");
     },
+
     trackPageView: function () {
+      // Get current session information
+      var session = this.getSession();
+
+      // Common session parameters needed for all page view events
+      var sessionParams = {
+        // Session identification
+        session_id: session.id,
+        ga_session_id: session.id,
+        ga_session_number: session.sessionCount,
+
+        // Critical for GA4 real-time reporting
+        engagement_time_msec: 1000,
+
+        // Session state flags
+        session_engaged: true,
+        engaged_session_event: true,
+
+        // First visit indicators for new users
+        first_visit: session.isFirstVisit ? 1 : 0,
+        new_visitor: session.sessionCount === 1 ? 1 : 0,
+
+        // Client information
+        client_id: this.getClientId(),
+
+        // Device information
+        user_agent: navigator.userAgent,
+        language: navigator.language || "",
+        screen_resolution: window.screen
+          ? window.screen.width + "x" + window.screen.height
+          : "",
+      };
+
       // Check if we're on a product page
       if (this.config.productData) {
+        this.log(this.config.productData);
+        var productData = JSON.parse(this.config.productData);
+
         // We're on a product page, so track view_item instead of page_view
         var viewItemData = {
+          // Include all session parameters
+          ...sessionParams,
+
+          // Product-specific data
           currency: this.config.currency || "EUR",
-          value: this.config.productData.price,
-          items: [this.config.productData],
+          value: productData.price,
+          items: [productData],
+
+          // Page information
           page_title: document.title,
           page_location: window.location.href,
           page_path: window.location.pathname,
-          referrer: document.referrer,
+          page_referrer: document.referrer,
         };
 
         // Add UTM parameters if available
@@ -51,42 +94,37 @@
         viewItemData.campaign = this.getUtmCampaign() || "(not set)";
 
         this.trackEvent("view_item", viewItemData);
-      }
-      // For regular pages, track page_view
-      else if (this.config.pageViewData) {
-        this.trackEvent("page_view", this.config.pageViewData);
       } else {
-        // Fallback to basic page view tracking if no data available
+        // Fallback to basic page view tracking if no product data available
         var pageViewData = {
+          // Include all session parameters
+          ...sessionParams,
+
+          // Page information
           page_title: document.title,
           page_location: window.location.href,
           page_path: window.location.pathname,
-          referrer: document.referrer,
+          page_referrer: document.referrer,
         };
+
+        // If this is a new session, add special flags for session start
+        if (session.isNew) {
+          // These internal flags help GA4 know this is a session start event
+          pageViewData._ss = 1;
+
+          if (session.isFirstVisit) {
+            pageViewData._fv = 1;
+          }
+
+          this.log("Sending page_view with session start flags", {
+            session_id: session.id,
+            is_new: session.isNew,
+            is_first_visit: session.isFirstVisit,
+          });
+        }
+
         this.trackEvent("page_view", pageViewData);
       }
-    },
-
-    // Track session_start event only if not already sent for this session
-    trackSessionStart: function () {
-      var session = this.getSessionId();
-
-      this.log("Session data:", session);
-
-      if (!session.isNew) {
-        this.log("Session already started, skipping session_start");
-        return;
-      }
-
-      var sessionStartData = {
-        engagement_time_msec: 1000,
-        engaged_session_event: true,
-        session_id: session.id,
-        ga_session_id: session.id,
-        page_location: window.location.href,
-      };
-
-      this.trackEvent("session_start", sessionStartData);
     },
 
     // Set up event listeners
@@ -575,7 +613,6 @@
         }
       }
     },
-
     // Get UTM parameters from URL
     getUtmSource: function () {
       return this.getParameterByName("utm_source");
@@ -595,61 +632,51 @@
       );
       return match && decodeURIComponent(match[1].replace(/\+/g, " "));
     },
-
     // Track an event
-    trackEvent: function (eventName, eventParams) {
-      // Create a copy of event params to avoid modifying the original
-      var params = Object.assign({}, eventParams);
-
+    trackEvent: function (eventName, eventParams = {}) {
       // Log the event
-      this.log("Tracking event: " + eventName, params);
+      this.log("Tracking event: " + eventName, eventParams);
+      var session = this.getSession();
 
-      // Add timestamp to event params
-      params.event_time = Math.floor(Date.now() / 1000);
+      // Add debug_mode to event params if not already present and ensure it's a boolean
+      if (!eventParams.hasOwnProperty("debug_mode")) {
+        const debugMode = this.config.debugMode;
+        eventParams.debug_mode =
+          debugMode === "1" ||
+          debugMode === 1 ||
+          debugMode === "true" ||
+          Boolean(debugMode);
+      } else if (
+        eventParams.debug_mode === "1" ||
+        eventParams.debug_mode === 1 ||
+        eventParams.debug_mode === "true"
+      ) {
+        eventParams.debug_mode = true;
+      }
+      // Add session_id to event params if not already present
+      if (!eventParams.hasOwnProperty("session_id")) {
+        eventParams.session_id = session.id;
+
+        // Add session number if not already present
+        if (!eventParams.hasOwnProperty("ga_session_number")) {
+          eventParams.ga_session_number = session.sessionCount;
+        }
+      }
+      // Add session_id to event params if not already present
+      if (!eventParams.hasOwnProperty("ga_session_id")) {
+        eventParams.ga_session_id = session.id;
+      }
+      if (!eventParams.hasOwnProperty("event_timestamp")) {
+        // Add timestamp to event params
+        eventParams.event_timestamp = Math.floor(Date.now() / 1000);
+      }
+
+      // Send server-side event if enabled
       if (this.config.useServerSide) {
-        // Add standard attribution parameters if not already present
-        if (!params.source)
-          params.source =
-            this.getUtmSource() || this.getReferrerSource() || "(direct)";
-        if (!params.referrer)
-          params.referrer = this.getReferrerSource() || "(direct)";
-        if (!params.medium)
-          params.medium =
-            this.getUtmMedium() || this.getReferrerMedium() || "(none)";
-        if (!params.campaign)
-          params.campaign = this.getUtmCampaign() || "(not set)";
-        if (!params.term)
-          params.term = this.getParameterByName("utm_term") || "(not set)";
-        if (!params.content)
-          params.content =
-            this.getParameterByName("utm_content") || "(not set)";
-        if (!params.session_id) {
-          var session = this.getSessionId();
-          params.session_id = session.id; // Use the session ID from the getSessionId() function
-        }
-        if (!params.ga_session_id) {
-          var session = this.getSessionId();
-          params.ga_session_id = session.id; // Use the session ID from the getSessionId() function
-        }
-        if (!params.engagement_time_msec) params.engagement_time_msec = 1000;
-        if (!params.debug_mode && this.config.debugMode) {
-          params.debug_mode = true;
-        }
-
-        // Make sure user data is included
-        params.client_id = this.getClientId();
-
-        // Send the event server-side
-        this.sendServerSideEvent(eventName, params);
+        this.sendServerSideEvent(eventName, eventParams);
       } else if (typeof gtag === "function") {
-        gtag("event", eventName, params);
+        gtag("event", eventName, eventParams);
         this.log("Sent to gtag: " + eventName);
-      } else {
-        console.error("[GA4 Server-Side Tagging] Error sending event", {
-          config: this.config,
-          eventName: eventName,
-          eventParams: params,
-        });
       }
     },
 
@@ -733,97 +760,41 @@
         },
       });
     },
-
-    // Get referrer source information
-    getReferrerSource: function () {
-      var referrer = document.referrer;
-      if (!referrer) return "(direct)";
-
-      var referrerHostname = new URL(referrer).hostname;
-      // var currentHostname = window.location.hostname;
-
-      // If same domain, it's internal
-      // if (referrerHostname === currentHostname) return "(internal)";
-
-      // Check for search engines
-      var searchEngines = {
-        google: "google",
-        bing: "bing",
-        yahoo: "yahoo",
-        duckduckgo: "duckduckgo",
-        yandex: "yandex",
-        baidu: "baidu",
-      };
-
-      for (var engine in searchEngines) {
-        if (referrerHostname.indexOf(engine) !== -1) {
-          return searchEngines[engine];
-        }
-      }
-
-      // If not a search engine, use the hostname as source
-      return referrerHostname;
-    },
-
-    getReferrerMedium: function () {
-      var referrer = document.referrer;
-      if (!referrer) return "(none)";
-
-      var referrerHostname = new URL(referrer).hostname;
-      var currentHostname = window.location.hostname;
-
-      // If same domain, it's internal
-      if (referrerHostname === currentHostname) return "(internal)";
-
-      // Check for search engines
-      var searchEngines = {
-        google: "organic",
-        bing: "organic",
-        yahoo: "organic",
-        duckduckgo: "organic",
-        yandex: "organic",
-        baidu: "organic",
-      };
-
-      for (var engine in searchEngines) {
-        if (referrerHostname.indexOf(engine) !== -1) {
-          return searchEngines[engine];
-        }
-      }
-
-      // Social media
-      var socialMedia = {
-        facebook: "social",
-        twitter: "social",
-        instagram: "social",
-        linkedin: "social",
-        reddit: "social",
-        pinterest: "social",
-      };
-
-      for (var site in socialMedia) {
-        if (referrerHostname.indexOf(site) !== -1) {
-          return socialMedia[site];
-        }
-      }
-
-      // Default for all other external sites
-      return "referral";
-    },
-
-    getSessionId: function () {
+    getSession: function () {
       var sessionId = localStorage.getItem("ga4_session_id");
       var sessionStart = localStorage.getItem("ga4_session_start");
+      var firstVisit = localStorage.getItem("ga4_first_visit");
+      var sessionCount = parseInt(
+        localStorage.getItem("ga4_session_count") || "0"
+      );
       var now = Date.now();
       var isNew = false;
+      var isFirstVisit = false;
+
+      // Check if this is the first visit ever
+      if (!firstVisit) {
+        localStorage.setItem("ga4_first_visit", now);
+        isFirstVisit = true;
+      }
 
       // If no session or session expired (30 min inactive)
-      if (!sessionId || !sessionStart || now - sessionStart > 30 * 60 * 1000) {
-        sessionId =
-          Math.random().toString(36).substring(2, 15) +
-          Math.random().toString(36).substring(2, 15);
+      if (
+        !sessionId ||
+        !sessionStart ||
+        now - parseInt(sessionStart) > 30 * 60 * 1000
+      ) {
+        // Generate a more robust session ID using timestamp and random values
+        sessionId = this.generateUniqueId();
+        sessionStart = now;
+
+        // Store session data
         localStorage.setItem("ga4_session_id", sessionId);
-        localStorage.setItem("ga4_session_start", now);
+        localStorage.setItem("ga4_session_start", sessionStart);
+
+        // Increment session count
+        sessionCount++;
+        localStorage.setItem("ga4_session_count", sessionCount);
+
         isNew = true;
       } else {
         // Update session timestamp on activity
@@ -832,10 +803,18 @@
 
       return {
         id: sessionId,
+        start: parseInt(sessionStart),
         isNew: isNew,
+        isFirstVisit: isFirstVisit,
+        sessionCount: sessionCount,
+        duration: now - parseInt(sessionStart),
       };
     },
 
+    // Helper function to generate a unique ID
+    generateUniqueId: function () {
+      return Date.now().toString();
+    },
     // Get client ID from cookie
     getClientId: function () {
       // Try to get client ID from _ga cookie
