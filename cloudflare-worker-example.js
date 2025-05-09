@@ -7,8 +7,8 @@
  */
 
 // Configuration
-var GA4_ENDPOINT = "https://www.google-analytics.com/mp/collect";
 var DEBUG_MODE = false; // Set to true to enable debug logging
+const GA4_ENDPOINT = "https://www.google-analytics.com/mp/collect";
 const GA4_MEASUREMENT_ID = "G-xx"; // Your GA4 Measurement ID
 const GA4_API_SECRET = "xx"; // Your GA4 API Secret
 
@@ -41,9 +41,12 @@ async function handleRequest(request) {
     if (payload.params.debug_mode) {
       DEBUG_MODE = payload.params.debug_mode;
     }
+
+    // Log the incoming event data
     if (DEBUG_MODE) {
-      GA4_ENDPOINT = "https://www.google-analytics.com/debug/mp/collect"; // Debug endpoint
+      console.log("Received event:", JSON.stringify(payload));
     }
+
     // Log the incoming event data
     if (DEBUG_MODE) {
       console.log("Received event:", JSON.stringify(payload));
@@ -387,6 +390,7 @@ function processEventData(data, request) {
         processedData.params.items = [];
       }
       break;
+
     case "select_item":
       // Ensure required select_item parameters
       if (!processedData.params.item_list_id) {
@@ -552,6 +556,7 @@ function processEventData(data, request) {
       } else {
         // Create empty items array if missing
         processedData.params.items = [];
+        processedData.params.value = 0; // Default value
       }
       break;
 
@@ -600,6 +605,7 @@ function processEventData(data, request) {
       } else {
         // Create empty items array if missing
         processedData.params.items = [];
+        processedData.params.value = 0; // Default value
       }
       break;
 
@@ -648,6 +654,7 @@ function processEventData(data, request) {
       } else {
         // Create empty items array if missing
         processedData.params.items = [];
+        processedData.params.value = 0; // Default value
       }
       break;
 

@@ -25,7 +25,7 @@
       this.setupEventListeners();
 
       // Log initialization
-      this.log("GA4 Server-Side Tagging initialized v9");
+      this.log("GA4 Server-Side Tagging initialized v2");
     },
 
     trackPageView: function () {
@@ -36,8 +36,6 @@
       var sessionParams = {
         // Session identification
         session_id: session.id,
-        ga_session_id: session.id,
-        ga_session_number: session.sessionCount,
 
         // Critical for GA4 real-time reporting
         engagement_time_msec: 1000,
@@ -54,7 +52,6 @@
         client_id: this.getClientId(),
 
         // Device information
-        user_agent: navigator.userAgent,
         language: navigator.language || "",
         screen_resolution: window.screen
           ? window.screen.width + "x" + window.screen.height
@@ -64,7 +61,7 @@
       // Check if we're on a product page
       if (this.config.productData) {
         this.log(this.config.productData);
-        var productData = JSON.parse(this.config.productData);
+        var productData = this.config.productData;
 
         // We're on a product page, so track view_item instead of page_view
         var viewItemData = {
@@ -102,22 +99,6 @@
           page_path: window.location.pathname,
           page_referrer: document.referrer,
         };
-
-        // If this is a new session, add special flags for session start
-        if (session.isNew) {
-          // These internal flags help GA4 know this is a session start event
-          pageViewData._ss = 1;
-
-          if (session.isFirstVisit) {
-            pageViewData._fv = 1;
-          }
-
-          this.log("Sending page_view with session start flags", {
-            session_id: session.id,
-            is_new: session.isNew,
-            is_first_visit: session.isFirstVisit,
-          });
-        }
 
         this.trackEvent("page_view", pageViewData);
       }
@@ -228,11 +209,12 @@
           var productName = $button.data("ga4-product-name");
           var productPrice = $button.data("ga4-product-price") || 0;
           var quantity = parseInt($("input.qty").val()) || 1;
+          var productData = self.config.productData;
 
           // Check if productId is empty or not found
           if (!productId) {
             // Get item_name from h1.bde-heading
-            productName = $("h1.bde-heading").text().trim();
+            productName = document.title;
 
             // Get item_id from body class (postid-XXXXX)
             var bodyClasses = $("body").attr("class").split(" ");
@@ -244,20 +226,24 @@
             }
 
             // Set price to 0
-            productPrice = 0;
+            productPrice = productData.price;
           }
 
           self.trackEvent("add_to_cart", {
             item_id: productId,
             item_name: productName,
             price: parseFloat(productPrice),
+            items: [productData],
             quantity: quantity,
+            value: parseFloat(productPrice)
           });
 
           self.log("Tracked Buy Now button click as add_to_cart", {
             item_id: productId,
             item_name: productName,
             price: parseFloat(productPrice),
+            items: [productData],
+            value: parseFloat(productPrice),
             quantity: quantity,
           });
         }
@@ -399,6 +385,7 @@
       // Track purchase event on order received page
       if (
         window.location.href.indexOf("/checkout/order-received/") > -1 ||
+        window.location.href.indexOf("/inschrijven/order-received/") > -1 ||
         window.location.href.indexOf("/order-pay/") > -1 ||
         window.location.href.indexOf("/thank-you/") > -1
       ) {
@@ -634,25 +621,18 @@
       this.log("Tracking event: " + eventName, eventParams);
       var session = this.getSession();
 
+      // Add session_id to event params if not already present
+      if (!eventParams.hasOwnProperty("session_id")) {
+        eventParams.session_id = session.id;
+      }
+
       // Add debug_mode to event params if not already present and ensure it's a boolean
       if (!eventParams.hasOwnProperty("debug_mode")) {
         if (Boolean(this.config.debugMode) === true) {
           eventParams.debug_mode = Boolean(this.config.debugMode);
         }
       }
-      // Add session_id to event params if not already present
-      if (!eventParams.hasOwnProperty("session_id")) {
-        eventParams.session_id = session.id;
 
-        // Add session number if not already present
-        if (!eventParams.hasOwnProperty("ga_session_number")) {
-          eventParams.ga_session_number = session.sessionCount;
-        }
-      }
-      // Add session_id to event params if not already present
-      if (!eventParams.hasOwnProperty("ga_session_id")) {
-        eventParams.ga_session_id = session.id;
-      }
       if (!eventParams.hasOwnProperty("event_timestamp")) {
         // Add timestamp to event params
         eventParams.event_timestamp = Math.floor(Date.now() / 1000);
