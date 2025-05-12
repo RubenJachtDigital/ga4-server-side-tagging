@@ -25,12 +25,62 @@
       this.setupEventListeners();
 
       // Log initialization
-      this.log("GA4 Server-Side Tagging initialized v2");
+      this.log("GA4 Server-Side Tagging initialized v7");
     },
 
     trackPageView: function () {
       // Get current session information
       var session = this.getSession();
+
+      // Get referrer information
+      var referrer = document.referrer || "";
+      var referrerURL = null;
+      var referrerDomain = "";
+
+      // Parse referrer if it exists
+      if (referrer) {
+        try {
+          referrerURL = new URL(referrer);
+          referrerDomain = referrerURL.hostname;
+        } catch (e) {
+          this.log("Invalid referrer URL:", referrer);
+        }
+      }
+
+      // Get UTM parameters from URL
+      var utmSource = this.getUtmSource();
+      var utmMedium = this.getUtmMedium();
+      var utmCampaign = this.getUtmCampaign();
+
+      // Determine source and medium according to GA4 rules
+      var source = utmSource || "";
+      var medium = utmMedium || "";
+      var campaign = utmCampaign || "(not set)";
+
+      // If no UTM parameters but we have a referrer, determine source/medium
+      if (!source && referrerDomain) {
+        // Handle search engines - this is critical for organic search attribution
+        if (referrerDomain.indexOf("google") > -1) {
+          // Google organic search
+          source = "google";
+          medium = "organic";
+        } else if (
+          referrerDomain.indexOf("bing") > -1 ||
+          referrerDomain.indexOf("yahoo") > -1
+        ) {
+          // Other common search engines
+          source = referrerDomain;
+          medium = "organic";
+        } else {
+          // Regular referral
+          source = referrerDomain;
+          medium = "referral";
+        }
+      } else if (!source) {
+        // No UTM and no referrer means direct traffic
+        source = "(direct)";
+        medium = "(none)";
+      }
 
       // Common session parameters needed for all page view events
       var sessionParams = {
@@ -56,51 +106,40 @@
         screen_resolution: window.screen
           ? window.screen.width + "x" + window.screen.height
           : "",
+
+        // Traffic attribution parameters - IMPORTANT FOR ORGANIC SEARCH
+        source: source,
+        medium: medium,
+        campaign: campaign,
+
+        // Page information
+        page_title: document.title,
+        page_location: this.getPageLocationWithoutParams(window.location.href),
+        page_path: window.location.pathname,
+        page_referrer: referrer,
+
+        // Debug mode - set to false for production
+        debug_mode: false,
+
+        // Event timestamp
+        event_timestamp: Math.floor(Date.now() / 1000),
       };
 
-      // Check if we're on a product page
+      // Rest of your function (view_item vs page_view handling)
       if (this.config.productData) {
         this.log(this.config.productData);
         var productData = this.config.productData;
 
-        // We're on a product page, so track view_item instead of page_view
         var viewItemData = {
-          // Include all session parameters
           ...sessionParams,
-
-          // Product-specific data
           currency: this.config.currency || "EUR",
           value: productData.price,
           items: [productData],
-
-          // Page information
-          page_title: document.title,
-          page_location: window.location.href,
-          page_path: window.location.pathname,
-          page_referrer: document.referrer,
         };
-
-        // Add UTM parameters if available
-        viewItemData.source =
-          this.getUtmSource() || document.referrer || "(direct)";
-        viewItemData.medium = this.getUtmMedium() || "(none)";
-        viewItemData.campaign = this.getUtmCampaign() || "(not set)";
 
         this.trackEvent("view_item", viewItemData);
       } else {
-        // Fallback to basic page view tracking if no product data available
-        var pageViewData = {
-          // Include all session parameters
-          ...sessionParams,
-
-          // Page information
-          page_title: document.title,
-          page_location: window.location.href,
-          page_path: window.location.pathname,
-          page_referrer: document.referrer,
-        };
-
-        this.trackEvent("page_view", pageViewData);
+        this.trackEvent("page_view", sessionParams);
       }
     },
 
@@ -235,7 +274,7 @@
             price: parseFloat(productPrice),
             items: [productData],
             quantity: quantity,
-            value: parseFloat(productPrice)
+            value: parseFloat(productPrice),
           });
 
           self.log("Tracked Buy Now button click as add_to_cart", {
@@ -384,6 +423,7 @@
 
       // Track purchase event on order received page
       if (
+        self.config.isThankYouPage === true ||
         window.location.href.indexOf("/checkout/order-received/") > -1 ||
         window.location.href.indexOf("/inschrijven/order-received/") > -1 ||
         window.location.href.indexOf("/order-pay/") > -1 ||
@@ -596,6 +636,28 @@
         }
       }
     },
+    // Add this helper function to your JavaScript
+    getPageLocationWithoutParams: function (url) {
+      try {
+        // Parse the URL
+        const parsedUrl = new URL(url);
+
+        // Get the base URL without parameters (protocol + hostname + pathname)
+        let cleanUrl =
+          parsedUrl.protocol + "//" + parsedUrl.hostname + parsedUrl.pathname;
+
+        // Trim to 100 characters if needed
+        if (cleanUrl.length > 100) {
+          cleanUrl = cleanUrl.substring(0, 100);
+        }
+
+        return cleanUrl;
+      } catch (e) {
+        // In case of invalid URL, return a trimmed version of the original
+        return url.split("?")[0].substring(0, 100);
+      }
+    },
+
     // Get UTM parameters from URL
     getUtmSource: function () {
       return this.getParameterByName("utm_source");

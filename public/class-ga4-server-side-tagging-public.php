@@ -114,6 +114,12 @@ class GA4_Server_Side_Tagging_Public
                 }
             }
         }
+        if (function_exists('is_wc_endpoint_url') && is_wc_endpoint_url('order-received')) {
+            $script_data['isThankYouPage'] = true;
+        }
+        else {
+            $script_data['isThankYouPage'] = false;
+        }
 
         if (!empty($this->get_raq_cart_data())) {
             $quote_data = $this->get_order_quote_data_for_tracking();
