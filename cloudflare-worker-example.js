@@ -38,23 +38,22 @@ async function handleRequest(request) {
     // Parse the request body
     const payload = await request.json();
 
-    if (payload.params.debug_mode) {
-      DEBUG_MODE = payload.params.debug_mode;
-    }
-
-    // Log the incoming event data
-    if (DEBUG_MODE) {
-      console.log("Received event:", JSON.stringify(payload));
-    }
-
-    // Log the incoming event data
-    if (DEBUG_MODE) {
-      console.log("Received event:", JSON.stringify(payload));
-    }
-
     // Process the event data
     const processedData = processEventData(payload, request);
+    
+    if (processedData.params.debug_mode) {
+      DEBUG_MODE = true;
+    }
 
+    // Log the incoming event data
+    if (DEBUG_MODE) {
+      console.log("Received event:", JSON.stringify(payload));
+    }
+
+    // Log the incoming event data
+    if (DEBUG_MODE) {
+      console.log("Received event:", JSON.stringify(payload));
+    }
     // Validate required parameters
     if (!processedData.name) {
       return new Response(JSON.stringify({ error: "Missing event name" }), {
