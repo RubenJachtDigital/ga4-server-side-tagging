@@ -118,9 +118,6 @@
         page_path: window.location.pathname,
         page_referrer: referrer,
 
-        // Debug mode - set to false for production
-        debug_mode: false,
-
         // Event timestamp
         event_timestamp: Math.floor(Date.now() / 1000),
       };
