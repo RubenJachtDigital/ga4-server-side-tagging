@@ -25,7 +25,7 @@
       this.setupEventListeners();
 
       // Log initialization
-      this.log("GA4 Server-Side Tagging initialized v1");
+      this.log("GA4 Server-Side Tagging initialized v4");
     },
 
     trackPageView: function () {
@@ -121,7 +121,7 @@
         // Event timestamp
         event_timestamp: Math.floor(Date.now() / 1000),
       };
-      this.log("Is order received page: ", this.isOrderConfirmationPage());
+      this.log("Is order received page: " + this.isOrderConfirmationPage());
 
       // Rest of your function (view_item vs page_view handling)
       if (this.config.productData) {
@@ -781,26 +781,42 @@
         },
       });
     },
+    // Option 2: Add more detailed logging within the function
     isOrderConfirmationPage: function () {
-      if (this.config.isThankYouPage === true) {
+      // Check config value
+      if (this.config && this.config.isThankYouPage === true) {
+        this.log("Order page detected via config setting");
         return true;
       }
-      // Check URL patterns (your existing approach)
+
+      // Check URL patterns
       const isUrlMatch =
         window.location.href.indexOf("/checkout/order-received/") > -1 ||
         window.location.href.indexOf("/inschrijven/order-received/") > -1 ||
         window.location.href.indexOf("/order-pay/") > -1 ||
         window.location.href.indexOf("/thank-you/") > -1;
+      if (isUrlMatch) {
+        this.log("Order page detected via URL pattern");
+        return true;
+      }
 
       // Check for WooCommerce body class
       const hasWooClass =
         document.body.classList.contains("woocommerce-order-received") ||
         (document.body.classList.contains("woocommerce-checkout") &&
-          document.querySelector(".woocommerce-order-overview"));
+          document.querySelector(".woocommerce-order-overview") !== null);
+      if (hasWooClass) {
+        this.log("Order page detected via WooCommerce classes");
+        return true;
+      }
 
       // Check for order ID in URL parameters
       const urlParams = new URLSearchParams(window.location.search);
       const hasOrderParam = urlParams.has("order") || urlParams.has("order_id");
+      if (hasOrderParam) {
+        this.log("Order page detected via URL parameters");
+        return true;
+      }
 
       // Check for thank you page elements
       const hasThankYouElements =
@@ -808,8 +824,13 @@
           null ||
         document.querySelector(".woocommerce-order-received") !== null ||
         document.querySelector(".woocommerce-notice--success") !== null;
+      if (hasThankYouElements) {
+        this.log("Order page detected via thank you page elements");
+        return true;
+      }
 
-      return isUrlMatch || hasWooClass || hasOrderParam || hasThankYouElements;
+      this.log("Not an order page");
+      return false;
     },
     getSession: function () {
       var sessionId = localStorage.getItem("server_side_ga4_session_id");
