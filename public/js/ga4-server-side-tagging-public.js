@@ -25,7 +25,7 @@
       this.setupEventListeners();
 
       // Log initialization
-      this.log("GA4 Server-Side Tagging initialized v7");
+      this.log("GA4 Server-Side Tagging initialized v8");
     },
 
     trackPageView: function () {
@@ -787,11 +787,11 @@
       });
     },
     getSession: function () {
-      var sessionId = localStorage.getItem("ga4_session_id");
-      var sessionStart = localStorage.getItem("ga4_session_start");
-      var firstVisit = localStorage.getItem("ga4_first_visit");
+      var sessionId = localStorage.getItem("server_side_ga4_session_id");
+      var sessionStart = localStorage.getItem("server_side_ga4_session_start");
+      var firstVisit = localStorage.getItem("server_side_ga4_first_visit");
       var sessionCount = parseInt(
-        localStorage.getItem("ga4_session_count") || "0"
+        localStorage.getItem("server_side_ga4_session_count") || "0"
       );
       var now = Date.now();
       var isNew = false;
@@ -799,7 +799,7 @@
 
       // Check if this is the first visit ever
       if (!firstVisit) {
-        localStorage.setItem("ga4_first_visit", now);
+        localStorage.setItem("server_side_ga4_first_visit", now);
         isFirstVisit = true;
       }
 
@@ -814,17 +814,17 @@
         sessionStart = now;
 
         // Store session data
-        localStorage.setItem("ga4_session_id", sessionId);
-        localStorage.setItem("ga4_session_start", sessionStart);
+        localStorage.setItem("server_side_ga4_session_id", sessionId);
+        localStorage.setItem("server_side_ga4_session_start", sessionStart);
 
         // Increment session count
         sessionCount++;
-        localStorage.setItem("ga4_session_count", sessionCount);
+        localStorage.setItem("server_side_ga4_session_count", sessionCount);
 
         isNew = true;
       } else {
         // Update session timestamp on activity
-        localStorage.setItem("ga4_session_start", now);
+        localStorage.setItem("server_side_ga4_session_start", now);
       }
 
       return {
@@ -844,17 +844,17 @@
     // Get client ID from cookie
     getClientId: function () {
       // Try to get client ID from _ga cookie
-      var gaCookie = this.getCookie("_ga");
-      if (gaCookie) {
-        var parts = gaCookie.split(".");
-        if (parts.length >= 4) {
-          return parts[2] + "." + parts[3];
-        }
-      }
+      // var gaCookie = this.getCookie("_ga");
+      // if (gaCookie) {
+      //   var parts = gaCookie.split(".");
+      //   if (parts.length >= 4) {
+      //     return parts[2] + "." + parts[3];
+      //   }
+      // }
 
       // Try to get from localStorage if available
       if (window.localStorage) {
-        var storedClientId = localStorage.getItem("ga4_client_id");
+        var storedClientId = localStorage.getItem("server_side_ga4_client_id");
         if (storedClientId) {
           return storedClientId;
         }
@@ -871,7 +871,7 @@
 
       // Store in localStorage if available
       if (window.localStorage) {
-        localStorage.setItem("ga4_client_id", clientId);
+        localStorage.setItem("server_side_ga4_client_id", clientId);
       }
 
       return clientId;
