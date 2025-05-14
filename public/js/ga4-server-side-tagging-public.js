@@ -121,6 +121,7 @@
         // Event timestamp
         event_timestamp: Math.floor(Date.now() / 1000),
       };
+      this.log("Is order received page: ", this.isOrderConfirmationPage());
 
       // Rest of your function (view_item vs page_view handling)
       if (this.config.productData) {
