@@ -25,7 +25,7 @@
       this.setupEventListeners();
 
       // Log initialization
-      this.log("GA4 Server-Side Tagging initialized v8");
+      this.log("GA4 Server-Side Tagging initialized v9");
     },
 
     trackPageView: function () {
@@ -419,13 +419,7 @@
       }
 
       // Track purchase event on order received page
-      if (
-        self.config.isThankYouPage === true ||
-        window.location.href.indexOf("/checkout/order-received/") > -1 ||
-        window.location.href.indexOf("/inschrijven/order-received/") > -1 ||
-        window.location.href.indexOf("/order-pay/") > -1 ||
-        window.location.href.indexOf("/thank-you/") > -1
-      ) {
+      if (self.isOrderConfirmationPage()) {
         // Check if we have order data from the server
         if (
           typeof self.config.orderData !== "undefined" &&
@@ -785,6 +779,39 @@
           });
         },
       });
+    },
+    isOrderConfirmationPage: function () {
+      // Check URL patterns (your existing approach)
+      const isUrlMatch =
+        window.location.href.indexOf("/checkout/order-received/") > -1 ||
+        window.location.href.indexOf("/inschrijven/order-received/") > -1 ||
+        window.location.href.indexOf("/order-pay/") > -1 ||
+        window.location.href.indexOf("/thank-you/") > -1;
+
+      // Check for WooCommerce body class
+      const hasWooClass =
+        document.body.classList.contains("woocommerce-order-received") ||
+        (document.body.classList.contains("woocommerce-checkout") &&
+          document.querySelector(".woocommerce-order-overview"));
+
+      // Check for order ID in URL parameters
+      const urlParams = new URLSearchParams(window.location.search);
+      const hasOrderParam = urlParams.has("order") || urlParams.has("order_id");
+
+      // Check for thank you page elements
+      const hasThankYouElements =
+        document.querySelector(".woocommerce-thankyou-order-details") !==
+          null ||
+        document.querySelector(".woocommerce-order-received") !== null ||
+        document.querySelector(".woocommerce-notice--success") !== null;
+
+      return (
+        isUrlMatch ||
+        hasWooClass ||
+        hasOrderParam ||
+        hasThankYouElements ||
+        this.config.isThankYouPage === true
+      );
     },
     getSession: function () {
       var sessionId = localStorage.getItem("server_side_ga4_session_id");
