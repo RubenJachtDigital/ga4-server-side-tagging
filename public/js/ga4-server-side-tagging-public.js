@@ -25,7 +25,7 @@
       this.setupEventListeners();
 
       // Log initialization
-      this.log("GA4 Server-Side Tagging initialized v9");
+      this.log("GA4 Server-Side Tagging initialized v1");
     },
 
     trackPageView: function () {
@@ -781,6 +781,9 @@
       });
     },
     isOrderConfirmationPage: function () {
+      if (this.config.isThankYouPage === true) {
+        return true;
+      }
       // Check URL patterns (your existing approach)
       const isUrlMatch =
         window.location.href.indexOf("/checkout/order-received/") > -1 ||
@@ -805,13 +808,7 @@
         document.querySelector(".woocommerce-order-received") !== null ||
         document.querySelector(".woocommerce-notice--success") !== null;
 
-      return (
-        isUrlMatch ||
-        hasWooClass ||
-        hasOrderParam ||
-        hasThankYouElements ||
-        this.config.isThankYouPage === true
-      );
+      return isUrlMatch || hasWooClass || hasOrderParam || hasThankYouElements;
     },
     getSession: function () {
       var sessionId = localStorage.getItem("server_side_ga4_session_id");
