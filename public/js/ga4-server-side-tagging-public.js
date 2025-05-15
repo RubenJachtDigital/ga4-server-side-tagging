@@ -27,7 +27,7 @@
       this.setupEventListeners();
 
       // Log initialization
-      this.log("GA4 Server-Side Tagging initialized v6");
+      this.log("GA4 Server-Side Tagging initialized v7");
     },
 
     trackPageView: function () {
@@ -53,35 +53,56 @@
       var utmSource = this.getUtmSource();
       var utmMedium = this.getUtmMedium();
       var utmCampaign = this.getUtmCampaign();
+      var utmContent = this.getUtmContent();
+      var utmTerm = this.getUtmTerm();
 
       // Determine source and medium according to GA4 rules
       var source = utmSource || "";
       var medium = utmMedium || "";
       var campaign = utmCampaign || "(not set)";
+      var content = utmContent || "";
+      var term = utmTerm || "";
 
       // If no UTM parameters but we have a referrer, determine source/medium
-      if (!source && referrerDomain) {
+      if (!source && !medium && referrerDomain) {
         // Handle search engines - this is critical for organic search attribution
         if (referrerDomain.indexOf("google") > -1) {
-          // Google organic search
-          source = "google";
+          // Check if it's Google Ads or organic
+          if (referrer.indexOf("gclid=") > -1) {
+            source = "google";
+            medium = "cpc";
+          } else {
+            // Google organic search
+            source = "google";
+            medium = "organic";
+          }
+        } else if (referrerDomain.indexOf("bing") > -1) {
+          source = "bing";
+          medium = "organic";
+        } else if (referrerDomain.indexOf("yahoo") > -1) {
+          source = "yahoo";
           medium = "organic";
         } else if (
-          referrerDomain.indexOf("bing") > -1 ||
-          referrerDomain.indexOf("yahoo") > -1
+          referrerDomain.indexOf("facebook.com") > -1 ||
+          referrerDomain.indexOf("instagram.com") > -1
         ) {
-          // Other common search engines
-          source = referrerDomain;
-          medium = "organic";
-        } else {
-          // Regular referral
+          // Social referrals
+          source = referrerDomain.replace("www.", "").split(".")[0];
+          medium = "social";
+        } else if (
+          referrerDomain !== window.location.hostname &&
+          referrerDomain !== ""
+        ) {
+          // Regular referral - ensure it's not from the same domain
           source = referrerDomain;
           medium = "referral";
         }
-      } else if (!source) {
-        // No UTM and no referrer means direct traffic
+      }
+
+      // No UTM and no referrer means direct traffic
+      if (!source && !medium) {
         source = "(direct)";
-        medium = "(none)";
+        medium = "none"; // Changed from "(none)" to "none" to match GA4's expected format
       }
 
       // Common session parameters needed for all page view events
@@ -109,10 +130,14 @@
           ? window.screen.width + "x" + window.screen.height
           : "",
 
-        // Traffic attribution parameters - IMPORTANT FOR ORGANIC SEARCH
+        // Traffic attribution parameters
         source: source,
         medium: medium,
         campaign: campaign,
+
+        // Add content and term parameters if available
+        ...(content && { content: content }),
+        ...(term && { term: term }),
 
         // Page information
         page_title: document.title,
@@ -123,6 +148,8 @@
         // Event timestamp
         event_timestamp: Math.floor(Date.now() / 1000),
       };
+
+      this.log("Page view params:", sessionParams);
       this.log("Is order received page: " + this.isOrderConfirmationPage());
 
       // Rest of your function (view_item vs page_view handling)
@@ -665,12 +692,26 @@
       return this.getParameterByName("utm_campaign");
     },
 
-    getParameterByName: function (name) {
-      var match = RegExp("[?&]" + name + "=([^&]*)").exec(
-        window.location.search
-      );
-      return match && decodeURIComponent(match[1].replace(/\+/g, " "));
+    // Add these new functions for content and term
+    getUtmContent: function () {
+      return this.getParameterByName("utm_content");
     },
+
+    getUtmTerm: function () {
+      return this.getParameterByName("utm_term");
+    },
+
+    // Helper function to get URL parameters (if you don't already have this)
+    getParameterByName: function (name, url) {
+      if (!url) url = window.location.href;
+      name = name.replace(/[\[\]]/g, "\\$&");
+      var regex = new RegExp("[?&]" + name + "(=([^&#]*)|&|#|$)"),
+        results = regex.exec(url);
+      if (!results) return null;
+      if (!results[2]) return "";
+      return decodeURIComponent(results[2].replace(/\+/g, " "));
+    },
+
     // Track an event
     trackEvent: function (eventName, eventParams = {}) {
       // Log the event
