@@ -460,12 +460,6 @@
           // Add attribution data to order data
           var orderData = self.config.orderData;
 
-          // Add source attribution parameters
-          orderData.source =
-            self.getUtmSource() || document.referrer || "(direct)";
-          orderData.medium = self.getUtmMedium() || "(none)";
-          orderData.campaign = self.getUtmCampaign() || "(not set)";
-
           self.log(
             "Order data found, tracking purchase event with attribution",
             orderData
@@ -493,18 +487,11 @@
               affiliation: self.config.siteName || "Website",
               value: orderTotal,
               currency: self.config.currency || "EUR",
-              // Add attribution data
-              source: self.getUtmSource() || document.referrer || "(direct)",
-              medium: self.getUtmMedium() || "(none)",
-              campaign: self.getUtmCampaign() || "(not set)",
             });
 
             self.log("Tracked minimal purchase event with attribution", {
               transaction_id: orderId,
               value: orderTotal,
-              source: self.getUtmSource() || document.referrer || "(direct)",
-              medium: self.getUtmMedium() || "(none)",
-              campaign: self.getUtmCampaign() || "(not set)",
             });
           } else {
             self.log("Could not extract order data from the page");
@@ -522,12 +509,7 @@
             // Add attribution data to quote data
             var quoteData = self.config.quoteData;
 
-            // Add source attribution parameters
-            quoteData.source =
-              self.getUtmSource() || document.referrer || "(direct)";
-            quoteData.medium = self.getUtmMedium() || "(none)";
-            quoteData.campaign = self.getUtmCampaign() || "(not set)";
-
+       
             self.log(
               "Quote data found, tracking purchase event with attribution",
               quoteData
@@ -554,18 +536,11 @@
                 transaction_id: orderId,
                 value: orderTotal,
                 currency: self.config.currency || "EUR",
-                // Add attribution data
-                source: self.getUtmSource() || document.referrer || "(direct)",
-                medium: self.getUtmMedium() || "(none)",
-                campaign: self.getUtmCampaign() || "(not set)",
               });
 
               self.log("Tracked minimal purchase event with attribution", {
                 transaction_id: orderId,
                 value: orderTotal,
-                source: self.getUtmSource() || document.referrer || "(direct)",
-                medium: self.getUtmMedium() || "(none)",
-                campaign: self.getUtmCampaign() || "(not set)",
               });
             } else {
               self.log("Could not extract order data from the page");
