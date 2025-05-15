@@ -27,7 +27,7 @@
       this.setupEventListeners();
 
       // Log initialization
-      this.log("GA4 Server-Side Tagging initialized v8");
+      this.log("GA4 Server-Side Tagging initialized v9");
     },
 
     trackPageView: function () {
