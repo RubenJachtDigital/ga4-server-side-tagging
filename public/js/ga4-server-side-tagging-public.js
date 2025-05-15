@@ -64,6 +64,9 @@
       var utmContent = this.getUtmContent();
       var utmTerm = this.getUtmTerm();
 
+      // Get Google Click ID (gclid) from URL
+      var gclid = this.getGclid();
+
       // Determine source and medium according to GA4 rules
       var source = utmSource || "";
       var medium = utmMedium || "";
@@ -76,7 +79,7 @@
         // Handle search engines - this is critical for organic search attribution
         if (referrerDomain.indexOf("google") > -1) {
           // Check if it's Google Ads or organic
-          if (referrer.indexOf("gclid=") > -1) {
+          if (referrer.indexOf("gclid=") > -1 || gclid) {
             source = "google";
             medium = "cpc";
           } else {
@@ -107,6 +110,12 @@
         }
       }
 
+      // If we have a gclid but no UTM source/medium was set, override with Google Ads attribution
+      if (gclid && !utmSource && !utmMedium) {
+        source = "google";
+        medium = "cpc";
+      }
+
       // No UTM and no referrer (or ignored referrer) means direct traffic
       if (!source && !medium) {
         // For direct traffic, check if we should use last non-direct attribution
@@ -121,6 +130,7 @@
             "(not set)";
           content = localStorage.getItem("server_side_ga4_last_content") || "";
           term = localStorage.getItem("server_side_ga4_last_term") || "";
+          gclid = localStorage.getItem("server_side_ga4_last_gclid") || "";
         } else {
           source = "(direct)";
           medium = "none";
@@ -128,7 +138,11 @@
       }
 
       // Store attribution data when it's available (for new sessions or when UTM params are present)
-      if ((isNewSession || utmSource || utmMedium) && source && medium) {
+      if (
+        (isNewSession || utmSource || utmMedium || gclid) &&
+        source &&
+        medium
+      ) {
         localStorage.setItem("server_side_ga4_last_source", source);
         localStorage.setItem("server_side_ga4_last_medium", medium);
         if (campaign)
@@ -136,6 +150,7 @@
         if (content)
           localStorage.setItem("server_side_ga4_last_content", content);
         if (term) localStorage.setItem("server_side_ga4_last_term", term);
+        if (gclid) localStorage.setItem("server_side_ga4_last_gclid", gclid);
       }
 
       // Common session parameters needed for all page view events
@@ -171,6 +186,9 @@
         // Add content and term parameters if available
         ...(content && { content: content }),
         ...(term && { term: term }),
+
+        // Add gclid parameter if available
+        ...(gclid && { gclid: gclid }),
 
         // Flag for internal navigation
         ignore_referrer: ignore_referrer,
@@ -739,13 +757,15 @@
       return this.getParameterByName("utm_campaign");
     },
 
-    // Add these new functions for content and term
     getUtmContent: function () {
       return this.getParameterByName("utm_content");
     },
 
     getUtmTerm: function () {
       return this.getParameterByName("utm_term");
+    },
+    getGclid: function () {
+      return this.getParameterByName("gclid");
     },
 
     // Helper function to get URL parameters (if you don't already have this)
