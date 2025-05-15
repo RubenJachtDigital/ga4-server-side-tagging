@@ -27,7 +27,7 @@
       this.setupEventListeners();
 
       // Log initialization
-      this.log("GA4 Server-Side Tagging initialized v7");
+      this.log("GA4 Server-Side Tagging initialized v8");
     },
 
     trackPageView: function () {
@@ -371,11 +371,13 @@
           .replace(/[^0-9,.]/g, "");
 
         if (productId && productName) {
-          self.trackEvent("view_item", {
-            item_id: productId,
-            item_name: productName,
-            price: parseFloat(productPrice),
-          });
+          if (self.config.useServerSide != true) {
+            self.trackEvent("view_item", {
+              item_id: productId,
+              item_name: productName,
+              price: parseFloat(productPrice),
+            });
+          }
         }
       }
 
