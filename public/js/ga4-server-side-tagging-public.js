@@ -27,13 +27,14 @@
       this.setupEventListeners();
 
       // Log initialization
-      this.log("GA4 Server-Side Tagging initialized v2");
+      this.log("GA4 Server-Side Tagging initialized v3");
     },
 
     // Main page view tracking function
     trackPageView: function () {
       // Get current session information
       var session = this.getSession();
+      var isNewSession = session.isNew; // Track if this is a new session
 
       // Get referrer information
       var referrer = document.referrer || "";
@@ -108,8 +109,33 @@
 
       // No UTM and no referrer (or ignored referrer) means direct traffic
       if (!source && !medium) {
-        source = "(direct)";
-        medium = "none"; // Changed from "(none)" to "none" to match GA4's expected format
+        // For direct traffic, check if we should use last non-direct attribution
+        if (!isNewSession) {
+          // For subsequent hits in an existing session, try to use stored attribution
+          source =
+            localStorage.getItem("server_side_ga4_last_source") || "(direct)";
+          medium =
+            localStorage.getItem("server_side_ga4_last_medium") || "none";
+          campaign =
+            localStorage.getItem("server_side_ga4_last_campaign") ||
+            "(not set)";
+          content = localStorage.getItem("server_side_ga4_last_content") || "";
+          term = localStorage.getItem("server_side_ga4_last_term") || "";
+        } else {
+          source = "(direct)";
+          medium = "none";
+        }
+      }
+
+      // Store attribution data when it's available (for new sessions or when UTM params are present)
+      if ((isNewSession || utmSource || utmMedium) && source && medium) {
+        localStorage.setItem("server_side_ga4_last_source", source);
+        localStorage.setItem("server_side_ga4_last_medium", medium);
+        if (campaign)
+          localStorage.setItem("server_side_ga4_last_campaign", campaign);
+        if (content)
+          localStorage.setItem("server_side_ga4_last_content", content);
+        if (term) localStorage.setItem("server_side_ga4_last_term", term);
       }
 
       // Common session parameters needed for all page view events
@@ -159,9 +185,15 @@
         event_timestamp: Math.floor(Date.now() / 1000),
       };
 
+      // Send session_start event if this is a new session
+      if (isNewSession) {
+        this.log("Sending session_start event");
+        this.trackEvent("session_start", sessionParams);
+      }
+
       this.log("Page view params:", sessionParams);
+      this.log("Is new session: " + isNewSession);
       this.log("Is order received page: " + this.isOrderConfirmationPage());
-      this.log("Ignore referrer: " + ignore_referrer);
 
       // Track appropriate event based on page type
       if (this.isProductListPage()) {
