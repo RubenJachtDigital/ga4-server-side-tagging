@@ -27,9 +27,10 @@
       this.setupEventListeners();
 
       // Log initialization
-      this.log("GA4 Server-Side Tagging initialized v9");
+      this.log("GA4 Server-Side Tagging initialized v2");
     },
 
+    // Main page view tracking function
     trackPageView: function () {
       // Get current session information
       var session = this.getSession();
@@ -38,12 +39,18 @@
       var referrer = document.referrer || "";
       var referrerURL = null;
       var referrerDomain = "";
+      var ignore_referrer = false;
 
       // Parse referrer if it exists
       if (referrer) {
         try {
           referrerURL = new URL(referrer);
           referrerDomain = referrerURL.hostname;
+
+          // Check if the referrer is from the same domain (internal link)
+          if (referrerDomain === window.location.hostname) {
+            ignore_referrer = true;
+          }
         } catch (e) {
           this.log("Invalid referrer URL:", referrer);
         }
@@ -64,7 +71,7 @@
       var term = utmTerm || "";
 
       // If no UTM parameters but we have a referrer, determine source/medium
-      if (!source && !medium && referrerDomain) {
+      if (!source && !medium && referrerDomain && !ignore_referrer) {
         // Handle search engines - this is critical for organic search attribution
         if (referrerDomain.indexOf("google") > -1) {
           // Check if it's Google Ads or organic
@@ -99,7 +106,7 @@
         }
       }
 
-      // No UTM and no referrer means direct traffic
+      // No UTM and no referrer (or ignored referrer) means direct traffic
       if (!source && !medium) {
         source = "(direct)";
         medium = "none"; // Changed from "(none)" to "none" to match GA4's expected format
@@ -139,10 +146,13 @@
         ...(content && { content: content }),
         ...(term && { term: term }),
 
+        // Flag for internal navigation
+        ignore_referrer: ignore_referrer,
+
         // Page information
         page_title: document.title,
         page_location: this.getPageLocationWithoutParams(window.location.href),
-        page_path: window.location.pathname,
+        page_path: this.getPageLocationWithoutParams(window.location.pathname),
         page_referrer: referrer,
 
         // Event timestamp
@@ -151,10 +161,36 @@
 
       this.log("Page view params:", sessionParams);
       this.log("Is order received page: " + this.isOrderConfirmationPage());
+      this.log("Ignore referrer: " + ignore_referrer);
 
-      // Rest of your function (view_item vs page_view handling)
-      if (this.config.productData) {
-        this.log(this.config.productData);
+      // Track appropriate event based on page type
+      if (this.isProductListPage()) {
+        // Product list page - track view_item_list instead of page_view
+        var productListData = this.getProductListItems();
+
+        if (productListData.items.length > 0) {
+          // Combine session parameters with item list data
+          var itemListData = {
+            ...sessionParams,
+            item_list_name: productListData.listName,
+            item_list_id: productListData.listId,
+            items: productListData.items,
+          };
+
+          this.trackEvent("view_item_list", itemListData);
+
+          // Setup click tracking for products
+          this.setupProductClickTracking(
+            productListData.listName,
+            productListData.listId,
+            sessionParams
+          );
+        } else {
+          // Fall back to page_view if no products found
+          this.trackEvent("page_view", sessionParams);
+        }
+      } else if (this.isProductPage()) {
+        // Single product page - track view_item
         var productData = this.config.productData;
 
         var viewItemData = {
@@ -166,6 +202,7 @@
 
         this.trackEvent("view_item", viewItemData);
       } else {
+        // Regular page - track page_view
         this.trackEvent("page_view", sessionParams);
       }
     },
@@ -509,7 +546,6 @@
             // Add attribution data to quote data
             var quoteData = self.config.quoteData;
 
-       
             self.log(
               "Quote data found, tracking purchase event with attribution",
               quoteData
@@ -591,46 +627,48 @@
         });
 
         if (items.length > 0) {
-          self.trackEvent("view_item_list", {
-            item_list_name: listName,
-            item_list_id: listId,
-            items: items,
-          });
+          if (self.config.useServerSide != true) {
+            self.trackEvent("view_item_list", {
+              item_list_name: listName,
+              item_list_id: listId,
+              items: items,
+            });
 
-          // Track product clicks for select_item events
-          $(".products .product a").on("click", function () {
-            var $product = $(this).closest(".product");
-            var index = $product.index() + 1;
-            var productId =
-              $product.find(".add_to_cart_button").data("product_id") || "";
-            var productName = $product
-              .find(".woocommerce-loop-product__title")
-              .text()
-              .trim();
+            // Track product clicks for select_item events
+            $(".products .product a").on("click", function () {
+              var $product = $(this).closest(".product");
+              var index = $product.index() + 1;
+              var productId =
+                $product.find(".add_to_cart_button").data("product_id") || "";
+              var productName = $product
+                .find(".woocommerce-loop-product__title")
+                .text()
+                .trim();
 
-            if (productId && productName) {
-              self.trackEvent("select_item", {
-                item_list_name: listName,
-                item_list_id: listId,
-                items: [
-                  {
-                    item_id: productId,
-                    item_name: productName,
-                    index: index,
-                    item_list_name: listName,
-                    item_list_id: listId,
-                  },
-                ],
-              });
+              if (productId && productName) {
+                self.trackEvent("select_item", {
+                  item_list_name: listName,
+                  item_list_id: listId,
+                  items: [
+                    {
+                      item_id: productId,
+                      item_name: productName,
+                      index: index,
+                      item_list_name: listName,
+                      item_list_id: listId,
+                    },
+                  ],
+                });
 
-              self.log("Tracked select_item event", {
-                item_id: productId,
-                item_name: productName,
-                index: index,
-                item_list_name: listName,
-              });
-            }
-          });
+                self.log("Tracked select_item event", {
+                  item_id: productId,
+                  item_name: productName,
+                  index: index,
+                  item_list_name: listName,
+                });
+              }
+            });
+          }
         }
       }
     },
@@ -907,6 +945,106 @@
     generateUniqueId: function () {
       return Date.now().toString();
     },
+
+    // Check if we're on a product list page
+    isProductListPage: function () {
+      return (
+        $(".woocommerce .products").length &&
+        !$(".woocommerce-product-gallery").length
+      );
+    },
+
+    // Check if we're on a single product page
+    isProductPage: function () {
+      return this.config.productData ? true : false;
+    },
+
+    // Get product list items
+    getProductListItems: function () {
+      var listName = "Product List";
+      var listId = "";
+      var items = [];
+
+      // Try to determine the list type
+      if ($(".woocommerce-products-header__title").length) {
+        listName = $(".woocommerce-products-header__title").text().trim();
+      } else if ($(".page-title").length) {
+        listName = $(".page-title").text().trim();
+      }
+
+      // Get products in the list
+      $(".products .product").each(function (index) {
+        var $product = $(this);
+        var productId =
+          $product.find(".add_to_cart_button").data("product_id") || "";
+        var productName = $product
+          .find(".woocommerce-loop-product__title")
+          .text()
+          .trim();
+        var productPrice = $product
+          .find(".price .amount")
+          .text()
+          .replace(/[^0-9,.]/g, "");
+
+        if (productId && productName) {
+          items.push({
+            item_id: productId,
+            item_name: productName,
+            price: parseFloat(productPrice),
+            index: index + 1,
+            item_list_name: listName,
+            item_list_id: listId,
+          });
+        }
+      });
+
+      return {
+        listName: listName,
+        listId: listId,
+        items: items,
+      };
+    },
+
+    // Setup click tracking for products in a list
+    setupProductClickTracking: function (listName, listId, sessionParams) {
+      $(".products .product a").on("click", function () {
+        var $product = $(this).closest(".product");
+        var index = $product.index() + 1;
+        var productId =
+          $product.find(".add_to_cart_button").data("product_id") || "";
+        var productName = $product
+          .find(".woocommerce-loop-product__title")
+          .text()
+          .trim();
+
+        if (productId && productName) {
+          var selectItemData = {
+            ...sessionParams,
+            item_list_name: listName,
+            item_list_id: listId,
+            items: [
+              {
+                item_id: productId,
+                item_name: productName,
+                index: index,
+                item_list_name: listName,
+                item_list_id: listId,
+              },
+            ],
+          };
+
+          this.trackEvent("select_item", selectItemData);
+
+          this.log("Tracked select_item event", {
+            item_id: productId,
+            item_name: productName,
+            index: index,
+            item_list_name: listName,
+          });
+        }
+      });
+    },
+
     // Get client ID from cookie
     getClientId: function () {
       // Try to get client ID from _ga cookie
