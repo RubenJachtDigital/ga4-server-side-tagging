@@ -194,20 +194,7 @@ class GA4_Server_Side_Tagging_Public
                 gtag('config', '<?php echo esc_js($measurement_id); ?>');
             <?php endif; ?>
 
-            <?php if ($use_server_side && !empty($cloudflare_worker_url)) : ?>
-                // Configure server-side endpoint
-                gtag('config', '<?php echo esc_js($measurement_id); ?>', {
-                    'transport_url': '<?php echo esc_js($cloudflare_worker_url); ?>',
-                    'first_party_collection': true,
-                    'send_page_view': false, // This prevents automatic page view tracking
-                });
-
-                <?php
-                $this->logger->info('Uses Server-Side Tracking');
-                ?>
-            <?php endif; ?>
-
-            <?php if (is_user_logged_in() && !$use_server_side) : ?>
+            <?php if (is_user_logged_in()) : ?>
                 // Set user ID for logged-in users
                 gtag('set', 'user_id', '<?php echo esc_js(get_current_user_id()); ?>');
             <?php endif; ?>

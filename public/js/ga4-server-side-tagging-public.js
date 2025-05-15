@@ -18,14 +18,15 @@
         this.log("Measurement ID not configured");
         return;
       }
-
-      this.trackPageView();
+      if (this.config.useServerSide === true) {
+        this.trackPageView();
+      }
 
       // Set up event listeners
       this.setupEventListeners();
 
       // Log initialization
-      this.log("GA4 Server-Side Tagging initialized v4");
+      this.log("GA4 Server-Side Tagging initialized v5");
     },
 
     trackPageView: function () {
