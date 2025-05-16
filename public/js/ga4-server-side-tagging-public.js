@@ -27,7 +27,7 @@
       this.setupEventListeners();
 
       // Log initialization
-      this.log("GA4 Server-Side Tagging initialized v4");
+      this.log("GA4 Server-Side Tagging initialized v5");
     },
 
     // Main page view tracking function
@@ -165,6 +165,9 @@
         session_engaged: true,
         engaged_session_event: true,
 
+        // Session start flag - include when it's a new session instead of a separate event
+        ...(isNewSession && { session_start: 1 }),
+
         // First visit indicators for new users
         first_visit: session.isFirstVisit ? 1 : 0,
         new_visitor: session.sessionCount === 1 ? 1 : 0,
@@ -203,12 +206,7 @@
         event_timestamp: Math.floor(Date.now() / 1000),
       };
 
-      // Send session_start event if this is a new session
-      if (isNewSession) {
-        this.log("Sending session_start event");
-        this.trackEvent("session_start", sessionParams);
-      }
-
+      // Log session information - removed session_start event
       this.log("Page view params:", sessionParams);
       this.log("Is new session: " + isNewSession);
       this.log("Is order received page: " + this.isOrderConfirmationPage());
