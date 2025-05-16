@@ -816,7 +816,6 @@
 
     // Send server-side event
     sendServerSideEvent: function (eventName, eventParams) {
-      var self = this;
 
       // Create a copy of the event params to avoid modifying the original
       var params = JSON.parse(JSON.stringify(eventParams));
