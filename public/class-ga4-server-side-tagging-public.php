@@ -161,7 +161,7 @@ class GA4_Server_Side_Tagging_Public
             return;
         }
 
-        if ($use_server_side !== true) {
+        if ($use_server_side == true) {
             return;
         }
 
