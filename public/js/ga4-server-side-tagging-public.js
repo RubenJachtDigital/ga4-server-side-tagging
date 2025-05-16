@@ -27,7 +27,7 @@
       this.setupEventListeners();
 
       // Log initialization
-      this.log("GA4 Server-Side Tagging initialized v5");
+      this.log("GA4 Server-Side Tagging initialized v7");
     },
 
     // Main page view tracking function
@@ -273,30 +273,35 @@
           });
         }
       );
+      var trackForms =
+        "form:not(.cart, .woocommerce-cart-form, .checkout, .woocommerce-checkout)";
+      if (
+        typeof self.config.quoteData !== "undefined" &&
+        self.config.quoteData
+      ) {
+        trackForms =
+          "form:not(.cart, .woocommerce-cart-form, .checkout, .woocommerce-checkout, #gform_3)";
+      }
 
       // Track form submissions (excluding WooCommerce forms)
-      $(document).on(
-        "submit",
-        "form:not(.cart, .woocommerce-cart-form, .checkout, .woocommerce-checkout, #gform_3)",
-        function () {
-          // Skip tracking form submissions that are WooCommerce add to cart forms
-          if (
-            $(this).hasClass("cart") ||
-            $(this).find(".add_to_cart_button").length ||
-            $(this).find('button[name="add-to-cart"]').length
-          ) {
-            return;
-          }
-
-          var formId = $(this).attr("id") || "unknown";
-          var formAction = $(this).attr("action") || "unknown";
-
-          self.trackEvent("form_submit", {
-            form_id: formId,
-            form_action: formAction,
-          });
+      $(document).on("submit", trackForms, function () {
+        // Skip tracking form submissions that are WooCommerce add to cart forms
+        if (
+          $(this).hasClass("cart") ||
+          $(this).find(".add_to_cart_button").length ||
+          $(this).find('button[name="add-to-cart"]').length
+        ) {
+          return;
         }
-      );
+
+        var formId = $(this).attr("id") || "unknown";
+        var formAction = $(this).attr("action") || "unknown";
+
+        self.trackEvent("form_submit", {
+          form_id: formId,
+          form_action: formAction,
+        });
+      });
 
       // Track WooCommerce specific events if enabled
       if (this.config.isEcommerceEnabled) {
