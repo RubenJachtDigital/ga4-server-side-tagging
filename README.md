@@ -85,14 +85,8 @@ if (typeof GA4ServerSideTagging !== 'undefined') {
 If you want to use server-side tracking only (no client-side tracking):
 
 1. Keep the GA4 Measurement ID and API Secret in the plugin settings
-2. Add the following code to your theme's functions.php file:
-
-```php
-add_action('wp_head', function() {
-    // Remove default GA4 tracking code
-    remove_action('wp_head', array(GA4_Server_Side_Tagging_Public::instance(), 'add_ga4_tracking_code'));
-}, 5);
-```
+2. Add a Cloudflare Worker URL
+3. Enable the "server-side tagging" option
 
 ## Support
 
