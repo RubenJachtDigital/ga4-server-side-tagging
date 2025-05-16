@@ -51,7 +51,6 @@ class GA4_Server_Side_Tagging
         $this->load_dependencies();
         $this->define_admin_hooks();
         $this->define_public_hooks();
-        $this->define_woocommerce_hooks();
     }
 
 
@@ -119,37 +118,6 @@ class GA4_Server_Side_Tagging
         $plugin_endpoint = new GA4_Server_Side_Tagging_Endpoint($this->logger);
         $this->loader->add_action('rest_api_init', $plugin_endpoint, 'register_routes');
     }
-
-    /**
-     * Register all of the hooks related to WooCommerce integration.
-     *
-     * @since    1.0.0
-     * @access   private
-     */
-    private function define_woocommerce_hooks()
-    {
-        if (!class_exists('WooCommerce')) {
-            return;
-        }
-
-        $plugin_woocommerce = new GA4_Server_Side_Tagging_WooCommerce($this->logger);
-
-        // Register additional hooks
-        $plugin_woocommerce->register_hooks();
-
-        // Track product views
-        $this->loader->add_action('woocommerce_single_product_summary', $plugin_woocommerce, 'track_product_view', 5);
-
-        // Track add to cart events
-        $this->loader->add_action('woocommerce_add_to_cart', $plugin_woocommerce, 'track_add_to_cart', 20, 6);
-
-        // Track checkout steps
-        $this->loader->add_action('woocommerce_before_checkout_form', $plugin_woocommerce, 'track_checkout_step', 10);
-
-        // Track purchases
-        $this->loader->add_action('woocommerce_thankyou', $plugin_woocommerce, 'track_purchase', 10, 1);
-    }
-
 
 
     /**

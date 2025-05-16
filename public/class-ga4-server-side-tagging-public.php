@@ -7,7 +7,7 @@
  * @package    GA4_Server_Side_Tagging
  */
 
-if (! defined('WPINC')) {
+if (!defined('WPINC')) {
     die;
 }
 
@@ -72,7 +72,7 @@ class GA4_Server_Side_Tagging_Public
         }
 
         // Check if we should track logged-in users
-        if (is_user_logged_in() && ! get_option('ga4_track_logged_in_users', true)) {
+        if (is_user_logged_in() && !get_option('ga4_track_logged_in_users', true)) {
             return;
         }
 
@@ -95,7 +95,7 @@ class GA4_Server_Side_Tagging_Public
             'nonce' => wp_create_nonce('wp_rest'),
             'isEcommerceEnabled' => get_option('ga4_ecommerce_tracking', true),
             'cloudflareWorkerUrl' => get_option('ga4_cloudflare_worker_url', ''),
-            'currency' => get_woocommerce_currency(),
+            'currency' => function_exists('get_woocommerce_currency') ? get_woocommerce_currency() : 'EUR',
             'siteName' => get_bloginfo('name'),
         );
         // Add product data if we're on a product page
@@ -116,8 +116,7 @@ class GA4_Server_Side_Tagging_Public
         }
         if (function_exists('is_wc_endpoint_url') && is_wc_endpoint_url('order-received')) {
             $script_data['isThankYouPage'] = true;
-        }
-        else {
+        } else {
             $script_data['isThankYouPage'] = false;
         }
 
@@ -158,10 +157,10 @@ class GA4_Server_Side_Tagging_Public
         }
 
         // Check if we should track logged-in users
-        if (is_user_logged_in() && ! get_option('ga4_track_logged_in_users', true)) {
+        if (is_user_logged_in() && !get_option('ga4_track_logged_in_users', true)) {
             return;
         }
-        
+
         if ($use_server_side !== true) {
             return;
         }
@@ -171,7 +170,7 @@ class GA4_Server_Side_Tagging_Public
         $this->logger->info('Page view: ' . get_the_title() . ' (' . get_permalink() . ')');
 
         // Output the GA4 tracking code
-?>
+        ?>
         <!-- GA4 Server-Side Tagging -->
         <script async src="https://www.googletagmanager.com/gtag/js?id=<?php echo esc_attr($measurement_id); ?>"></script>
 
@@ -182,11 +181,11 @@ class GA4_Server_Side_Tagging_Public
                 dataLayer.push(arguments);
             }
             gtag('js', new Date());
-            <?php if ($anonymize_ip) : ?>
+            <?php if ($anonymize_ip): ?>
                 gtag('set', 'anonymize_ip', true);
             <?php endif; ?>
 
-            <?php if ($debug_mode) : ?>
+            <?php if ($debug_mode): ?>
                 gtag('config', '<?php echo esc_js($measurement_id); ?>', {
                     'debug_mode': true
                 });
@@ -194,13 +193,13 @@ class GA4_Server_Side_Tagging_Public
                 gtag('config', '<?php echo esc_js($measurement_id); ?>');
             <?php endif; ?>
 
-            <?php if (is_user_logged_in()) : ?>
+            <?php if (is_user_logged_in()): ?>
                 // Set user ID for logged-in users
                 gtag('set', 'user_id', '<?php echo esc_js(get_current_user_id()); ?>');
             <?php endif; ?>
         </script>
         <!-- End GA4 Server-Side Tagging -->
-<?php
+        <?php
     }
 
     /**
@@ -218,7 +217,7 @@ class GA4_Server_Side_Tagging_Public
         $items = array();
         foreach ($order->get_items() as $item) {
             $product = $item->get_product();
-            if (! $product) {
+            if (!$product) {
                 continue;
             }
 
@@ -242,7 +241,7 @@ class GA4_Server_Side_Tagging_Public
                         $categories[] = $term->name;
                     }
                 }
-                if (! empty($categories)) {
+                if (!empty($categories)) {
                     $product_data['item_category'] = $categories[0];
 
                     // Add additional categories if available
@@ -276,7 +275,7 @@ class GA4_Server_Side_Tagging_Public
 
         // Add shipping tier
         $shipping_methods = $order->get_shipping_methods();
-        if (! empty($shipping_methods)) {
+        if (!empty($shipping_methods)) {
             $shipping_method = reset($shipping_methods);
             $order_data['shipping_tier'] = $shipping_method->get_method_title();
         }
@@ -313,7 +312,7 @@ class GA4_Server_Side_Tagging_Public
                 $parent_id = wp_get_post_parent_id($variation_id);
                 $results[] = [
                     'variation_id' => $variation_id,
-                    'parent_id'    => $parent_id ? $parent_id : $variation_id,
+                    'parent_id' => $parent_id ? $parent_id : $variation_id,
                 ];
             }
             return $results;
@@ -373,7 +372,7 @@ class GA4_Server_Side_Tagging_Public
                         $categories[] = $term->name;
                     }
                 }
-                if (! empty($categories)) {
+                if (!empty($categories)) {
                     $product_data['item_category'] = $categories[0];
 
                     // Add additional categories if available
