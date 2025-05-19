@@ -27,14 +27,181 @@
       this.setupEventListeners();
 
       // Log initialization
-      this.log("GA4 Server-Side Tagging initialized v7");
+      this.log("GA4 Server-Side Tagging initialized v9");
     },
 
-    // Main page view tracking function
+    // Method to parse user agent and extract device/browser information
+    parseUserAgent: function () {
+      var userAgent = navigator.userAgent;
+      var clientHints = this.getClientHints();
+
+      // Initialize the result object
+      var parsedUA = {
+        browser_name: "",
+        os_name: "",
+        device_type: "",
+        user_agent: userAgent,
+        is_mobile: false,
+      };
+
+      // Use Client Hints API if available (more reliable than user agent parsing)
+      if (clientHints) {
+        parsedUA.browser_name = clientHints.brands?.[0]?.brand || "";
+        parsedUA.os_name = clientHints.platform || "";
+        parsedUA.is_mobile = clientHints.mobile || false;
+      }
+
+      // Parse browser information from user agent
+      if (!parsedUA.browser_name) {
+        // Chrome/Chromium (including Edge, Opera, Brave, etc.)
+        if (userAgent.indexOf("Chrome") > -1) {
+          if (userAgent.indexOf("Edg") > -1) {
+            parsedUA.browser_name = "Microsoft Edge";
+          } else if (
+            userAgent.indexOf("OPR") > -1 ||
+            userAgent.indexOf("Opera") > -1
+          ) {
+            parsedUA.browser_name = "Opera";
+          } else if (userAgent.indexOf("YaBrowser") > -1) {
+            parsedUA.browser_name = "Yandex Browser";
+          } else if (userAgent.indexOf("Brave") > -1) {
+            parsedUA.browser_name = "Brave";
+          } else {
+            parsedUA.browser_name = "Chrome";
+          }
+        }
+        // Firefox
+        else if (userAgent.indexOf("Firefox") > -1) {
+          parsedUA.browser_name = "Firefox";
+        }
+        // Safari (not Chrome-based)
+        else if (
+          userAgent.indexOf("Safari") > -1 &&
+          userAgent.indexOf("Chrome") === -1
+        ) {
+          parsedUA.browser_name = "Safari";
+        }
+        // Internet Explorer
+        else if (
+          userAgent.indexOf("Trident") > -1 ||
+          userAgent.indexOf("MSIE") > -1
+        ) {
+          parsedUA.browser_name = "Internet Explorer";
+        }
+        // Samsung Internet
+        else if (userAgent.indexOf("SamsungBrowser") > -1) {
+          parsedUA.browser_name = "Samsung Internet";
+        }
+        // UC Browser
+        else if (userAgent.indexOf("UCBrowser") > -1) {
+          parsedUA.browser_name = "UC Browser";
+        }
+        // Generic fallback
+        else {
+          parsedUA.browser_name = "Unknown";
+        }
+      }
+
+      // Parse operating system information
+      if (!parsedUA.os_name) {
+        if (userAgent.indexOf("Windows NT") > -1) {
+          parsedUA.os_name = "Windows";
+        } else if (
+          userAgent.indexOf("Mac OS X") > -1 ||
+          userAgent.indexOf("macOS") > -1
+        ) {
+          parsedUA.os_name = "macOS";
+        } else if (userAgent.indexOf("Linux") > -1) {
+          if (userAgent.indexOf("Android") > -1) {
+            parsedUA.os_name = "Android";
+          } else {
+            parsedUA.os_name = "Linux";
+          }
+        } else if (
+          userAgent.indexOf("iPhone") > -1 ||
+          userAgent.indexOf("iPad") > -1
+        ) {
+          parsedUA.os_name = "iOS";
+        } else if (userAgent.indexOf("CrOS") > -1) {
+          parsedUA.os_name = "Chrome OS";
+        } else {
+          parsedUA.os_name = "Unknown";
+        }
+      }
+
+      // Determine device type
+      if (!parsedUA.is_mobile && !parsedUA.device_type) {
+        // Check for mobile devices
+        if (
+          userAgent.indexOf("Mobile") > -1 ||
+          userAgent.indexOf("Android") > -1
+        ) {
+          parsedUA.is_mobile = true;
+          parsedUA.device_type = "mobile";
+
+          // Handle iPad separately as it doesn't have 'Mobile' in UA
+          if (userAgent.indexOf("iPad") > -1) {
+            parsedUA.is_mobile = false;
+            parsedUA.device_type = "tablet";
+          }
+        }
+        // Check for tablets (non-iPad Android tablets)
+        else if (
+          userAgent.indexOf("Tablet") > -1 ||
+          (userAgent.indexOf("Android") > -1 &&
+            userAgent.indexOf("Mobile") === -1)
+        ) {
+          parsedUA.device_type = "tablet";
+        }
+        // Desktop/laptop
+        else {
+          parsedUA.device_type = "desktop";
+        }
+      }
+
+      return parsedUA;
+    },
+
+    // Method to get User Agent Client Hints (modern approach)
+    getClientHints: function () {
+      // Check if User Agent Client Hints API is available
+      if (navigator.userAgentData) {
+        try {
+          return {
+            brands: navigator.userAgentData.brands,
+            mobile: navigator.userAgentData.mobile,
+            platform: navigator.userAgentData.platform,
+          };
+        } catch (e) {
+          this.log("Error accessing User Agent Client Hints:", e);
+          return null;
+        }
+      }
+      return null;
+    },
+
+    // Method to calculate engagement time
+    calculateEngagementTime: function () {
+      // Get stored page start time or use current time as fallback
+      var startTime = this.pageStartTime || Date.now();
+      var currentTime = Date.now();
+      var engagementTime = currentTime - startTime;
+
+      // Ensure minimum engagement time of 1000ms for GA4 compatibility
+      // and maximum of 30 minutes (1800000ms) to prevent unrealistic values
+      return Math.max(1000, Math.min(engagementTime, 1800000));
+    },
+
     trackPageView: function () {
+      // Track page start time for engagement calculation
+      this.pageStartTime = Date.now();
+
       // Get current session information
       var session = this.getSession();
       var isNewSession = session.isNew; // Track if this is a new session
+
+      // Get user agent and device information
+      var userAgentInfo = this.parseUserAgent();
 
       // Get referrer information
       var referrer = document.referrer || "";
@@ -153,60 +320,248 @@
         if (gclid) localStorage.setItem("server_side_ga4_last_gclid", gclid);
       }
 
-      // Common session parameters needed for all page view events
+      // Common session parameters needed for all page view events (limited to 25 params max)
       var sessionParams = {
-        // Session identification
+        // Core identification (required)
         session_id: session.id,
-
-        // Critical for GA4 real-time reporting
-        engagement_time_msec: 1000,
-
-        // Session state flags
-        session_engaged: true,
-        engaged_session_event: true,
-
-        // Session start flag - include when it's a new session instead of a separate event
-        ...(isNewSession && { session_start: 1 }),
-
-        // First visit indicators for new users
-        first_visit: session.isFirstVisit ? 1 : 0,
-        new_visitor: session.sessionCount === 1 ? 1 : 0,
-
-        // Client information
         client_id: this.getClientId(),
 
-        // Device information
-        language: navigator.language || "",
-        screen_resolution: window.screen
-          ? window.screen.width + "x" + window.screen.height
-          : "",
+        // Critical for GA4 real-time reporting (calculate actual engagement time)
+        engagement_time_msec: this.calculateEngagementTime(),
 
-        // Traffic attribution parameters
+        // Session flags
+        ...(isNewSession && { session_start: 1 }),
+        first_visit: session.isFirstVisit ? 1 : 0,
+
+        // Device and browser (most important UA info)
+        browser_name: userAgentInfo.browser_name,
+        os_name: userAgentInfo.os_name,
+        device_type: userAgentInfo.device_type,
+        is_mobile: userAgentInfo.is_mobile,
+
+        // Language
+        language: navigator.language || "",
+
+        // Traffic attribution (required for marketing)
         source: source,
         medium: medium,
         campaign: campaign,
 
-        // Add content and term parameters if available
+        // Add UTM content/term only if present to save param slots
         ...(content && { content: content }),
         ...(term && { term: term }),
-
-        // Add gclid parameter if available
         ...(gclid && { gclid: gclid }),
 
-        // Flag for internal navigation
-        ignore_referrer: ignore_referrer,
-
-        // Page information
+        // Page information (essential)
         page_title: document.title,
         page_location: this.getPageLocationWithoutParams(window.location.href),
-        page_path: this.getPageLocationWithoutParams(window.location.pathname),
         page_referrer: referrer,
 
-        // Event timestamp
+        // Shortened user agent (max 100 chars)
+        user_agent: userAgentInfo.user_agent
+          ? userAgentInfo.user_agent.substring(0, 100)
+          : "",
+
+        // Timestamp
         event_timestamp: Math.floor(Date.now() / 1000),
       };
 
-      // Log session information - removed session_start event
+      // Try to get user location information
+      this.getUserLocation()
+        .then((locationData) => {
+          // Add location data to session parameters
+          if (locationData) {
+            sessionParams.geo_latitude = locationData.latitude;
+            sessionParams.geo_longitude = locationData.longitude;
+
+            // Add any additional location information if available
+            if (locationData.city) sessionParams.geo_city = locationData.city;
+            if (locationData.country)
+              sessionParams.geo_country = locationData.country;
+            if (locationData.region)
+              sessionParams.geo_region = locationData.region;
+          }
+
+          this.completePageViewTracking(sessionParams, isNewSession);
+        })
+        .catch((error) => {
+          // Continue with tracking even if location fetching fails
+          this.log("Location tracking error:", error);
+          this.completePageViewTracking(sessionParams, isNewSession);
+        });
+    },
+
+    // Method to get user location (IP-based only to avoid permission prompts)
+    getUserLocation: function () {
+      return new Promise((resolve, reject) => {
+        // First check if we have cached location data to avoid multiple requests
+        const cachedLocation = sessionStorage.getItem("user_location_data");
+        if (cachedLocation) {
+          try {
+            resolve(JSON.parse(cachedLocation));
+            return;
+          } catch (e) {
+            this.log("Error parsing cached location data");
+            // Continue to fetch fresh data if cache parsing fails
+          }
+        }
+
+        // Use IP-based geolocation exclusively (no permission prompt)
+        this.getIPBasedLocation()
+          .then((ipLocationData) => {
+            // Cache the location data for future use (1 hour)
+            sessionStorage.setItem(
+              "user_location_data",
+              JSON.stringify(ipLocationData)
+            );
+            resolve(ipLocationData);
+          })
+          .catch((err) => {
+            this.log("IP location error:", err);
+            // Return empty location data rather than rejecting
+            resolve({});
+          });
+      });
+    },
+
+    // Method to enhance location data with city/country info using reverse geocoding
+    enhanceLocationData: function (basicLocationData) {
+      return new Promise((resolve, reject) => {
+        // Use OpenStreetMap's Nominatim service for reverse geocoding
+        // This is a free and open service, but should be used with respect to their usage policy
+        const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${basicLocationData.latitude}&lon=${basicLocationData.longitude}&zoom=10`;
+
+        fetch(url, {
+          headers: {
+            // Add a user agent identifying your application as recommended by Nominatim
+            "User-Agent": "WebsiteAnalyticsTracker/1.0",
+          },
+        })
+          .then((response) => {
+            if (!response.ok) throw new Error("Geocoding request failed");
+            return response.json();
+          })
+          .then((data) => {
+            // Extract location data from Nominatim response
+            const address = data.address || {};
+
+            const enhanced = {
+              ...basicLocationData,
+              city:
+                address.city ||
+                address.town ||
+                address.village ||
+                address.hamlet ||
+                "",
+              region: address.state || address.county || "",
+              country: address.country || "",
+            };
+
+            this.log("Enhanced location data obtained", enhanced);
+            resolve(enhanced);
+          })
+          .catch((error) => {
+            this.log("Geocoding error:", error);
+            resolve(basicLocationData); // Fall back to basic data on error
+          });
+      });
+    },
+
+    // Method to get location based on IP address
+    getIPBasedLocation: function () {
+      return new Promise((resolve, reject) => {
+        // Try multiple IP geolocation services for redundancy
+        // Starting with ipapi.co
+        fetch("https://ipapi.co/json/")
+          .then((response) => {
+            if (!response.ok) throw new Error("ipapi.co lookup failed");
+            return response.json();
+          })
+          .then((data) => {
+            const locationData = {
+              latitude: parseFloat(data.latitude),
+              longitude: parseFloat(data.longitude),
+              city: data.city || "",
+              region: data.region || "",
+              country: data.country_name || "",
+            };
+            this.log("Location obtained from ipapi.co", locationData);
+            resolve(locationData);
+          })
+          .catch((error) => {
+            // If first service fails, try ipinfo.io as fallback
+            this.log(
+              "First IP location service failed, trying fallback",
+              error
+            );
+
+            // Note: In production, you would need an API token for ipinfo.io
+            fetch("https://ipinfo.io/json")
+              .then((response) => {
+                if (!response.ok) throw new Error("ipinfo.io lookup failed");
+                return response.json();
+              })
+              .then((data) => {
+                // ipinfo returns location as "lat,lng" string, so we need to parse it
+                let coords = [0, 0];
+                if (data.loc && data.loc.includes(",")) {
+                  coords = data.loc.split(",");
+                }
+
+                const locationData = {
+                  latitude: parseFloat(coords[0]),
+                  longitude: parseFloat(coords[1]),
+                  city: data.city || "",
+                  region: data.region || "",
+                  country: data.country || "",
+                };
+
+                this.log(
+                  "Location obtained from fallback service",
+                  locationData
+                );
+                resolve(locationData);
+              })
+              .catch((secondError) => {
+                // If both services fail, try one more option - geoiplookup.io
+                this.log(
+                  "Second IP location service failed, trying final fallback",
+                  secondError
+                );
+
+                fetch("https://json.geoiplookup.io/")
+                  .then((response) => {
+                    if (!response.ok) throw new Error("geoiplookup.io failed");
+                    return response.json();
+                  })
+                  .then((data) => {
+                    const locationData = {
+                      latitude: parseFloat(data.latitude),
+                      longitude: parseFloat(data.longitude),
+                      city: data.city || "",
+                      region: data.region || "",
+                      country: data.country_name || "",
+                    };
+
+                    this.log(
+                      "Location obtained from final fallback service",
+                      locationData
+                    );
+                    resolve(locationData);
+                  })
+                  .catch((finalError) => {
+                    this.log("All IP location services failed", finalError);
+                    // If all services fail, return an empty object instead of rejecting
+                    resolve({});
+                  });
+              });
+          });
+      });
+    },
+
+    // Method to complete page view tracking after location attempt
+    completePageViewTracking: function (sessionParams, isNewSession) {
+      // Log session information
       this.log("Page view params:", sessionParams);
       this.log("Is new session: " + isNewSession);
       this.log("Is order received page: " + this.isOrderConfirmationPage());
@@ -816,7 +1171,6 @@
 
     // Send server-side event
     sendServerSideEvent: function (eventName, eventParams) {
-
       // Create a copy of the event params to avoid modifying the original
       var params = JSON.parse(JSON.stringify(eventParams));
 

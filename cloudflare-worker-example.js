@@ -40,7 +40,7 @@ async function handleRequest(request) {
 
     // Process the event data
     const processedData = processEventData(payload, request);
-    
+
     if (processedData.params.debug_mode) {
       DEBUG_MODE = true;
     }
@@ -665,9 +665,10 @@ function processEventData(data, request) {
       break;
   }
 
-  // Add engagement parameters for all events
-  processedData.params.engagement_time_msec = 1000;
-
+  // Add engagement parameters for all events only when not already assigned
+  if (!processedData.params.engagement_time_msec) {
+    processedData.params.engagement_time_msec = 1000;
+  }
   // Log the processed event data
   if (DEBUG_MODE) {
     console.log("Processed event data:", JSON.stringify(processedData));
