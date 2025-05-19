@@ -27,7 +27,7 @@
       this.setupEventListeners();
 
       // Log initialization
-      this.log("GA4 Server-Side Tagging initialized v9");
+      this.log("GA4 Server-Side Tagging initialized v3");
     },
 
     // Method to parse user agent and extract device/browser information
@@ -180,10 +180,89 @@
       return null;
     },
 
+    // Method to get or create session information
+    getSession: function () {
+      var sessionId = localStorage.getItem("server_side_ga4_session_id");
+      var sessionStart = localStorage.getItem("server_side_ga4_session_start");
+      var firstVisit = localStorage.getItem("server_side_ga4_first_visit");
+      var sessionCount = parseInt(
+        localStorage.getItem("server_side_ga4_session_count") || "0"
+      );
+      var now = Date.now();
+      var isNew = false;
+      var isFirstVisit = false;
+
+      // Check if this is the first visit ever
+      if (!firstVisit) {
+        localStorage.setItem("server_side_ga4_first_visit", now);
+        isFirstVisit = true;
+      }
+
+      // If no session or session expired (30 min inactive)
+      if (
+        !sessionId ||
+        !sessionStart ||
+        now - parseInt(sessionStart) > 30 * 60 * 1000
+      ) {
+        // Clear expired session data
+        this.clearSessionData();
+
+        // Generate a more robust session ID using timestamp and random values
+        sessionId = this.generateUniqueId();
+        sessionStart = now;
+
+        // Store session data
+        localStorage.setItem("server_side_ga4_session_id", sessionId);
+        localStorage.setItem("server_side_ga4_session_start", sessionStart);
+
+        // Increment session count
+        sessionCount++;
+        localStorage.setItem("server_side_ga4_session_count", sessionCount);
+
+        isNew = true;
+      }
+      // Don't update session start time - keep the original start time
+      // Only update on new sessions, not on every activity
+
+      return {
+        id: sessionId,
+        start: parseInt(sessionStart),
+        isNew: isNew,
+        isFirstVisit: isFirstVisit,
+        sessionCount: sessionCount,
+        duration: now - parseInt(sessionStart),
+      };
+    },
+
+    // Helper function to clear expired session data
+    clearSessionData: function () {
+      // Clear session-specific data but keep user-level data
+      localStorage.removeItem("server_side_ga4_session_id");
+      localStorage.removeItem("server_side_ga4_session_start");
+
+      // Clear attribution data that's tied to sessions
+      localStorage.removeItem("server_side_ga4_last_source");
+      localStorage.removeItem("server_side_ga4_last_medium");
+      localStorage.removeItem("server_side_ga4_last_campaign");
+      localStorage.removeItem("server_side_ga4_last_content");
+      localStorage.removeItem("server_side_ga4_last_term");
+      localStorage.removeItem("server_side_ga4_last_gclid");
+
+      // Keep these items as they're user-level, not session-level:
+      // - server_side_ga4_first_visit (first visit timestamp)
+      // - server_side_ga4_session_count (total sessions count)
+      // - client_id (user identifier)
+    },
+    // Helper function to generate a unique ID
+    generateUniqueId: function () {
+      return Date.now().toString();
+    },
+
     // Method to calculate engagement time
     calculateEngagementTime: function () {
+      var session = this.getSession();
       // Get stored page start time or use current time as fallback
-      var startTime = this.pageStartTime || Date.now();
+      var startTime = session.start || Date.now();
       var currentTime = Date.now();
       var engagementTime = currentTime - startTime;
 
@@ -193,11 +272,9 @@
     },
 
     trackPageView: function () {
-      // Track page start time for engagement calculation
-      this.pageStartTime = Date.now();
-
       // Get current session information
       var session = this.getSession();
+      this.log("session data: " + session.start);
       var isNewSession = session.isNew; // Track if this is a new session
 
       // Get user agent and device information
@@ -319,6 +396,7 @@
         if (term) localStorage.setItem("server_side_ga4_last_term", term);
         if (gclid) localStorage.setItem("server_side_ga4_last_gclid", gclid);
       }
+      this.log(this.calculateEngagementTime());
 
       // Common session parameters needed for all page view events (limited to 25 params max)
       var sessionParams = {
@@ -328,7 +406,6 @@
 
         // Critical for GA4 real-time reporting (calculate actual engagement time)
         engagement_time_msec: this.calculateEngagementTime(),
-
         // Session flags
         ...(isNewSession && { session_start: 1 }),
         first_visit: session.isFirstVisit ? 1 : 0,
@@ -1297,61 +1374,6 @@
 
       this.log("Not an order page");
       return false;
-    },
-    getSession: function () {
-      var sessionId = localStorage.getItem("server_side_ga4_session_id");
-      var sessionStart = localStorage.getItem("server_side_ga4_session_start");
-      var firstVisit = localStorage.getItem("server_side_ga4_first_visit");
-      var sessionCount = parseInt(
-        localStorage.getItem("server_side_ga4_session_count") || "0"
-      );
-      var now = Date.now();
-      var isNew = false;
-      var isFirstVisit = false;
-
-      // Check if this is the first visit ever
-      if (!firstVisit) {
-        localStorage.setItem("server_side_ga4_first_visit", now);
-        isFirstVisit = true;
-      }
-
-      // If no session or session expired (30 min inactive)
-      if (
-        !sessionId ||
-        !sessionStart ||
-        now - parseInt(sessionStart) > 30 * 60 * 1000
-      ) {
-        // Generate a more robust session ID using timestamp and random values
-        sessionId = this.generateUniqueId();
-        sessionStart = now;
-
-        // Store session data
-        localStorage.setItem("server_side_ga4_session_id", sessionId);
-        localStorage.setItem("server_side_ga4_session_start", sessionStart);
-
-        // Increment session count
-        sessionCount++;
-        localStorage.setItem("server_side_ga4_session_count", sessionCount);
-
-        isNew = true;
-      } else {
-        // Update session timestamp on activity
-        localStorage.setItem("server_side_ga4_session_start", now);
-      }
-
-      return {
-        id: sessionId,
-        start: parseInt(sessionStart),
-        isNew: isNew,
-        isFirstVisit: isFirstVisit,
-        sessionCount: sessionCount,
-        duration: now - parseInt(sessionStart),
-      };
-    },
-
-    // Helper function to generate a unique ID
-    generateUniqueId: function () {
-      return Date.now().toString();
     },
 
     // Check if we're on a product list page

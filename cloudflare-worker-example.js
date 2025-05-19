@@ -78,6 +78,9 @@ async function handleRequest(request) {
       );
     }
 
+    // Extract location data from params before preparing GA4 payload
+    const userLocation = extractLocationData(processedData.params);
+
     // Prepare the GA4 payload
     const ga4Payload = {
       client_id: processedData.params.client_id,
@@ -88,6 +91,11 @@ async function handleRequest(request) {
         },
       ],
     };
+
+    // Add user_location at request level if available
+    if (userLocation && Object.keys(userLocation).length > 0) {
+      ga4Payload.user_location = userLocation;
+    }
 
     // Remove client_id from params to avoid duplication, only if it exists
     if (ga4Payload.events[0].params.hasOwnProperty("client_id")) {
@@ -153,6 +161,187 @@ async function handleRequest(request) {
       }
     );
   }
+}
+
+/**
+ * Extract location data from params and convert to GA4 format
+ * @param {Object} params - Event parameters
+ * @returns {Object} Location data in GA4 format
+ */
+function extractLocationData(params) {
+  const userLocation = {};
+
+  // Map location parameters to GA4 user_location format
+  if (params.geo_city || params.city) {
+    userLocation.city = params.geo_city || params.city;
+    delete params.geo_city;
+    delete params.city;
+  }
+
+  if (params.geo_country || params.country) {
+    // Convert country name to ISO code if needed
+    const countryName = params.geo_country || params.country;
+    userLocation.country_id = convertCountryToISO(countryName);
+    delete params.geo_country;
+    delete params.country;
+  }
+
+  if (params.geo_region || params.region) {
+    // Convert region to ISO format if needed
+    const regionName = params.geo_region || params.region;
+    const countryCode = userLocation.country_id || 'NL'; // Default to NL if no country
+    userLocation.region_id = convertRegionToISO(regionName, countryCode);
+    delete params.geo_region;
+    delete params.region;
+  }
+
+  // Add continent and subcontinent based on country
+  if (userLocation.country_id) {
+    const continentInfo = getContinentInfo(userLocation.country_id);
+    if (continentInfo.continent_id) {
+      userLocation.continent_id = continentInfo.continent_id;
+    }
+    if (continentInfo.subcontinent_id) {
+      userLocation.subcontinent_id = continentInfo.subcontinent_id;
+    }
+  }
+
+  // Remove lat/lng from params as they're not standard GA4 parameters
+  if (params.geo_latitude) {
+    delete params.geo_latitude;
+  }
+  if (params.geo_longitude) {
+    delete params.geo_longitude;
+  }
+
+  return userLocation;
+}
+
+/**
+ * Get continent and subcontinent info based on country code
+ * @param {string} countryCode - ISO country code
+ * @returns {Object} Continent and subcontinent information
+ */
+function getContinentInfo(countryCode) {
+  // Continental and subcontinental mapping based on UN geoscheme
+  const continentMap = {
+    // Europe (continent: 150)
+    'NL': { continent_id: '150', subcontinent_id: '155' }, // Western Europe
+    'DE': { continent_id: '150', subcontinent_id: '155' }, // Western Europe
+    'FR': { continent_id: '150', subcontinent_id: '155' }, // Western Europe
+    'ES': { continent_id: '150', subcontinent_id: '039' }, // Southern Europe
+    'IT': { continent_id: '150', subcontinent_id: '039' }, // Southern Europe
+    'BE': { continent_id: '150', subcontinent_id: '155' }, // Western Europe
+    'GB': { continent_id: '150', subcontinent_id: '154' }, // Northern Europe
+    'IE': { continent_id: '150', subcontinent_id: '154' }, // Northern Europe
+    'SE': { continent_id: '150', subcontinent_id: '154' }, // Northern Europe
+    'NO': { continent_id: '150', subcontinent_id: '154' }, // Northern Europe
+    'DK': { continent_id: '150', subcontinent_id: '154' }, // Northern Europe
+    'FI': { continent_id: '150', subcontinent_id: '154' }, // Northern Europe
+    'PL': { continent_id: '150', subcontinent_id: '151' }, // Eastern Europe
+    'RU': { continent_id: '150', subcontinent_id: '151' }, // Eastern Europe
+    'AT': { continent_id: '150', subcontinent_id: '155' }, // Western Europe
+    'CH': { continent_id: '150', subcontinent_id: '155' }, // Western Europe
+    'PT': { continent_id: '150', subcontinent_id: '039' }, // Southern Europe
+    'GR': { continent_id: '150', subcontinent_id: '039' }, // Southern Europe
+    'TR': { continent_id: '142', subcontinent_id: '145' }, // Western Asia
+    'LU': { continent_id: '150', subcontinent_id: '155' }, // Western Europe
+
+    // Americas (continent: 019)
+    'US': { continent_id: '019', subcontinent_id: '021' }, // Northern America
+    'CA': { continent_id: '019', subcontinent_id: '021' }, // Northern America
+    'MX': { continent_id: '019', subcontinent_id: '013' }, // Central America
+    'BR': { continent_id: '019', subcontinent_id: '005' }, // South America
+    'AR': { continent_id: '019', subcontinent_id: '005' }, // South America
+
+    // Asia (continent: 142)
+    'CN': { continent_id: '142', subcontinent_id: '030' }, // Eastern Asia
+    'JP': { continent_id: '142', subcontinent_id: '030' }, // Eastern Asia
+    'IN': { continent_id: '142', subcontinent_id: '034' }, // Southern Asia
+
+    // Africa (continent: 002)
+    'ZA': { continent_id: '002', subcontinent_id: '018' }, // Southern Africa
+
+    // Oceania (continent: 009)
+    'AU': { continent_id: '009', subcontinent_id: '053' }, // Australia and New Zealand
+  };
+
+  return continentMap[countryCode] || { continent_id: '', subcontinent_id: '' };
+}
+
+/**
+ * Convert country name to ISO country code
+ * @param {string} countryName - Full country name
+ * @returns {string} ISO country code
+ */
+function convertCountryToISO(countryName) {
+  // Simple mapping for common countries
+  const countryMap = {
+    'The Netherlands': 'NL',
+    'Netherlands': 'NL',
+    'United States': 'US',
+    'United Kingdom': 'GB',
+    'Germany': 'DE',
+    'France': 'FR',
+    'Spain': 'ES',
+    'Italy': 'IT',
+    'Belgium': 'BE',
+    'Canada': 'CA',
+    'Australia': 'AU',
+    'Japan': 'JP',
+    'China': 'CN',
+    'India': 'IN',
+    'Brazil': 'BR',
+    'Mexico': 'MX',
+    'Argentina': 'AR',
+    'South Africa': 'ZA',
+    'Russia': 'RU',
+    'Poland': 'PL',
+    'Sweden': 'SE',
+    'Norway': 'NO',
+    'Denmark': 'DK',
+    'Finland': 'FI',
+    'Ireland': 'IE',
+    'Portugal': 'PT',
+    'Greece': 'GR',
+    'Turkey': 'TR',
+    'Austria': 'AT',
+    'Switzerland': 'CH',
+    'Luxembourg': 'LU'
+  };
+
+  return countryMap[countryName] || countryName.toUpperCase().substring(0, 2);
+}
+
+/**
+ * Convert region name to ISO region code
+ * @param {string} regionName - Full region name
+ * @param {string} countryCode - ISO country code
+ * @returns {string} ISO region code
+ */
+function convertRegionToISO(regionName, countryCode) {
+  // Netherlands regions mapping
+  if (countryCode === 'NL') {
+    const nlRegions = {
+      'North Holland': 'NL-NH',
+      'South Holland': 'NL-ZH',
+      'North Brabant': 'NL-NB',
+      'South Brabant': 'NL-NB',
+      'Utrecht': 'NL-UT',
+      'Gelderland': 'NL-GE',
+      'Overijssel': 'NL-OV',
+      'Limburg': 'NL-LI',
+      'Groningen': 'NL-GR',
+      'Friesland': 'NL-FR',
+      'Drenthe': 'NL-DR',
+      'Flevoland': 'NL-FL',
+      'Zeeland': 'NL-ZE'
+    };
+    return nlRegions[regionName] || `${countryCode}-${regionName.toUpperCase().substring(0, 2)}`;
+  }
+
+  // For other countries, create a simple format
+  return `${countryCode}-${regionName.toUpperCase().substring(0, 2)}`;
 }
 
 /**
