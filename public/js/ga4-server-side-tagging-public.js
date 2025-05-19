@@ -27,7 +27,7 @@
       this.setupEventListeners();
 
       // Log initialization
-      this.log("GA4 Server-Side Tagging initialized v3");
+      this.log("GA4 Server-Side Tagging initialized v4");
     },
 
     // Method to parse user agent and extract device/browser information
@@ -705,6 +705,7 @@
           });
         }
       );
+
       var trackForms =
         "form:not(.cart, .woocommerce-cart-form, .checkout, .woocommerce-checkout)";
       if (
@@ -739,6 +740,213 @@
       if (this.config.isEcommerceEnabled) {
         this.setupEcommerceTracking();
       }
+      // Track scroll depth
+      self.setupScrollTracking();
+
+      // Track user engagement (time on page)
+      self.setupEngagementTracking();
+
+      // Track file downloads
+      $(document).on(
+        "click",
+        'a[href*=".pdf"], a[href*=".zip"], a[href*=".doc"], a[href*=".docx"], a[href*=".xls"], a[href*=".xlsx"], a[href*=".ppt"], a[href*=".pptx"]',
+        function () {
+          var href = $(this).attr("href");
+          var fileName = href.split("/").pop().split("?")[0];
+          var fileExtension = fileName.split(".").pop().toLowerCase();
+
+          self.trackEvent("file_download", {
+            file_name: fileName,
+            file_extension: fileExtension,
+            link_url: href,
+          });
+        }
+      );
+
+      // Track video interactions (for embedded YouTube/Vimeo)
+      self.setupVideoTracking();
+
+      // Track search queries (if you have a search form)
+      $(document).on(
+        "submit",
+        'form[role="search"], .search-form',
+        function () {
+          var searchQuery = $(this)
+            .find(
+              'input[type="search"], input[name*="search"], input[name="s"]'
+            )
+            .val();
+          if (searchQuery && searchQuery.trim() !== "") {
+            self.trackEvent("search", {
+              search_term: searchQuery.trim(),
+            });
+          }
+        }
+      );
+
+      // Track phone number clicks (tel: links)
+      $(document).on("click", 'a[href^="tel:"]', function () {
+        var phone = $(this).attr("href").replace("tel:", "");
+        self.trackEvent("phone_call", {
+          phone_number: phone,
+        });
+      });
+
+      // Track email clicks (mailto: links)
+      $(document).on("click", 'a[href^="mailto:"]', function () {
+        var email = $(this).attr("href").replace("mailto:", "");
+        self.trackEvent("email_click", {
+          email_address: email,
+        });
+      });
+
+      // Track social media link clicks
+      $(document).on(
+        "click",
+        'a[href*="facebook.com"], a[href*="twitter.com"], a[href*="linkedin.com"], a[href*="instagram.com"], a[href*="youtube.com"], a[href*="tiktok.com"]',
+        function () {
+          var href = $(this).attr("href");
+          var platform = self.getSocialPlatform(href);
+
+          self.trackEvent("social_click", {
+            platform: platform,
+            link_url: href,
+          });
+        }
+      );
+
+      // Track button clicks (for important CTAs)
+      $(document).on(
+        "click",
+        'button, .btn, .button, input[type="submit"], input[type="button"]',
+        function () {
+          // Skip if it's a form submit (already tracked above)
+          if (
+            $(this).attr("type") === "submit" &&
+            $(this).closest("form").length
+          ) {
+            return;
+          }
+
+          var buttonText =
+            $(this).text() ||
+            $(this).val() ||
+            $(this).attr("aria-label") ||
+            "Unknown";
+          var buttonId = $(this).attr("id") || "";
+          var buttonClass = $(this).attr("class") || "";
+
+          self.trackEvent("button_click", {
+            button_text: buttonText.trim(),
+            button_id: buttonId,
+            button_class: buttonClass,
+          });
+        }
+      );
+
+      // Track page visibility changes (tab switching)
+      document.addEventListener("visibilitychange", function () {
+        if (document.hidden) {
+          self.trackEvent("page_hidden", {
+            time_on_page: Date.now() - self.pageStartTime,
+          });
+        } else {
+          self.trackEvent("page_visible", {});
+        }
+      });
+    },
+
+    // Setup scroll depth tracking
+    setupScrollTracking: function () {
+      var self = this;
+      var scrollDepths = [25, 50, 75, 90];
+      var trackedDepths = [];
+
+      $(window).on("scroll", function () {
+        var scrollTop = $(window).scrollTop();
+        var docHeight = $(document).height() - $(window).height();
+        var scrollPercent = Math.round((scrollTop / docHeight) * 100);
+
+        scrollDepths.forEach(function (depth) {
+          if (scrollPercent >= depth && trackedDepths.indexOf(depth) === -1) {
+            trackedDepths.push(depth);
+            self.trackEvent("scroll", {
+              percent_scrolled: depth,
+            });
+          }
+        });
+      });
+    },
+
+    // Setup user engagement tracking (sends periodic engagement events)
+    setupEngagementTracking: function () {
+      var self = this;
+      var engagementIntervals = [15, 30, 60, 120]; // seconds
+      var trackedIntervals = [];
+
+      setInterval(function () {
+        if (!document.hidden) {
+          var timeOnPage = Math.floor((Date.now() - self.pageStartTime) / 1000);
+
+          engagementIntervals.forEach(function (interval) {
+            if (
+              timeOnPage >= interval &&
+              trackedIntervals.indexOf(interval) === -1
+            ) {
+              trackedIntervals.push(interval);
+              self.trackEvent("user_engagement", {
+                engagement_time_msec: interval * 1000,
+              });
+            }
+          });
+        }
+      }, 15000); // Check every 15 seconds
+    },
+
+    // Setup video tracking (basic implementation for YouTube/Vimeo embeds)
+    setupVideoTracking: function () {
+      var self = this;
+
+      // Track when videos become visible in viewport
+      $('iframe[src*="youtube.com"], iframe[src*="vimeo.com"]').each(
+        function () {
+          var $video = $(this);
+          var videoUrl = $video.attr("src");
+          var videoPlatform =
+            videoUrl.indexOf("youtube") > -1 ? "YouTube" : "Vimeo";
+
+          // Use Intersection Observer if available
+          if ("IntersectionObserver" in window) {
+            var observer = new IntersectionObserver(
+              function (entries) {
+                entries.forEach(function (entry) {
+                  if (entry.isIntersecting) {
+                    self.trackEvent("video_view", {
+                      video_platform: videoPlatform,
+                      video_url: videoUrl,
+                    });
+                    observer.unobserve(entry.target);
+                  }
+                });
+              },
+              { threshold: 0.5 }
+            );
+
+            observer.observe($video[0]);
+          }
+        }
+      );
+    },
+
+    // Helper function to determine social media platform
+    getSocialPlatform: function (url) {
+      if (url.indexOf("facebook.com") > -1) return "Facebook";
+      if (url.indexOf("twitter.com") > -1) return "Twitter";
+      if (url.indexOf("linkedin.com") > -1) return "LinkedIn";
+      if (url.indexOf("instagram.com") > -1) return "Instagram";
+      if (url.indexOf("youtube.com") > -1) return "YouTube";
+      if (url.indexOf("tiktok.com") > -1) return "TikTok";
+      return "Other";
     },
 
     // Set up e-commerce tracking
