@@ -27,7 +27,7 @@
       this.setupEventListeners();
 
       // Log initialization
-      this.log("GA4 Server-Side Tagging initialized v6");
+      this.log("GA4 Server-Side Tagging initialized v8");
     },
 
     trackPageView: function () {
@@ -118,6 +118,7 @@
         source = "google";
         medium = "cpc";
       }
+      this.log("Source and medium data:" + source + ", " + medium);
 
       // No UTM and no referrer (or ignored referrer) means direct traffic
       if (!source && !medium) {
@@ -139,6 +140,7 @@
           medium = "none";
         }
       }
+      this.log("Source and medium data v2:" + source + ", " + medium);
 
       // Store attribution data when it's available (for new sessions or when UTM params are present)
       if (
@@ -1511,7 +1513,7 @@
       if (!eventParams.hasOwnProperty("session_id")) {
         eventParams.session_id = session.id;
       }
-         // Add session_count to event params if not already present
+      // Add session_count to event params if not already present
       if (!eventParams.hasOwnProperty("session_count")) {
         eventParams.session_count = session.sessionCount;
       }
