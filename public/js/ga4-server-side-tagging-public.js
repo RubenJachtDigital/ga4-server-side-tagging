@@ -27,7 +27,7 @@
       this.setupEventListeners();
 
       // Log initialization
-      this.log("GA4 Server-Side Tagging initialized v9");
+      this.log("GA4 Server-Side Tagging initialized v4");
     },
 
     trackPageView: function () {
@@ -78,24 +78,33 @@
       var term = utmTerm || "";
 
       // If no UTM parameters but we have a referrer, determine source/medium
-      if (!source && !medium && referrerDomain && !ignore_referrer) {
+      if (
+        !source &&
+        !medium &&
+        referrerDomain &&
+        !ignore_referrer
+      ) {
         // Handle search engines - this is critical for organic search attribution
         if (referrerDomain.indexOf("google") > -1) {
           // Check if it's Google Ads or organic
           if (referrer.indexOf("gclid=") > -1 || gclid) {
             source = "google";
             medium = "cpc";
+            campaign = "(organic)";
           } else {
             // Google organic search
             source = "google";
             medium = "organic";
+            campaign = "(organic)";
           }
         } else if (referrerDomain.indexOf("bing") > -1) {
           source = "bing";
           medium = "organic";
+          campaign = "(organic)";
         } else if (referrerDomain.indexOf("yahoo") > -1) {
           source = "yahoo";
           medium = "organic";
+          campaign = "(organic)";
         } else if (
           referrerDomain.indexOf("facebook.com") > -1 ||
           referrerDomain.indexOf("instagram.com") > -1
@@ -103,6 +112,7 @@
           // Social referrals
           source = referrerDomain.replace("www.", "").split(".")[0];
           medium = "social";
+          campaign = "(social)";
         } else if (
           referrerDomain !== window.location.hostname &&
           referrerDomain !== ""
@@ -110,23 +120,16 @@
           // Regular referral - ensure it's not from the same domain
           source = referrerDomain;
           medium = "referral";
+          campaign = "(referral)";
         }
       }
 
-      // If we have a gclid but no UTM source/medium was set, override with Google Ads attribution
+      // If we have a gclid but no UTM source/medium/campaign was set, override with Google Ads attribution
       if (gclid && !utmSource && !utmMedium) {
         source = "google";
         medium = "cpc";
+        campaign = "(organic)";
       }
-      this.log("Source and medium data:", {
-        referrer: referrer,
-        referrerDomain: referrerDomain,
-        medium: medium,
-        source: source,
-        isNewSession: isNewSession,
-        ignore_referrer: ignore_referrer,
-      });
-
       // No UTM and no referrer (or ignored referrer) means direct traffic
       if (!source && !medium) {
         // For direct traffic, check if we should use last non-direct attribution
@@ -145,16 +148,20 @@
         } else {
           source = "(direct)";
           medium = "none";
+          campaign = "(not set)";
         }
       }
-      this.log("Source and medium data v2:", {
+
+      this.log("Source and medium data:", {
         referrer: referrer,
         referrerDomain: referrerDomain,
         medium: medium,
         source: source,
+        campaign: campaign,
         isNewSession: isNewSession,
         ignore_referrer: ignore_referrer,
       });
+
       // Store attribution data when it's available (for new sessions or when UTM params are present)
       if (
         (isNewSession || utmSource || utmMedium || gclid) &&
@@ -170,9 +177,8 @@
         if (term) localStorage.setItem("server_side_ga4_last_term", term);
         if (gclid) localStorage.setItem("server_side_ga4_last_gclid", gclid);
       }
-      this.log(this.calculateEngagementTime());
 
-      var trafficType = this.determineTrafficType(source, medium);
+      this.log(this.calculateEngagementTime());
 
       // Common session parameters needed for all page view events (limited to 25 params max)
       var sessionParams = {
@@ -184,11 +190,9 @@
         engagement_time_msec: this.calculateEngagementTime(),
         // Session flags
         ...(isNewSession && { session_start: 1 }),
-        first_visit: session.isFirstVisit ? 1 : 0,
 
         // Device and browser (most important UA info)
         browser_name: userAgentInfo.browser_name,
-        os_name: userAgentInfo.os_name,
         device_type: userAgentInfo.device_type,
 
         // Add screen resolution
@@ -206,11 +210,9 @@
         // Language
         language: navigator.language || "",
 
-        // Traffic attribution (required for marketing)
         source: source,
         medium: medium,
         campaign: campaign,
-        traffic_type: trafficType,
 
         // Add UTM content/term only if present to save param slots
         ...(content && { content: content }),
@@ -1205,7 +1207,6 @@
       // Initialize the result object
       var parsedUA = {
         browser_name: "",
-        os_name: "",
         device_type: "",
         user_agent: userAgent,
         is_mobile: false,
@@ -1216,7 +1217,6 @@
       // Use Client Hints API if available (more reliable than user agent parsing)
       if (clientHints) {
         parsedUA.browser_name = clientHints.brands?.[0]?.brand || "";
-        parsedUA.os_name = clientHints.platform || "";
         parsedUA.is_mobile = clientHints.mobile || false;
       }
 
@@ -1271,32 +1271,6 @@
         }
       }
 
-      // Parse operating system information
-      if (!parsedUA.os_name) {
-        if (userAgent.indexOf("Windows NT") > -1) {
-          parsedUA.os_name = "Windows";
-        } else if (
-          userAgent.indexOf("Mac OS X") > -1 ||
-          userAgent.indexOf("macOS") > -1
-        ) {
-          parsedUA.os_name = "macOS";
-        } else if (userAgent.indexOf("Linux") > -1) {
-          if (userAgent.indexOf("Android") > -1) {
-            parsedUA.os_name = "Android";
-          } else {
-            parsedUA.os_name = "Linux";
-          }
-        } else if (
-          userAgent.indexOf("iPhone") > -1 ||
-          userAgent.indexOf("iPad") > -1
-        ) {
-          parsedUA.os_name = "iOS";
-        } else if (userAgent.indexOf("CrOS") > -1) {
-          parsedUA.os_name = "Chrome OS";
-        } else {
-          parsedUA.os_name = "Unknown";
-        }
-      }
 
       // Determine device type based on user agent
       if (
@@ -1347,65 +1321,6 @@
       }
 
       return parsedUA;
-    },
-    // Method to determine traffic type based on source and medium
-    determineTrafficType: function (source, medium) {
-      // Direct traffic
-      if (source === "(direct)" && medium === "none") {
-        return "direct";
-      }
-
-      // Organic search
-      if (medium === "organic") {
-        return "organic";
-      }
-
-      // Paid search
-      if (medium === "cpc" || medium === "ppc" || medium === "paidsearch") {
-        return "paid_search";
-      }
-
-      // Social media
-      if (
-        medium === "social" ||
-        medium === "sm" ||
-        source === "facebook" ||
-        source === "instagram" ||
-        source === "twitter" ||
-        source === "linkedin" ||
-        source === "pinterest" ||
-        source === "youtube"
-      ) {
-        return "social";
-      }
-
-      // Email marketing
-      if (medium === "email") {
-        return "email";
-      }
-
-      // Affiliates
-      if (medium === "affiliate") {
-        return "affiliate";
-      }
-
-      // Regular referral traffic (links from other sites)
-      if (medium === "referral") {
-        return "referral";
-      }
-
-      // Display or banner ads
-      if (medium === "display" || medium === "banner" || medium === "cpm") {
-        return "display";
-      }
-
-      // Video ads
-      if (medium === "video") {
-        return "video";
-      }
-
-      // Default fallback
-      return "other";
     },
 
     // Method to get User Agent Client Hints (modern approach)
