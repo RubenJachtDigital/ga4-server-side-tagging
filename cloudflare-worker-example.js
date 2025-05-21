@@ -65,19 +65,6 @@ async function handleRequest(request) {
       });
     }
 
-    if (!processedData.params || !processedData.params.client_id) {
-      return new Response(
-        JSON.stringify({ error: "Missing client_id parameter" }),
-        {
-          status: 400,
-          headers: {
-            "Content-Type": "application/json",
-            ...getCORSHeaders(request),
-          },
-        }
-      );
-    }
-
     // Extract location data from params before preparing GA4 payload
     const userLocation = extractLocationData(processedData.params);
 
@@ -107,6 +94,23 @@ async function handleRequest(request) {
       ga4Payload.user_id = processedData.params.user_id;
       // Remove from params to avoid duplication
       delete processedData.params.user_id;
+    }
+
+    // Check if params exceeds 25
+    const payloadParamsCount = Object.keys(processedData.params).length;
+    if (payloadParamsCount > 25) {
+      return new Response(
+        JSON.stringify({
+          error: `Too many parameters: ${payloadParamsCount}. GA4 only allows a maximum of 25 parameters per event. - ${processedData.params}`,
+        }),
+        {
+          status: 400,
+          headers: {
+            "Content-Type": "application/json",
+            ...getCORSHeaders(request),
+          },
+        }
+      );
     }
 
     // Send the event to GA4
@@ -164,9 +168,487 @@ async function handleRequest(request) {
 }
 
 /**
- * Extract location data from params and convert to GA4 format
- * @param {Object} params - Event parameters
- * @returns {Object} Location data in GA4 format
+ * Get continent and subcontinent info based on country code
+ * @param {string} countryCode - ISO country code
+ * @returns {Object} Continent and subcontinent information
+ */
+/**
+ * Get continent and subcontinent information based on country code
+ * @param {string} countryCode - ISO 3166-1 alpha-2 country code
+ * @returns {Object} Object containing continent_id and subcontinent_id
+ */
+function getContinentInfo(countryCode) {
+  // Detect continent code format (e.g., "EU", "NA")
+  const continentCodeMap = {
+    "EU": { continent_id: "150", subcontinent_id: "" }, // Europe
+    "NA": { continent_id: "019", subcontinent_id: "021" }, // North America
+    "SA": { continent_id: "019", subcontinent_id: "005" }, // South America
+    "AS": { continent_id: "142", subcontinent_id: "" }, // Asia
+    "AF": { continent_id: "002", subcontinent_id: "" }, // Africa
+    "OC": { continent_id: "009", subcontinent_id: "" }, // Oceania
+    "AN": { continent_id: "010", subcontinent_id: "" }, // Antarctica
+  };
+
+  if (continentCodeMap[countryCode]) {
+    return continentCodeMap[countryCode];
+  }
+
+  // Continental and subcontinental mapping based on UN geoscheme
+  const continentMap = {
+    // Europe (continent: 150)
+    "AD": { continent_id: "150", subcontinent_id: "039" }, // Andorra (Southern Europe)
+    "AL": { continent_id: "150", subcontinent_id: "039" }, // Albania (Southern Europe)
+    "AT": { continent_id: "150", subcontinent_id: "155" }, // Austria (Western Europe)
+    "BA": { continent_id: "150", subcontinent_id: "039" }, // Bosnia and Herzegovina (Southern Europe)
+    "BE": { continent_id: "150", subcontinent_id: "155" }, // Belgium (Western Europe)
+    "BG": { continent_id: "150", subcontinent_id: "151" }, // Bulgaria (Eastern Europe)
+    "BY": { continent_id: "150", subcontinent_id: "151" }, // Belarus (Eastern Europe)
+    "CH": { continent_id: "150", subcontinent_id: "155" }, // Switzerland (Western Europe)
+    "CY": { continent_id: "150", subcontinent_id: "145" }, // Cyprus (Western Asia/Southern Europe)
+    "CZ": { continent_id: "150", subcontinent_id: "151" }, // Czech Republic (Eastern Europe)
+    "DE": { continent_id: "150", subcontinent_id: "155" }, // Germany (Western Europe)
+    "DK": { continent_id: "150", subcontinent_id: "154" }, // Denmark (Northern Europe)
+    "EE": { continent_id: "150", subcontinent_id: "154" }, // Estonia (Northern Europe)
+    "ES": { continent_id: "150", subcontinent_id: "039" }, // Spain (Southern Europe)
+    "FI": { continent_id: "150", subcontinent_id: "154" }, // Finland (Northern Europe)
+    "FR": { continent_id: "150", subcontinent_id: "155" }, // France (Western Europe)
+    "GB": { continent_id: "150", subcontinent_id: "154" }, // United Kingdom (Northern Europe)
+    "GR": { continent_id: "150", subcontinent_id: "039" }, // Greece (Southern Europe)
+    "HR": { continent_id: "150", subcontinent_id: "039" }, // Croatia (Southern Europe)
+    "HU": { continent_id: "150", subcontinent_id: "151" }, // Hungary (Eastern Europe)
+    "IE": { continent_id: "150", subcontinent_id: "154" }, // Ireland (Northern Europe)
+    "IS": { continent_id: "150", subcontinent_id: "154" }, // Iceland (Northern Europe)
+    "IT": { continent_id: "150", subcontinent_id: "039" }, // Italy (Southern Europe)
+    "LI": { continent_id: "150", subcontinent_id: "155" }, // Liechtenstein (Western Europe)
+    "LT": { continent_id: "150", subcontinent_id: "154" }, // Lithuania (Northern Europe)
+    "LU": { continent_id: "150", subcontinent_id: "155" }, // Luxembourg (Western Europe)
+    "LV": { continent_id: "150", subcontinent_id: "154" }, // Latvia (Northern Europe)
+    "MC": { continent_id: "150", subcontinent_id: "155" }, // Monaco (Western Europe)
+    "MD": { continent_id: "150", subcontinent_id: "151" }, // Moldova (Eastern Europe)
+    "ME": { continent_id: "150", subcontinent_id: "039" }, // Montenegro (Southern Europe)
+    "MK": { continent_id: "150", subcontinent_id: "039" }, // North Macedonia (Southern Europe)
+    "MT": { continent_id: "150", subcontinent_id: "039" }, // Malta (Southern Europe)
+    "NL": { continent_id: "150", subcontinent_id: "155" }, // Netherlands (Western Europe)
+    "NO": { continent_id: "150", subcontinent_id: "154" }, // Norway (Northern Europe)
+    "PL": { continent_id: "150", subcontinent_id: "151" }, // Poland (Eastern Europe)
+    "PT": { continent_id: "150", subcontinent_id: "039" }, // Portugal (Southern Europe)
+    "RO": { continent_id: "150", subcontinent_id: "151" }, // Romania (Eastern Europe)
+    "RS": { continent_id: "150", subcontinent_id: "039" }, // Serbia (Southern Europe)
+    "RU": { continent_id: "150", subcontinent_id: "151" }, // Russia (Eastern Europe)
+    "SE": { continent_id: "150", subcontinent_id: "154" }, // Sweden (Northern Europe)
+    "SI": { continent_id: "150", subcontinent_id: "039" }, // Slovenia (Southern Europe)
+    "SK": { continent_id: "150", subcontinent_id: "151" }, // Slovakia (Eastern Europe)
+    "SM": { continent_id: "150", subcontinent_id: "039" }, // San Marino (Southern Europe)
+    "UA": { continent_id: "150", subcontinent_id: "151" }, // Ukraine (Eastern Europe)
+    "VA": { continent_id: "150", subcontinent_id: "039" }, // Vatican City (Southern Europe)
+    
+    // Americas (continent: 019)
+    "AG": { continent_id: "019", subcontinent_id: "029" }, // Antigua and Barbuda (Caribbean)
+    "AR": { continent_id: "019", subcontinent_id: "005" }, // Argentina (South America)
+    "BB": { continent_id: "019", subcontinent_id: "029" }, // Barbados (Caribbean)
+    "BO": { continent_id: "019", subcontinent_id: "005" }, // Bolivia (South America)
+    "BR": { continent_id: "019", subcontinent_id: "005" }, // Brazil (South America)
+    "BS": { continent_id: "019", subcontinent_id: "029" }, // Bahamas (Caribbean)
+    "BZ": { continent_id: "019", subcontinent_id: "013" }, // Belize (Central America)
+    "CA": { continent_id: "019", subcontinent_id: "021" }, // Canada (Northern America)
+    "CL": { continent_id: "019", subcontinent_id: "005" }, // Chile (South America)
+    "CO": { continent_id: "019", subcontinent_id: "005" }, // Colombia (South America)
+    "CR": { continent_id: "019", subcontinent_id: "013" }, // Costa Rica (Central America)
+    "CU": { continent_id: "019", subcontinent_id: "029" }, // Cuba (Caribbean)
+    "DM": { continent_id: "019", subcontinent_id: "029" }, // Dominica (Caribbean)
+    "DO": { continent_id: "019", subcontinent_id: "029" }, // Dominican Republic (Caribbean)
+    "EC": { continent_id: "019", subcontinent_id: "005" }, // Ecuador (South America)
+    "GT": { continent_id: "019", subcontinent_id: "013" }, // Guatemala (Central America)
+    "GY": { continent_id: "019", subcontinent_id: "005" }, // Guyana (South America)
+    "HN": { continent_id: "019", subcontinent_id: "013" }, // Honduras (Central America)
+    "HT": { continent_id: "019", subcontinent_id: "029" }, // Haiti (Caribbean)
+    "JM": { continent_id: "019", subcontinent_id: "029" }, // Jamaica (Caribbean)
+    "MX": { continent_id: "019", subcontinent_id: "013" }, // Mexico (Central America)
+    "NI": { continent_id: "019", subcontinent_id: "013" }, // Nicaragua (Central America)
+    "PA": { continent_id: "019", subcontinent_id: "013" }, // Panama (Central America)
+    "PE": { continent_id: "019", subcontinent_id: "005" }, // Peru (South America)
+    "PY": { continent_id: "019", subcontinent_id: "005" }, // Paraguay (South America)
+    "SV": { continent_id: "019", subcontinent_id: "013" }, // El Salvador (Central America)
+    "SR": { continent_id: "019", subcontinent_id: "005" }, // Suriname (South America)
+    "TT": { continent_id: "019", subcontinent_id: "029" }, // Trinidad and Tobago (Caribbean)
+    "US": { continent_id: "019", subcontinent_id: "021" }, // United States (Northern America)
+    "UY": { continent_id: "019", subcontinent_id: "005" }, // Uruguay (South America)
+    "VE": { continent_id: "019", subcontinent_id: "005" }, // Venezuela (South America)
+
+    // Asia (continent: 142)
+    "AE": { continent_id: "142", subcontinent_id: "145" }, // United Arab Emirates (Western Asia)
+    "AF": { continent_id: "142", subcontinent_id: "034" }, // Afghanistan (Southern Asia)
+    "AM": { continent_id: "142", subcontinent_id: "145" }, // Armenia (Western Asia)
+    "AZ": { continent_id: "142", subcontinent_id: "145" }, // Azerbaijan (Western Asia)
+    "BD": { continent_id: "142", subcontinent_id: "034" }, // Bangladesh (Southern Asia)
+    "BH": { continent_id: "142", subcontinent_id: "145" }, // Bahrain (Western Asia)
+    "BN": { continent_id: "142", subcontinent_id: "035" }, // Brunei (South-Eastern Asia)
+    "BT": { continent_id: "142", subcontinent_id: "034" }, // Bhutan (Southern Asia)
+    "CN": { continent_id: "142", subcontinent_id: "030" }, // China (Eastern Asia)
+    "GE": { continent_id: "142", subcontinent_id: "145" }, // Georgia (Western Asia)
+    "ID": { continent_id: "142", subcontinent_id: "035" }, // Indonesia (South-Eastern Asia)
+    "IL": { continent_id: "142", subcontinent_id: "145" }, // Israel (Western Asia)
+    "IN": { continent_id: "142", subcontinent_id: "034" }, // India (Southern Asia)
+    "IQ": { continent_id: "142", subcontinent_id: "145" }, // Iraq (Western Asia)
+    "IR": { continent_id: "142", subcontinent_id: "034" }, // Iran (Southern Asia)
+    "JO": { continent_id: "142", subcontinent_id: "145" }, // Jordan (Western Asia)
+    "JP": { continent_id: "142", subcontinent_id: "030" }, // Japan (Eastern Asia)
+    "KG": { continent_id: "142", subcontinent_id: "143" }, // Kyrgyzstan (Central Asia)
+    "KH": { continent_id: "142", subcontinent_id: "035" }, // Cambodia (South-Eastern Asia)
+    "KP": { continent_id: "142", subcontinent_id: "030" }, // North Korea (Eastern Asia)
+    "KR": { continent_id: "142", subcontinent_id: "030" }, // South Korea (Eastern Asia)
+    "KW": { continent_id: "142", subcontinent_id: "145" }, // Kuwait (Western Asia)
+    "KZ": { continent_id: "142", subcontinent_id: "143" }, // Kazakhstan (Central Asia)
+    "LA": { continent_id: "142", subcontinent_id: "035" }, // Laos (South-Eastern Asia)
+    "LB": { continent_id: "142", subcontinent_id: "145" }, // Lebanon (Western Asia)
+    "LK": { continent_id: "142", subcontinent_id: "034" }, // Sri Lanka (Southern Asia)
+    "MM": { continent_id: "142", subcontinent_id: "035" }, // Myanmar (South-Eastern Asia)
+    "MN": { continent_id: "142", subcontinent_id: "030" }, // Mongolia (Eastern Asia)
+    "MV": { continent_id: "142", subcontinent_id: "034" }, // Maldives (Southern Asia)
+    "MY": { continent_id: "142", subcontinent_id: "035" }, // Malaysia (South-Eastern Asia)
+    "NP": { continent_id: "142", subcontinent_id: "034" }, // Nepal (Southern Asia)
+    "OM": { continent_id: "142", subcontinent_id: "145" }, // Oman (Western Asia)
+    "PH": { continent_id: "142", subcontinent_id: "035" }, // Philippines (South-Eastern Asia)
+    "PK": { continent_id: "142", subcontinent_id: "034" }, // Pakistan (Southern Asia)
+    "PS": { continent_id: "142", subcontinent_id: "145" }, // Palestine (Western Asia)
+    "QA": { continent_id: "142", subcontinent_id: "145" }, // Qatar (Western Asia)
+    "SA": { continent_id: "142", subcontinent_id: "145" }, // Saudi Arabia (Western Asia)
+    "SG": { continent_id: "142", subcontinent_id: "035" }, // Singapore (South-Eastern Asia)
+    "SY": { continent_id: "142", subcontinent_id: "145" }, // Syria (Western Asia)
+    "TH": { continent_id: "142", subcontinent_id: "035" }, // Thailand (South-Eastern Asia)
+    "TJ": { continent_id: "142", subcontinent_id: "143" }, // Tajikistan (Central Asia)
+    "TM": { continent_id: "142", subcontinent_id: "143" }, // Turkmenistan (Central Asia)
+    "TR": { continent_id: "142", subcontinent_id: "145" }, // Turkey (Western Asia)
+    "TW": { continent_id: "142", subcontinent_id: "030" }, // Taiwan (Eastern Asia)
+    "UZ": { continent_id: "142", subcontinent_id: "143" }, // Uzbekistan (Central Asia)
+    "VN": { continent_id: "142", subcontinent_id: "035" }, // Vietnam (South-Eastern Asia)
+    "YE": { continent_id: "142", subcontinent_id: "145" }, // Yemen (Western Asia)
+
+    // Africa (continent: 002)
+    "AO": { continent_id: "002", subcontinent_id: "017" }, // Angola (Middle Africa)
+    "BF": { continent_id: "002", subcontinent_id: "011" }, // Burkina Faso (Western Africa)
+    "BI": { continent_id: "002", subcontinent_id: "014" }, // Burundi (Eastern Africa)
+    "BJ": { continent_id: "002", subcontinent_id: "011" }, // Benin (Western Africa)
+    "BW": { continent_id: "002", subcontinent_id: "018" }, // Botswana (Southern Africa)
+    "CD": { continent_id: "002", subcontinent_id: "017" }, // DR Congo (Middle Africa)
+    "CF": { continent_id: "002", subcontinent_id: "017" }, // Central African Republic (Middle Africa)
+    "CG": { continent_id: "002", subcontinent_id: "017" }, // Republic of the Congo (Middle Africa)
+    "CI": { continent_id: "002", subcontinent_id: "011" }, // Côte d'Ivoire (Western Africa)
+    "CM": { continent_id: "002", subcontinent_id: "017" }, // Cameroon (Middle Africa)
+    "CV": { continent_id: "002", subcontinent_id: "011" }, // Cape Verde (Western Africa)
+    "DJ": { continent_id: "002", subcontinent_id: "014" }, // Djibouti (Eastern Africa)
+    "DZ": { continent_id: "002", subcontinent_id: "015" }, // Algeria (Northern Africa)
+    "EG": { continent_id: "002", subcontinent_id: "015" }, // Egypt (Northern Africa)
+    "ER": { continent_id: "002", subcontinent_id: "014" }, // Eritrea (Eastern Africa)
+    "ET": { continent_id: "002", subcontinent_id: "014" }, // Ethiopia (Eastern Africa)
+    "GA": { continent_id: "002", subcontinent_id: "017" }, // Gabon (Middle Africa)
+    "GH": { continent_id: "002", subcontinent_id: "011" }, // Ghana (Western Africa)
+    "GM": { continent_id: "002", subcontinent_id: "011" }, // Gambia (Western Africa)
+    "GN": { continent_id: "002", subcontinent_id: "011" }, // Guinea (Western Africa)
+    "GQ": { continent_id: "002", subcontinent_id: "017" }, // Equatorial Guinea (Middle Africa)
+    "GW": { continent_id: "002", subcontinent_id: "011" }, // Guinea-Bissau (Western Africa)
+    "KE": { continent_id: "002", subcontinent_id: "014" }, // Kenya (Eastern Africa)
+    "LR": { continent_id: "002", subcontinent_id: "011" }, // Liberia (Western Africa)
+    "LS": { continent_id: "002", subcontinent_id: "018" }, // Lesotho (Southern Africa)
+    "LY": { continent_id: "002", subcontinent_id: "015" }, // Libya (Northern Africa)
+    "MA": { continent_id: "002", subcontinent_id: "015" }, // Morocco (Northern Africa)
+    "MG": { continent_id: "002", subcontinent_id: "014" }, // Madagascar (Eastern Africa)
+    "ML": { continent_id: "002", subcontinent_id: "011" }, // Mali (Western Africa)
+    "MR": { continent_id: "002", subcontinent_id: "011" }, // Mauritania (Western Africa)
+    "MU": { continent_id: "002", subcontinent_id: "014" }, // Mauritius (Eastern Africa)
+    "MW": { continent_id: "002", subcontinent_id: "014" }, // Malawi (Eastern Africa)
+    "MZ": { continent_id: "002", subcontinent_id: "014" }, // Mozambique (Eastern Africa)
+    "NA": { continent_id: "002", subcontinent_id: "018" }, // Namibia (Southern Africa)
+    "NE": { continent_id: "002", subcontinent_id: "011" }, // Niger (Western Africa)
+    "NG": { continent_id: "002", subcontinent_id: "011" }, // Nigeria (Western Africa)
+    "RW": { continent_id: "002", subcontinent_id: "014" }, // Rwanda (Eastern Africa)
+    "SD": { continent_id: "002", subcontinent_id: "015" }, // Sudan (Northern Africa)
+    "SL": { continent_id: "002", subcontinent_id: "011" }, // Sierra Leone (Western Africa)
+    "SN": { continent_id: "002", subcontinent_id: "011" }, // Senegal (Western Africa)
+    "SO": { continent_id: "002", subcontinent_id: "014" }, // Somalia (Eastern Africa)
+    "SS": { continent_id: "002", subcontinent_id: "014" }, // South Sudan (Eastern Africa)
+    "SZ": { continent_id: "002", subcontinent_id: "018" }, // Eswatini (Southern Africa)
+    "TD": { continent_id: "002", subcontinent_id: "017" }, // Chad (Middle Africa)
+    "TG": { continent_id: "002", subcontinent_id: "011" }, // Togo (Western Africa)
+    "TN": { continent_id: "002", subcontinent_id: "015" }, // Tunisia (Northern Africa)
+    "TZ": { continent_id: "002", subcontinent_id: "014" }, // Tanzania (Eastern Africa)
+    "UG": { continent_id: "002", subcontinent_id: "014" }, // Uganda (Eastern Africa)
+    "ZA": { continent_id: "002", subcontinent_id: "018" }, // South Africa (Southern Africa)
+    "ZM": { continent_id: "002", subcontinent_id: "014" }, // Zambia (Eastern Africa)
+    "ZW": { continent_id: "002", subcontinent_id: "014" }, // Zimbabwe (Eastern Africa)
+    
+    // Oceania (continent: 009)
+    "AU": { continent_id: "009", subcontinent_id: "053" }, // Australia (Australia and New Zealand)
+    "FJ": { continent_id: "009", subcontinent_id: "054" }, // Fiji (Melanesia)
+    "FM": { continent_id: "009", subcontinent_id: "057" }, // Micronesia (Micronesia)
+    "KI": { continent_id: "009", subcontinent_id: "057" }, // Kiribati (Micronesia)
+    "MH": { continent_id: "009", subcontinent_id: "057" }, // Marshall Islands (Micronesia)
+    "NR": { continent_id: "009", subcontinent_id: "057" }, // Nauru (Micronesia)
+    "NZ": { continent_id: "009", subcontinent_id: "053" }, // New Zealand (Australia and New Zealand)
+    "PG": { continent_id: "009", subcontinent_id: "054" }, // Papua New Guinea (Melanesia)
+    "PW": { continent_id: "009", subcontinent_id: "057" }, // Palau (Micronesia)
+    "SB": { continent_id: "009", subcontinent_id: "054" }, // Solomon Islands (Melanesia)
+    "TO": { continent_id: "009", subcontinent_id: "061" }, // Tonga (Polynesia)
+    "TV": { continent_id: "009", subcontinent_id: "061" }, // Tuvalu (Polynesia)
+    "VU": { continent_id: "009", subcontinent_id: "054" }, // Vanuatu (Melanesia)
+    "WS": { continent_id: "009", subcontinent_id: "061" }, // Samoa (Polynesia)
+  };
+
+  // First check if the country code exists in our mapping
+  if (continentMap[countryCode]) {
+    return continentMap[countryCode];
+  }
+
+  // If country code is not in our map, make a best guess based on the first letter
+  const firstLetter = countryCode.charAt(0);
+  
+  // Default mapping based on first letter of country code
+  const defaultContinentByFirstLetter = {
+    "A": { continent_id: "142", subcontinent_id: "" }, // Mostly Asia
+    "B": { continent_id: "150", subcontinent_id: "" }, // Mostly Europe
+    "C": { continent_id: "019", subcontinent_id: "" }, // Mostly Americas
+    "D": { continent_id: "150", subcontinent_id: "" }, // Mostly Europe
+    "E": { continent_id: "150", subcontinent_id: "" }, // Mostly Europe
+    "F": { continent_id: "150", subcontinent_id: "" }, // Mostly Europe
+    "G": { continent_id: "150", subcontinent_id: "" }, // Mostly Europe
+    "H": { continent_id: "019", subcontinent_id: "" }, // Mixed
+    "I": { continent_id: "142", subcontinent_id: "" }, // Mostly Asia
+    "J": { continent_id: "142", subcontinent_id: "" }, // Mostly Asia
+    "K": { continent_id: "142", subcontinent_id: "" }, // Mostly Asia
+    "L": { continent_id: "150", subcontinent_id: "" }, // Mostly Europe
+    "M": { continent_id: "002", subcontinent_id: "" }, // Mixed
+    "N": { continent_id: "150", subcontinent_id: "" }, // Mostly Europe
+    "O": { continent_id: "142", subcontinent_id: "" }, // Mostly Asia
+    "P": { continent_id: "019", subcontinent_id: "" }, // Mixed
+    "Q": { continent_id: "142", subcontinent_id: "" }, // Mostly Asia (Qatar)
+    "R": { continent_id: "150", subcontinent_id: "" }, // Mostly Europe
+    "S": { continent_id: "150", subcontinent_id: "" }, // Mixed
+    "T": { continent_id: "142", subcontinent_id: "" }, // Mixed
+    "U": { continent_id: "019", subcontinent_id: "" }, // Mostly Americas
+    "V": { continent_id: "019", subcontinent_id: "" }, // Mixed
+    "W": { continent_id: "009", subcontinent_id: "" }, // Mostly Oceania
+    "Y": { continent_id: "142", subcontinent_id: "" }, // Yemen
+    "Z": { continent_id: "002", subcontinent_id: "" }, // Mostly Africa
+  };
+
+  return defaultContinentByFirstLetter[firstLetter] || { continent_id: "", subcontinent_id: "" };
+}
+
+/**
+ * Convert country name to ISO country code
+ * @param {string} countryName - Full country name
+ * @returns {string} ISO country code
+ */
+function convertCountryToISO(countryName) {
+  // Simple mapping for common countries
+  const countryMap = {
+    "The Netherlands": "NL",
+    "Netherlands": "NL",
+    "United States": "US",
+    "USA": "US",
+    "U.S.A.": "US",
+    "U.S.": "US",
+    "United Kingdom": "GB",
+    "UK": "GB",
+    "Great Britain": "GB",
+    "England": "GB",
+    "Germany": "DE",
+    "Deutschland": "DE",
+    "France": "FR",
+    "Spain": "ES",
+    "España": "ES",
+    "Italy": "IT",
+    "Italia": "IT",
+    "Belgium": "BE",
+    "België": "BE",
+    "Belgique": "BE",
+    "Canada": "CA",
+    "Australia": "AU",
+    "Japan": "JP",
+    "China": "CN",
+    "India": "IN",
+    "Brazil": "BR",
+    "Brasil": "BR",
+    "Mexico": "MX",
+    "México": "MX",
+    "Argentina": "AR",
+    "South Africa": "ZA",
+    "Russia": "RU",
+    "Russian Federation": "RU",
+    "Poland": "PL",
+    "Polska": "PL",
+    "Sweden": "SE",
+    "Sverige": "SE",
+    "Norway": "NO",
+    "Norge": "NO",
+    "Denmark": "DK",
+    "Danmark": "DK",
+    "Finland": "FI",
+    "Suomi": "FI",
+    "Ireland": "IE",
+    "Portugal": "PT",
+    "Greece": "GR",
+    "Ελλάδα": "GR",
+    "Turkey": "TR",
+    "Türkiye": "TR",
+    "Austria": "AT",
+    "Österreich": "AT",
+    "Switzerland": "CH",
+    "Schweiz": "CH",
+    "Suisse": "CH",
+    "Luxembourg": "LU",
+    "New Zealand": "NZ",
+    "South Korea": "KR",
+    "Republic of Korea": "KR",
+    "Thailand": "TH",
+    "Singapore": "SG",
+    "Malaysia": "MY",
+    "Indonesia": "ID",
+    "Vietnam": "VN",
+    "Philippines": "PH",
+    "United Arab Emirates": "AE",
+    "UAE": "AE",
+    "Saudi Arabia": "SA",
+    "Israel": "IL",
+    "Egypt": "EG",
+    "Nigeria": "NG",
+    "Kenya": "KE",
+    "Morocco": "MA",
+    "Chile": "CL",
+    "Colombia": "CO",
+    "Peru": "PE",
+  };
+
+  // Check if we have a direct mapping
+  if (countryMap[countryName]) {
+    return countryMap[countryName];
+  }
+  
+  // Try to handle the case where countryName might be a country code already
+  if (countryName && countryName.length === 2 && countryName === countryName.toUpperCase()) {
+    return countryName; // It's already a country code
+  }
+  
+  // As a fallback, try to extract first two letters of the country name and uppercase them
+  return countryName ? countryName.toUpperCase().substring(0, 2) : "";
+}
+
+/**
+ * Convert region name to ISO region code
+ * @param {string} regionName - Full region name
+ * @param {string} countryCode - ISO country code
+ * @returns {string} ISO region code
+ */
+function convertRegionToISO(regionName, countryCode) {
+  if (!regionName || !countryCode) {
+    return "";
+  }
+  
+  // Netherlands regions mapping
+  if (countryCode === "NL") {
+    const nlRegions = {
+      "North Holland": "NL-NH",
+      "Noord-Holland": "NL-NH",
+      "South Holland": "NL-ZH",
+      "Zuid-Holland": "NL-ZH",
+      "North Brabant": "NL-NB",
+      "Noord-Brabant": "NL-NB",
+      "South Brabant": "NL-NB",
+      "Utrecht": "NL-UT",
+      "Gelderland": "NL-GE",
+      "Overijssel": "NL-OV",
+      "Limburg": "NL-LI",
+      "Groningen": "NL-GR",
+      "Friesland": "NL-FR",
+      "Fryslân": "NL-FR",
+      "Drenthe": "NL-DR",
+      "Flevoland": "NL-FL",
+      "Zeeland": "NL-ZE",
+    };
+    return nlRegions[regionName] || `${countryCode}-${regionName.toUpperCase().substring(0, 2)}`;
+  }
+  
+  // US states mapping
+  if (countryCode === "US") {
+    const usStates = {
+      "Alabama": "US-AL",
+      "Alaska": "US-AK",
+      "Arizona": "US-AZ",
+      "Arkansas": "US-AR",
+      "California": "US-CA",
+      "Colorado": "US-CO",
+      "Connecticut": "US-CT",
+      "Delaware": "US-DE",
+      "Florida": "US-FL",
+      "Georgia": "US-GA",
+      "Hawaii": "US-HI",
+      "Idaho": "US-ID",
+      "Illinois": "US-IL",
+      "Indiana": "US-IN",
+      "Iowa": "US-IA",
+      "Kansas": "US-KS",
+      "Kentucky": "US-KY",
+      "Louisiana": "US-LA",
+      "Maine": "US-ME",
+      "Maryland": "US-MD",
+      "Massachusetts": "US-MA",
+      "Michigan": "US-MI",
+      "Minnesota": "US-MN",
+      "Mississippi": "US-MS",
+      "Missouri": "US-MO",
+      "Montana": "US-MT",
+      "Nebraska": "US-NE",
+      "Nevada": "US-NV",
+      "New Hampshire": "US-NH",
+      "New Jersey": "US-NJ",
+      "New Mexico": "US-NM",
+      "New York": "US-NY",
+      "North Carolina": "US-NC",
+      "North Dakota": "US-ND",
+      "Ohio": "US-OH",
+      "Oklahoma": "US-OK",
+      "Oregon": "US-OR",
+      "Pennsylvania": "US-PA",
+      "Rhode Island": "US-RI",
+      "South Carolina": "US-SC",
+      "South Dakota": "US-SD",
+      "Tennessee": "US-TN",
+      "Texas": "US-TX",
+      "Utah": "US-UT",
+      "Vermont": "US-VT",
+      "Virginia": "US-VA",
+      "Washington": "US-WA",
+      "West Virginia": "US-WV",
+      "Wisconsin": "US-WI",
+      "Wyoming": "US-WY",
+      "District of Columbia": "US-DC",
+      "Washington DC": "US-DC",
+      "Washington D.C.": "US-DC",
+    };
+    return usStates[regionName] || `${countryCode}-${regionName.toUpperCase().substring(0, 2)}`;
+  }
+  
+  // UK regions/countries
+  if (countryCode === "GB") {
+    const ukRegions = {
+      "England": "GB-ENG",
+      "Scotland": "GB-SCT",
+      "Wales": "GB-WLS",
+      "Northern Ireland": "GB-NIR",
+      "London": "GB-LDN",
+      "Greater London": "GB-LDN",
+    };
+    return ukRegions[regionName] || `${countryCode}-${regionName.toUpperCase().substring(0, 2)}`;
+  }
+  
+  // Default case for other countries
+  return `${countryCode}-${regionName.toUpperCase().substring(0, 2)}`;
+}
+
+/**
+ * Extract location data from params and format for GA4
+ * @param {Object} params - Request parameters containing location data
+ * @returns {Object} Formatted user_location object for GA4
  */
 function extractLocationData(params) {
   const userLocation = {};
@@ -189,23 +671,56 @@ function extractLocationData(params) {
   if (params.geo_region || params.region) {
     // Convert region to ISO format if needed
     const regionName = params.geo_region || params.region;
-    const countryCode = userLocation.country_id || 'NL'; // Default to NL if no country
+    const countryCode = userLocation.country_id || "NL"; // Default to NL if no country
     userLocation.region_id = convertRegionToISO(regionName, countryCode);
     delete params.geo_region;
     delete params.region;
   }
 
+  // Handle continent data from params
+  if (params.continent) {
+    // Map text continent names to their numeric codes
+    const continentNameToCode = {
+      "Europe": "150",
+      "Americas": "019",
+      "Asia": "142", 
+      "Africa": "002",
+      "Oceania": "009",
+      "Antarctica": "010",
+      // Also handle common abbreviations
+      "EU": "150",
+      "NA": "019", // North America
+      "SA": "019", // South America (still part of Americas)
+      "AS": "142",
+      "AF": "002",
+      "OC": "009",
+      "AN": "010"
+    };
+    
+    // Set the continent_id if it matches a known continent name or code
+    if (continentNameToCode[params.continent]) {
+      userLocation.continent_id = continentNameToCode[params.continent];
+    }
+    
+    delete params.continent; // Remove from params after processing
+  }
+
   // Add continent and subcontinent based on country
-  if (userLocation.country_id) {
+  if (userLocation.country_id && !userLocation.continent_id) {
     const continentInfo = getContinentInfo(userLocation.country_id);
+    
     if (continentInfo.continent_id) {
       userLocation.continent_id = continentInfo.continent_id;
     }
+    
     if (continentInfo.subcontinent_id) {
       userLocation.subcontinent_id = continentInfo.subcontinent_id;
     }
   }
-
+  
+  if(!userLocation.country_id) {
+    userLocation.country_id = "NL";
+  }
   // Remove lat/lng from params as they're not standard GA4 parameters
   if (params.geo_latitude) {
     delete params.geo_latitude;
@@ -213,135 +728,15 @@ function extractLocationData(params) {
   if (params.geo_longitude) {
     delete params.geo_longitude;
   }
+  
+  // Remove any empty values
+  Object.keys(userLocation).forEach(key => {
+    if (!userLocation[key]) {
+      delete userLocation[key];
+    }
+  });
 
   return userLocation;
-}
-
-/**
- * Get continent and subcontinent info based on country code
- * @param {string} countryCode - ISO country code
- * @returns {Object} Continent and subcontinent information
- */
-function getContinentInfo(countryCode) {
-  // Continental and subcontinental mapping based on UN geoscheme
-  const continentMap = {
-    // Europe (continent: 150)
-    'NL': { continent_id: '150', subcontinent_id: '155' }, // Western Europe
-    'DE': { continent_id: '150', subcontinent_id: '155' }, // Western Europe
-    'FR': { continent_id: '150', subcontinent_id: '155' }, // Western Europe
-    'ES': { continent_id: '150', subcontinent_id: '039' }, // Southern Europe
-    'IT': { continent_id: '150', subcontinent_id: '039' }, // Southern Europe
-    'BE': { continent_id: '150', subcontinent_id: '155' }, // Western Europe
-    'GB': { continent_id: '150', subcontinent_id: '154' }, // Northern Europe
-    'IE': { continent_id: '150', subcontinent_id: '154' }, // Northern Europe
-    'SE': { continent_id: '150', subcontinent_id: '154' }, // Northern Europe
-    'NO': { continent_id: '150', subcontinent_id: '154' }, // Northern Europe
-    'DK': { continent_id: '150', subcontinent_id: '154' }, // Northern Europe
-    'FI': { continent_id: '150', subcontinent_id: '154' }, // Northern Europe
-    'PL': { continent_id: '150', subcontinent_id: '151' }, // Eastern Europe
-    'RU': { continent_id: '150', subcontinent_id: '151' }, // Eastern Europe
-    'AT': { continent_id: '150', subcontinent_id: '155' }, // Western Europe
-    'CH': { continent_id: '150', subcontinent_id: '155' }, // Western Europe
-    'PT': { continent_id: '150', subcontinent_id: '039' }, // Southern Europe
-    'GR': { continent_id: '150', subcontinent_id: '039' }, // Southern Europe
-    'TR': { continent_id: '142', subcontinent_id: '145' }, // Western Asia
-    'LU': { continent_id: '150', subcontinent_id: '155' }, // Western Europe
-
-    // Americas (continent: 019)
-    'US': { continent_id: '019', subcontinent_id: '021' }, // Northern America
-    'CA': { continent_id: '019', subcontinent_id: '021' }, // Northern America
-    'MX': { continent_id: '019', subcontinent_id: '013' }, // Central America
-    'BR': { continent_id: '019', subcontinent_id: '005' }, // South America
-    'AR': { continent_id: '019', subcontinent_id: '005' }, // South America
-
-    // Asia (continent: 142)
-    'CN': { continent_id: '142', subcontinent_id: '030' }, // Eastern Asia
-    'JP': { continent_id: '142', subcontinent_id: '030' }, // Eastern Asia
-    'IN': { continent_id: '142', subcontinent_id: '034' }, // Southern Asia
-
-    // Africa (continent: 002)
-    'ZA': { continent_id: '002', subcontinent_id: '018' }, // Southern Africa
-
-    // Oceania (continent: 009)
-    'AU': { continent_id: '009', subcontinent_id: '053' }, // Australia and New Zealand
-  };
-
-  return continentMap[countryCode] || { continent_id: '', subcontinent_id: '' };
-}
-
-/**
- * Convert country name to ISO country code
- * @param {string} countryName - Full country name
- * @returns {string} ISO country code
- */
-function convertCountryToISO(countryName) {
-  // Simple mapping for common countries
-  const countryMap = {
-    'The Netherlands': 'NL',
-    'Netherlands': 'NL',
-    'United States': 'US',
-    'United Kingdom': 'GB',
-    'Germany': 'DE',
-    'France': 'FR',
-    'Spain': 'ES',
-    'Italy': 'IT',
-    'Belgium': 'BE',
-    'Canada': 'CA',
-    'Australia': 'AU',
-    'Japan': 'JP',
-    'China': 'CN',
-    'India': 'IN',
-    'Brazil': 'BR',
-    'Mexico': 'MX',
-    'Argentina': 'AR',
-    'South Africa': 'ZA',
-    'Russia': 'RU',
-    'Poland': 'PL',
-    'Sweden': 'SE',
-    'Norway': 'NO',
-    'Denmark': 'DK',
-    'Finland': 'FI',
-    'Ireland': 'IE',
-    'Portugal': 'PT',
-    'Greece': 'GR',
-    'Turkey': 'TR',
-    'Austria': 'AT',
-    'Switzerland': 'CH',
-    'Luxembourg': 'LU'
-  };
-
-  return countryMap[countryName] || countryName.toUpperCase().substring(0, 2);
-}
-
-/**
- * Convert region name to ISO region code
- * @param {string} regionName - Full region name
- * @param {string} countryCode - ISO country code
- * @returns {string} ISO region code
- */
-function convertRegionToISO(regionName, countryCode) {
-  // Netherlands regions mapping
-  if (countryCode === 'NL') {
-    const nlRegions = {
-      'North Holland': 'NL-NH',
-      'South Holland': 'NL-ZH',
-      'North Brabant': 'NL-NB',
-      'South Brabant': 'NL-NB',
-      'Utrecht': 'NL-UT',
-      'Gelderland': 'NL-GE',
-      'Overijssel': 'NL-OV',
-      'Limburg': 'NL-LI',
-      'Groningen': 'NL-GR',
-      'Friesland': 'NL-FR',
-      'Drenthe': 'NL-DR',
-      'Flevoland': 'NL-FL',
-      'Zeeland': 'NL-ZE'
-    };
-    return nlRegions[regionName] || `${countryCode}-${regionName.toUpperCase().substring(0, 2)}`;
-  }
-
-  // For other countries, create a simple format
-  return `${countryCode}-${regionName.toUpperCase().substring(0, 2)}`;
 }
 
 /**

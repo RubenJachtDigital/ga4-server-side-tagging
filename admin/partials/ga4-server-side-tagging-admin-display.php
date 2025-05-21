@@ -111,7 +111,7 @@ if ( ! defined( 'WPINC' ) ) {
                                     <input type="checkbox" id="ga4_anonymize_ip" name="ga4_anonymize_ip" <?php checked( $anonymize_ip ); ?> />
                                     Anonymize IP addresses
                                 </label>
-                                <p class="description">Anonymize user IP addresses for GDPR compliance</p>
+                                <p class="description">Anonymize user IP addresses for GDPR compliance.(Only tracks continent when enabled)</p>
                             </td>
                         </tr>
                         <tr>
