@@ -102,6 +102,10 @@ class GA4_Server_Side_Tagging_Public
         if (function_exists('is_product') && is_product()) {
             $script_data['productData'] = $this->get_current_product_data();
         }
+
+        if (function_exists('is_user_logged_in') && is_user_logged_in()) {
+            $script_data['user_id'] = get_current_user_id();
+        }
         // Add order data for purchase event if on the order received page
         if (function_exists('is_wc_endpoint_url') && is_wc_endpoint_url('order-received') && isset($_GET['key'])) {
             $order_id = wc_get_order_id_by_order_key(wc_clean(wp_unslash($_GET['key'])));

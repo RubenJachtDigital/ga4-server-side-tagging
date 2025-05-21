@@ -27,7 +27,7 @@
       this.setupEventListeners();
 
       // Log initialization
-      this.log("GA4 Server-Side Tagging initialized v6");
+      this.log("GA4 Server-Side Tagging initialized v7");
     },
 
     trackPageView: function () {
@@ -35,7 +35,7 @@
       var session = this.getSession();
       this.log("session data: " + session.start);
       var isNewSession = session.isNew; // Track if this is a new session
-
+      var user_id = "";
       // Get user agent and device information
       var userAgentInfo = this.parseUserAgent();
 
@@ -78,12 +78,7 @@
       var term = utmTerm || "";
 
       // If no UTM parameters but we have a referrer, determine source/medium
-      if (
-        !source &&
-        !medium &&
-        referrerDomain &&
-        !ignore_referrer
-      ) {
+      if (!source && !medium && referrerDomain && !ignore_referrer) {
         // Handle search engines - this is critical for organic search attribution
         if (referrerDomain.indexOf("google") > -1) {
           // Check if it's Google Ads or organic
@@ -179,7 +174,9 @@
       }
 
       this.log(this.calculateEngagementTime());
-
+      if (this.config.user_id) {
+        user_id = this.config.user_id;
+      }
       // Common session parameters needed for all page view events (limited to 25 params max)
       var sessionParams = {
         // Core identification (required)
@@ -190,6 +187,9 @@
         engagement_time_msec: this.calculateEngagementTime(),
         // Session flags
         ...(isNewSession && { session_start: 1 }),
+
+        // Adding user id
+        ...(user_id && { user_id: user_id }),
 
         // Device and browser (most important UA info)
         browser_name: userAgentInfo.browser_name,
@@ -1270,7 +1270,6 @@
           parsedUA.browser_name = "Unknown";
         }
       }
-
 
       // Determine device type based on user agent
       if (
