@@ -27,7 +27,7 @@
       this.setupEventListeners();
 
       // Log initialization
-      this.log("GA4 Server-Side Tagging initialized v5");
+      this.log("GA4 Server-Side Tagging initialized v6");
     },
 
     trackPageView: function () {
@@ -1510,6 +1510,10 @@
       // Add session_id to event params if not already present
       if (!eventParams.hasOwnProperty("session_id")) {
         eventParams.session_id = session.id;
+      }
+         // Add session_count to event params if not already present
+      if (!eventParams.hasOwnProperty("session_count")) {
+        eventParams.session_count = session.sessionCount;
       }
 
       // Add debug_mode to event params if not already present and ensure it's a boolean
