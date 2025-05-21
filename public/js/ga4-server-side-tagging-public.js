@@ -18,6 +18,10 @@
         this.log("Measurement ID not configured");
         return;
       }
+      if (this.config.ga4TrackLoggedInUsers != true) {
+        this.log("Not tracking logged in users");
+        return;
+      }
 
       if (this.config.useServerSide == true) {
         this.trackPageView();
@@ -27,7 +31,7 @@
       this.setupEventListeners();
 
       // Log initialization
-      this.log("GA4 Server-Side Tagging initialized v7");
+      this.log("GA4 Server-Side Tagging initialized v3");
     },
 
     trackPageView: function () {
@@ -35,7 +39,7 @@
       var session = this.getSession();
       this.log("session data: " + session.start);
       var isNewSession = session.isNew; // Track if this is a new session
-      var user_id = "";
+
       // Get user agent and device information
       var userAgentInfo = this.parseUserAgent();
 
@@ -174,9 +178,7 @@
       }
 
       this.log(this.calculateEngagementTime());
-      if (this.config.user_id) {
-        user_id = this.config.user_id;
-      }
+
       // Common session parameters needed for all page view events (limited to 25 params max)
       var sessionParams = {
         // Core identification (required)
@@ -187,9 +189,6 @@
         engagement_time_msec: this.calculateEngagementTime(),
         // Session flags
         ...(isNewSession && { session_start: 1 }),
-
-        // Adding user id
-        ...(user_id && { user_id: user_id }),
 
         // Device and browser (most important UA info)
         browser_name: userAgentInfo.browser_name,
@@ -1436,6 +1435,11 @@
       this.log("Tracking event: " + eventName, eventParams);
       var session = this.getSession();
 
+      if (!eventParams.hasOwnProperty("user_id")) {
+        if (this.config.user_id) {
+          eventParams.user_id = this.config.user_id;
+        }
+      }
       // Add session_id to event params if not already present
       if (!eventParams.hasOwnProperty("session_id")) {
         eventParams.session_id = session.id;

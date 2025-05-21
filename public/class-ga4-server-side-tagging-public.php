@@ -91,6 +91,7 @@ class GA4_Server_Side_Tagging_Public
             'useServerSide' => get_option('ga4_use_server_side', true),
             'debugMode' => get_option('ga4_server_side_tagging_debug_mode', false),
             'anonymizeIp' => get_option('ga4_anonymize_ip', true),
+            'ga4TrackLoggedInUsers' => get_option('ga4_track_logged_in_users', true),
             'apiEndpoint' => rest_url('ga4-server-side-tagging/v1/collect'),
             'nonce' => wp_create_nonce('wp_rest'),
             'isEcommerceEnabled' => get_option('ga4_ecommerce_tracking', true),
