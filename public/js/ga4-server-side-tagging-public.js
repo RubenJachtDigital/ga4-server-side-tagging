@@ -491,7 +491,7 @@
               trackedIntervals.indexOf(interval) === -1
             ) {
               trackedIntervals.push(interval);
-              self.trackEvent("user_engagement", {
+              self.trackEvent("custom_user_engagement", {
                 engagement_time_msec: interval * 1000,
               });
             }
