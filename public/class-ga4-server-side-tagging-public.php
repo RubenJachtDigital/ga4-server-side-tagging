@@ -99,28 +99,38 @@ class GA4_Server_Side_Tagging_Public
             'currency' => function_exists('get_woocommerce_currency') ? get_woocommerce_currency() : 'EUR',
             'siteName' => get_bloginfo('name'),
         );
+
         // Add product data if we're on a product page
         if (function_exists('is_product') && is_product()) {
             $script_data['productData'] = $this->get_current_product_data();
         }
 
+        // Add cart data for checkout events
+        if (function_exists('is_checkout') && (is_checkout() || is_cart())) {
+            $script_data['cartData'] = $this->get_cart_data_for_tracking();
+            $this->logger->info('Added cart data for checkout events. Items count: ' .
+                (isset($script_data['cartData']['items_count']) ? $script_data['cartData']['items_count'] : 0));
+        }
+
         if (function_exists('is_user_logged_in') && is_user_logged_in()) {
             $script_data['user_id'] = get_current_user_id();
         }
-        // Add order data for purchase event if on the order received page
-        if (function_exists('is_wc_endpoint_url') && is_wc_endpoint_url('order-received') && isset($_GET['key'])) {
-            $order_id = wc_get_order_id_by_order_key(wc_clean(wp_unslash($_GET['key'])));
 
-            if ($order_id) {
-                $order = wc_get_order($order_id);
-                if ($order) {
-                    $script_data['orderData'] = $this->get_order_data_for_tracking($order);
-                    $this->logger->info('Added order data for purchase event tracking. Order ID: ' . $order_id);
+        // Method 1: Use WooCommerce's built-in function (RECOMMENDED)
+        if (function_exists('is_order_received_page') && is_order_received_page()) {
+            $script_data['isThankYouPage'] = true;
+
+            // Get order data if key is present
+            if (isset($_GET['key'])) {
+                $order_id = wc_get_order_id_by_order_key(wc_clean(wp_unslash($_GET['key'])));
+                if ($order_id) {
+                    $order = wc_get_order($order_id);
+                    if ($order) {
+                        $script_data['orderData'] = $this->get_order_data_for_tracking($order);
+                        $this->logger->info('Added order data for purchase event tracking. Order ID: ' . $order_id);
+                    }
                 }
             }
-        }
-        if (function_exists('is_wc_endpoint_url') && is_wc_endpoint_url('order-received')) {
-            $script_data['isThankYouPage'] = true;
         } else {
             $script_data['isThankYouPage'] = false;
         }
@@ -130,7 +140,6 @@ class GA4_Server_Side_Tagging_Public
             $this->logger->info('Quote data:' . json_encode($quote_data));
             $script_data['quoteData'] = $quote_data;
             $this->logger->info('Added quote data for request a quote event tracking. Order ID: ' . $quote_data['transaction_id']);
-            // Delete the transient after using it
         }
 
         // Pass data to the script
@@ -206,6 +215,134 @@ class GA4_Server_Side_Tagging_Public
         <!-- End GA4 Server-Side Tagging -->
         <?php
     }
+    /**
+     * Get current cart data for GA4 tracking
+     * 
+     * @return array Cart data formatted for GA4 events
+     */
+    public function get_cart_data_for_tracking()
+    {
+        if (!function_exists('WC') || !WC()->cart) {
+            return array();
+        }
+
+        $cart = WC()->cart;
+
+        if ($cart->is_empty()) {
+            return array();
+        }
+
+        $cart_items = array();
+        $item_index = 1;
+
+        foreach ($cart->get_cart() as $cart_item_key => $cart_item) {
+            $product = $cart_item['data'];
+            $product_id = $cart_item['product_id'];
+            $variation_id = $cart_item['variation_id'];
+
+            // Get product categories
+            $categories = wp_get_post_terms($product_id, 'product_cat', array('fields' => 'names'));
+            $category = !empty($categories) ? $categories[0] : '';
+
+            // Get additional category levels for GA4
+            $category2 = isset($categories[1]) ? $categories[1] : '';
+            $category3 = isset($categories[2]) ? $categories[2] : '';
+            $category4 = isset($categories[3]) ? $categories[3] : '';
+            $category5 = isset($categories[4]) ? $categories[4] : '';
+
+            // Get product brand (if you have a brand taxonomy or custom field)
+            $brand = '';
+            if (taxonomy_exists('product_brand')) {
+                $brands = wp_get_post_terms($product_id, 'product_brand', array('fields' => 'names'));
+                $brand = !empty($brands) ? $brands[0] : '';
+            } else {
+                // Alternative: get brand from custom field
+                $brand = get_post_meta($product_id, '_product_brand', true);
+            }
+
+            $cart_items[] = array(
+                'item_id' => $variation_id ? $variation_id : $product_id,
+                'item_name' => $product->get_name(),
+                'affiliation' => get_bloginfo('name'),
+                'coupon' => '', // Will be set later if coupon is applied
+                'discount' => 0, // Will be calculated later if discount is applied
+                'index' => $item_index,
+                'item_brand' => $brand,
+                'item_category' => $category,
+                'item_category2' => $category2,
+                'item_category3' => $category3,
+                'item_category4' => $category4,
+                'item_category5' => $category5,
+                'item_list_id' => 'cart',
+                'item_list_name' => 'Shopping Cart',
+                'item_variant' => $variation_id ? $this->get_variation_attributes($cart_item) : '',
+                'location_id' => '', // Set if you have multiple store locations
+                'price' => floatval($product->get_price()),
+                'quantity' => intval($cart_item['quantity'])
+            );
+
+            $item_index++;
+        }
+
+        // Get applied coupons
+        $applied_coupons = $cart->get_applied_coupons();
+        $coupon_codes = !empty($applied_coupons) ? implode(',', $applied_coupons) : '';
+
+        // Calculate discount amount
+        $discount_amount = $cart->get_discount_total();
+
+        // Update coupon and discount info for items if coupon is applied
+        if (!empty($coupon_codes)) {
+            foreach ($cart_items as &$item) {
+                $item['coupon'] = $coupon_codes;
+                // Distribute discount proportionally (simplified approach)
+                $item['discount'] = $discount_amount > 0 ?
+                    round(($discount_amount * $item['price'] * $item['quantity']) / $cart->get_subtotal(), 2) : 0;
+            }
+        }
+
+        return array(
+            'currency' => get_woocommerce_currency(),
+            'value' => floatval($cart->get_total('edit')),
+            'coupon' => $coupon_codes,
+            'items' => $cart_items,
+            // Additional cart information
+            'subtotal' => floatval($cart->get_subtotal()),
+            'tax' => floatval($cart->get_total_tax()),
+            'shipping' => floatval($cart->get_shipping_total()),
+            'discount' => floatval($discount_amount),
+            'items_count' => $cart->get_cart_contents_count()
+        );
+    }
+
+    /**
+     * Get variation attributes as a string
+     * 
+     * @param array $cart_item Cart item data
+     * @return string Variation attributes formatted as string
+     */
+    private function get_variation_attributes($cart_item)
+    {
+        if (empty($cart_item['variation']) || !is_array($cart_item['variation'])) {
+            return '';
+        }
+
+        $attributes = array();
+        foreach ($cart_item['variation'] as $key => $value) {
+            if (empty($value))
+                continue;
+
+            // Remove 'attribute_' prefix and format
+            $attribute_name = str_replace('attribute_', '', $key);
+            $attribute_name = str_replace('pa_', '', $attribute_name); // Remove taxonomy prefix
+            $attribute_name = ucfirst(str_replace('-', ' ', $attribute_name));
+
+            $attributes[] = $attribute_name . ': ' . $value;
+        }
+
+        return implode(', ', $attributes);
+    }
+
 
     /**
      * Get order data formatted for GA4 purchase event tracking.
@@ -428,41 +565,208 @@ class GA4_Server_Side_Tagging_Public
 
         $this->logger->info('Getting product data for view_item event: ' . $product->get_name());
 
-        // Get product data
-        $product_data = [
-            'item_id' => $product->get_id(),
-            'item_name' => $product->get_name(),
-            'price' => (float) $product->get_price(),
-        ];
-
-        // Add optional parameters if available
-        if ($product->get_sku()) {
-            $product_data['item_sku'] = $product->get_sku();
-        }
-
+        // Get product categories
+        $categories = [];
         if ($product->get_category_ids()) {
-            $categories = [];
             foreach ($product->get_category_ids() as $cat_id) {
                 $term = get_term_by('id', $cat_id, 'product_cat');
                 if ($term) {
                     $categories[] = $term->name;
                 }
             }
-            if (!empty($categories)) {
-                $product_data['item_category'] = $categories[0];
+        }
 
-                // Add additional categories if available
-                for ($i = 1; $i < min(5, count($categories)); $i++) {
-                    $product_data['item_category' . ($i + 1)] = $categories[$i];
+        // Get product brand (if you have a brand taxonomy or custom field)
+        $brand = '';
+        if (taxonomy_exists('product_brand')) {
+            $brands = wp_get_post_terms($product->get_id(), 'product_brand', array('fields' => 'names'));
+            $brand = !empty($brands) ? $brands[0] : '';
+        } else {
+            // Alternative: get brand from custom field
+            $brand = get_post_meta($product->get_id(), '_product_brand', true);
+        }
+
+        // Base product data with proper GA4 formatting
+        $product_data = [
+            'item_id' => (string) $product->get_id(), // Convert to string for GA4
+            'item_name' => $product->get_name(),
+            'affiliation' => get_bloginfo('name'),
+            'coupon' => '', // Will be set if coupon is applied
+            'discount' => 0, // Will be set if discount is applied
+            'index' => 0, // Position in list (if applicable)
+            'item_brand' => $brand,
+            'item_category' => !empty($categories) ? $categories[0] : '',
+            'item_category2' => isset($categories[1]) ? $categories[1] : '',
+            'item_category3' => isset($categories[2]) ? $categories[2] : '',
+            'item_category4' => isset($categories[3]) ? $categories[3] : '',
+            'item_category5' => isset($categories[4]) ? $categories[4] : '',
+            'item_list_id' => '', // Set if product is in a specific list
+            'item_list_name' => '', // Set if product is in a specific list
+            'item_variant' => '',
+            'location_id' => '', // Set if you have multiple store locations
+            'price' => (float) $product->get_price(),
+            'quantity' => 1, // Default quantity for view_item events
+            'currency' => get_woocommerce_currency()
+        ];
+
+        // Add SKU if available
+        if ($product->get_sku()) {
+            $product_data['item_sku'] = $product->get_sku();
+        }
+
+        // Handle variable products
+        if ($product->is_type('variable')) {
+            $product_data['item_variant'] = 'Variable Product';
+
+            // If we're on a variation page, get the specific variation data
+            if (isset($_GET) && !empty($_GET)) {
+                $variation_attributes = [];
+                foreach ($_GET as $key => $value) {
+                    if (strpos($key, 'attribute_') === 0) {
+                        $attribute_name = str_replace('attribute_', '', $key);
+                        $attribute_name = str_replace('pa_', '', $attribute_name);
+                        $attribute_name = ucfirst(str_replace('-', ' ', $attribute_name));
+                        $variation_attributes[] = $attribute_name . ': ' . $value;
+                    }
+                }
+                if (!empty($variation_attributes)) {
+                    $product_data['item_variant'] = implode(', ', $variation_attributes);
                 }
             }
         }
 
-        // If it's a variable product, add variant info
-        if ($product->is_type('variable')) {
-            $product_data['item_variant'] = 'Variable Product';
+        // Handle grouped products
+        if ($product->is_type('grouped')) {
+            $product_data['item_variant'] = 'Grouped Product';
+        }
+
+        // Handle subscription products (if WooCommerce Subscriptions is active)
+        if ($product->is_type('subscription') || $product->is_type('variable-subscription')) {
+            $product_data['item_variant'] = 'Subscription Product';
+        }
+
+        // Remove empty values to keep the data clean
+        $product_data = array_filter($product_data, function ($value) {
+            return $value !== '' && $value !== null;
+        });
+
+        return $product_data;
+    }
+
+    /**
+     * Get current product data for view_item event (wrapper for proper event structure)
+     */
+    public function get_view_item_event_data()
+    {
+        $product_data = $this->get_current_product_data();
+
+        if (empty($product_data)) {
+            return [];
+        }
+
+        // Structure for view_item event
+        return [
+            'currency' => $product_data['currency'],
+            'value' => $product_data['price'],
+            'items' => [$product_data]
+        ];
+    }
+
+    /**
+     * Enhanced function to get product data with variation support
+     */
+    private function get_current_product_data_with_variation()
+    {
+        global $product;
+
+        if (!is_object($product)) {
+            $product = wc_get_product(get_the_ID());
+        }
+
+        if (!$product) {
+            return [];
+        }
+
+        // If this is a variation, get both parent and variation data
+        if ($product->is_type('variation')) {
+            $parent_product = wc_get_product($product->get_parent_id());
+            $product_data = $this->build_product_data_array($parent_product, $product);
+        } else {
+            $product_data = $this->build_product_data_array($product);
         }
 
         return $product_data;
+    }
+
+    /**
+     * Helper function to build product data array
+     */
+    private function build_product_data_array($product, $variation = null)
+    {
+        $actual_product = $variation ?: $product;
+
+        // Get categories from parent product
+        $categories = [];
+        if ($product->get_category_ids()) {
+            foreach ($product->get_category_ids() as $cat_id) {
+                $term = get_term_by('id', $cat_id, 'product_cat');
+                if ($term) {
+                    $categories[] = $term->name;
+                }
+            }
+        }
+
+        // Get brand
+        $brand = '';
+        if (taxonomy_exists('product_brand')) {
+            $brands = wp_get_post_terms($product->get_id(), 'product_brand', array('fields' => 'names'));
+            $brand = !empty($brands) ? $brands[0] : '';
+        } else {
+            $brand = get_post_meta($product->get_id(), '_product_brand', true);
+        }
+
+        $product_data = [
+            'item_id' => (string) $actual_product->get_id(),
+            'item_name' => $actual_product->get_name(),
+            'affiliation' => get_bloginfo('name'),
+            'item_brand' => $brand,
+            'item_category' => !empty($categories) ? $categories[0] : '',
+            'item_category2' => isset($categories[1]) ? $categories[1] : '',
+            'item_category3' => isset($categories[2]) ? $categories[2] : '',
+            'item_category4' => isset($categories[3]) ? $categories[3] : '',
+            'item_category5' => isset($categories[4]) ? $categories[4] : '',
+            'price' => (float) $actual_product->get_price(),
+            'quantity' => 1,
+            'currency' => get_woocommerce_currency()
+        ];
+
+        // Add SKU
+        if ($actual_product->get_sku()) {
+            $product_data['item_sku'] = $actual_product->get_sku();
+        }
+
+        // Add variation attributes if this is a variation
+        if ($variation) {
+            $attributes = [];
+            foreach ($variation->get_variation_attributes() as $attribute => $value) {
+                if (empty($value))
+                    continue;
+
+                $attribute_name = str_replace('attribute_', '', $attribute);
+                $attribute_name = str_replace('pa_', '', $attribute_name);
+                $attribute_name = ucfirst(str_replace('-', ' ', $attribute_name));
+
+                $attributes[] = $attribute_name . ': ' . $value;
+            }
+
+            if (!empty($attributes)) {
+                $product_data['item_variant'] = implode(', ', $attributes);
+            }
+        }
+
+        // Remove empty values
+        return array_filter($product_data, function ($value) {
+            return $value !== '' && $value !== null;
+        });
     }
 }

@@ -31,7 +31,7 @@
       this.setupEventListeners();
 
       // Log initialization
-      this.log("GA4 Server-Side Tagging initialized v5");
+      this.log("GA4 Server-Side Tagging initialized v4");
     },
 
     trackPageView: function () {
@@ -550,141 +550,30 @@
     setupEcommerceTracking: function () {
       var self = this;
 
-      // Track add to cart button clicks
-      $(document).on("click", ".add_to_cart_button", function () {
-        var productId = $(this).data("product_id");
-        var productSku = $(this).data("product_sku");
-        var productName = $(this)
-          .closest(".product")
-          .find(".woocommerce-loop-product__title")
-          .text();
-        var productPrice = $(this).data("product_price") || 0;
-
-        self.trackEvent("add_to_cart", {
-          item_id: productId,
-          item_name: productName,
-          item_sku: productSku,
-          price: productPrice,
-          quantity: 1,
-        });
-      });
-
-      // Track AJAX add to cart events
-      $(document.body).on(
-        "added_to_cart",
-        function (event, fragments, cart_hash, $button) {
-          if ($button) {
-            var productId = $button.data("product_id");
-            var productSku = $button.data("product_sku");
-            var productName = $button
-              .closest(".product")
-              .find(".woocommerce-loop-product__title")
-              .text();
-            var productPrice = $button.data("product_price") || 0;
-
-            self.trackEvent("add_to_cart", {
-              item_id: productId,
-              item_name: productName,
-              item_sku: productSku,
-              price: productPrice,
-              quantity: 1,
-            });
-          }
-        }
-      );
-
       $(document).on(
         "click",
         '.single_add_to_cart_button.buy-now, input[name="wc-buy-now"], .direct-inschrijven, .add-request-quote-button',
         function () {
           var $button = $(this);
-          var productId = $button.data("ga4-product-id");
-          var productName = $button.data("ga4-product-name");
-          var productPrice = $button.data("ga4-product-price") || 0;
           var quantity = parseInt($("input.qty").val()) || 1;
           var productData = self.config.productData;
 
-          // Check if productId is empty or not found
-          if (!productId) {
-            // Get item_name from h1.bde-heading
-            productName = document.title;
+          if (productData && productData.item_id && productData.item_name) {
+            // item_id is already a string from PHP
+            var itemData = Object.assign({}, productData, {
+              quantity: quantity,
+            });
 
-            // Get item_id from body class (postid-XXXXX)
-            var bodyClasses = $("body").attr("class").split(" ");
-            for (var i = 0; i < bodyClasses.length; i++) {
-              if (bodyClasses[i].startsWith("postid-")) {
-                productId = bodyClasses[i].replace("postid-", "");
-                break;
-              }
-            }
-
-            // Set price to 0
-            productPrice = productData.price;
+            self.trackEvent("add_to_cart", {
+              currency: productData.currency,
+              value: productData.price * quantity,
+              items: [itemData],
+            });
+          } else {
+            self.log("Not tracked 'add_to_cart' - missing product data");
           }
-
-          self.trackEvent("add_to_cart", {
-            item_id: productId,
-            item_name: productName,
-            price: parseFloat(productPrice),
-            items: [productData],
-            quantity: quantity,
-            value: parseFloat(productPrice),
-          });
-
-          self.log("Tracked Buy Now button click as add_to_cart", {
-            item_id: productId,
-            item_name: productName,
-            price: parseFloat(productPrice),
-            items: [productData],
-            value: parseFloat(productPrice),
-            quantity: quantity,
-          });
         }
       );
-
-      // Track single product add to cart form submissions
-      $(document).on("submit", "form.cart", function (e) {
-        // Don't track if it's already tracked by other handlers
-        if ($(this).find(".add_to_cart_button").length) {
-          return;
-        }
-
-        var $form = $(this);
-        var $button = $form.find(".single_add_to_cart_button");
-
-        // Skip if it's a Buy Now button (already tracked)
-        if (
-          $button.hasClass("buy-now") ||
-          $form.find('input[name="wc-buy-now"]').length
-        ) {
-          return;
-        }
-
-        // Get product data from the page
-        var productId =
-          $form.find('input[name="add-to-cart"]').val() ||
-          $form.find('button[name="add-to-cart"]').val();
-        var productName = $(".product_title").text();
-        var productPrice = $(".woocommerce-Price-amount")
-          .first()
-          .text()
-          .replace(/[^0-9,.]/g, "");
-        var quantity = parseInt($form.find("input.qty").val()) || 1;
-
-        self.trackEvent("add_to_cart", {
-          item_id: productId,
-          item_name: productName,
-          price: parseFloat(productPrice),
-          quantity: quantity,
-        });
-
-        self.log("Tracked form submission as add_to_cart", {
-          item_id: productId,
-          item_name: productName,
-          price: parseFloat(productPrice),
-          quantity: quantity,
-        });
-      });
 
       // Track product detail views
       if ($(".woocommerce-product-gallery").length) {
@@ -711,70 +600,207 @@
       // Track remove from cart events
       $(document).on("click", ".woocommerce-cart-form .remove", function () {
         var $row = $(this).closest("tr");
-        var productName = $row.find(".product-name").text().trim();
-        var productId = $(this).data("product_id") || "";
-        var price = $row
-          .find(".product-price .amount")
-          .text()
-          .replace(/[^0-9,.]/g, "");
+        var $removeLink = $(this);
+
+        // Get product data from the remove link and row
+        var productId = $removeLink.data("product_id") || "";
+        var cartItemKey = $removeLink.data("cart_item_key") || "";
+
+        // Extract product name (clean up any HTML and trim)
+        var productName =
+          $row.find(".product-name a").text().trim() ||
+          $row.find(".product-name").text().trim();
+
+        // Extract price - try multiple selectors for different themes
+        var priceText = "";
+        var $priceElement = $row
+          .find(".product-price .woocommerce-Price-amount")
+          .first();
+        if ($priceElement.length === 0) {
+          $priceElement = $row.find(".product-price .amount").first();
+        }
+        if ($priceElement.length === 0) {
+          $priceElement = $row.find(".product-price").first();
+        }
+
+        if ($priceElement.length > 0) {
+          priceText = $priceElement.text().replace(/[^\d.,]/g, "");
+        }
+
+        var price = parseFloat(priceText.replace(",", ".")) || 0;
+
+        // Get quantity
         var quantity =
-          parseInt($row.find(".product-quantity input.qty").val()) || 1;
+          parseInt($row.find(".product-quantity input.qty").val()) ||
+          parseInt($row.find(".qty input").val()) ||
+          1;
 
-        self.trackEvent("remove_from_cart", {
-          item_id: productId,
+        // Try to get additional product data from cart data if available
+        var productData = {};
+        if (
+          typeof self.config.cartData !== "undefined" &&
+          self.config.cartData &&
+          self.config.cartData.items
+        ) {
+          // Find matching item in cart data
+          var matchingItem = self.config.cartData.items.find(function (item) {
+            return String(item.item_id) === String(productId);
+          });
+
+          if (matchingItem) {
+            productData = matchingItem;
+            // Override with actual quantity being removed
+            productData.quantity = quantity;
+          }
+        }
+
+        // Build the item data for GA4
+        var itemData = {
+          item_id: String(productId), // Ensure string format
           item_name: productName,
-          price: parseFloat(price),
+          affiliation:
+            productData.affiliation || self.config.siteName || "Website",
+          coupon: productData.coupon || "",
+          discount: productData.discount || 0,
+          index: productData.index || 0,
+          item_brand: productData.item_brand || "",
+          item_category: productData.item_category || "",
+          item_category2: productData.item_category2 || "",
+          item_category3: productData.item_category3 || "",
+          item_category4: productData.item_category4 || "",
+          item_category5: productData.item_category5 || "",
+          item_list_id: "cart",
+          item_list_name: "Shopping Cart",
+          item_variant: productData.item_variant || "",
+          location_id: productData.location_id || "",
+          price: price,
           quantity: quantity,
+        };
+
+        // Remove empty values to keep payload clean
+        Object.keys(itemData).forEach((key) => {
+          if (
+            itemData[key] === "" ||
+            itemData[key] === null ||
+            itemData[key] === undefined
+          ) {
+            delete itemData[key];
+          }
         });
 
-        self.log("Tracked remove_from_cart event", {
-          item_id: productId,
-          item_name: productName,
-          price: parseFloat(price),
-          quantity: quantity,
-        });
+        // Track the remove_from_cart event
+        if (productId && productName) {
+          self.trackEvent("remove_from_cart", {
+            currency:
+              (self.config.cartData && self.config.cartData.currency) ||
+              self.config.currency ||
+              "EUR",
+            value: price * quantity, // Total value being removed
+            items: [itemData],
+          });
+        } else {
+          self.log("Not tracked 'remove_from_cart' - missing required data:", {
+            productId: productId,
+            productName: productName,
+            price: price,
+            quantity: quantity,
+          });
+        }
       });
-
       // Track checkout steps
       if ($(".woocommerce-checkout").length) {
-        // Track begin_checkout event
-        self.trackEvent("begin_checkout", {
-          // Event data will be populated by the server-side code
-        });
+        if (!self.isOrderConfirmationPage()) {
+          // Check if we have cart data from PHP
+          if (
+            typeof self.config.cartData !== "undefined" &&
+            self.config.cartData &&
+            self.config.cartData.items &&
+            self.config.cartData.items.length > 0
+          ) {
+            var cartData = self.config.cartData;
 
-        // Track shipping info
-        $("form.checkout").on(
-          "change",
-          '#shipping_method input[type="radio"], #shipping_method input[type="hidden"]',
-          function () {
-            var shippingMethod = $(this).val();
-
-            self.trackEvent("add_shipping_info", {
-              shipping_tier: shippingMethod,
+            // Track begin_checkout with cart data
+            self.trackEvent("begin_checkout", {
+              currency: cartData.currency,
+              value: cartData.value,
+              coupon: cartData.coupon || undefined,
+              items: cartData.items,
             });
 
-            self.log("Tracked add_shipping_info event", {
-              shipping_tier: shippingMethod,
+            // Track shipping info
+            $("form.checkout").on(
+              "change",
+              '#shipping_method input[type="radio"], #shipping_method input[type="hidden"]',
+              function () {
+                var shippingMethod = $(this).val();
+                var shippingCost = 0;
+
+                // Try to get shipping cost from the selected option
+                var shippingLabel = $(
+                  'label[for="' + $(this).attr("id") + '"]'
+                ).text();
+                var costMatch = shippingLabel.match(/[\d.,]+/);
+                if (costMatch) {
+                  shippingCost = parseFloat(costMatch[0].replace(",", "."));
+                }
+
+                self.trackEvent("add_shipping_info", {
+                  currency: cartData.currency,
+                  value: cartData.value + shippingCost, // Add shipping to total value
+                  coupon: cartData.coupon || undefined,
+                  shipping_tier: shippingMethod,
+                  items: cartData.items,
+                });
+              }
+            );
+
+            // Track payment info
+            $("form.checkout").on(
+              "change",
+              'input[name="payment_method"]',
+              function () {
+                var paymentMethod = $(this).val();
+
+                self.trackEvent("add_payment_info", {
+                  currency: cartData.currency,
+                  value: cartData.value,
+                  coupon: cartData.coupon || undefined,
+                  payment_type: paymentMethod,
+                  items: cartData.items,
+                });
+              }
+            );
+
+            // Optional: Track when user starts filling billing/shipping info
+            var billingTracked = false;
+            $("form.checkout").on(
+              "input change",
+              "#billing_first_name, #billing_last_name, #billing_email",
+              function () {
+                if (!billingTracked) {
+                  billingTracked = true;
+
+                  self.trackEvent("begin_checkout", {
+                    currency: cartData.currency,
+                    value: cartData.value,
+                    coupon: cartData.coupon || undefined,
+                    items: cartData.items,
+                    checkout_step: 2,
+                    checkout_option: "billing_info_started",
+                  });
+                }
+              }
+            );
+          } else {
+            self.log("No cart data available for checkout tracking");
+
+            // Fallback: Track basic begin_checkout without items
+            self.trackEvent("begin_checkout", {
+              currency: self.config.currency || "EUR",
+              value: 0,
             });
           }
-        );
-
-        // Track payment info
-        $("form.checkout").on(
-          "change",
-          'input[name="payment_method"]',
-          function () {
-            var paymentMethod = $(this).val();
-
-            self.trackEvent("add_payment_info", {
-              payment_type: paymentMethod,
-            });
-
-            self.log("Tracked add_payment_info event", {
-              payment_type: paymentMethod,
-            });
-          }
-        );
+        }
       }
 
       // Track purchase event on order received page
@@ -814,11 +840,6 @@
               affiliation: self.config.siteName || "Website",
               value: orderTotal,
               currency: self.config.currency || "EUR",
-            });
-
-            self.log("Tracked minimal purchase event with attribution", {
-              transaction_id: orderId,
-              value: orderTotal,
             });
           } else {
             self.log("Could not extract order data from the page");
@@ -862,11 +883,6 @@
                 transaction_id: orderId,
                 value: orderTotal,
                 currency: self.config.currency || "EUR",
-              });
-
-              self.log("Tracked minimal purchase event with attribution", {
-                transaction_id: orderId,
-                value: orderTotal,
               });
             } else {
               self.log("Could not extract order data from the page");
@@ -948,13 +964,6 @@
                       item_list_id: listId,
                     },
                   ],
-                });
-
-                self.log("Tracked select_item event", {
-                  item_id: productId,
-                  item_name: productName,
-                  index: index,
-                  item_list_name: listName,
                 });
               }
             });
@@ -1609,7 +1618,7 @@
     // Option 2: Add more detailed logging within the function
     isOrderConfirmationPage: function () {
       // Check config value
-      if (this.config && this.config.isThankYouPage === true) {
+      if (this.config && this.config.isThankYouPage == true) {
         this.log("Order page detected via config setting");
         return true;
       }
@@ -1746,13 +1755,6 @@
           };
 
           this.trackEvent("select_item", selectItemData);
-
-          this.log("Tracked select_item event", {
-            item_id: productId,
-            item_name: productName,
-            index: index,
-            item_list_name: listName,
-          });
         }
       });
     },
