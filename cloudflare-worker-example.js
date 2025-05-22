@@ -728,7 +728,8 @@ function extractLocationData(params) {
         '019': 'US', // Americas - United States
         '142': 'JP', // Asia - Japan
         '002': 'NG', // Africa - Nigeria
-        '009': 'AU'  // Oceania - Australia
+        '009': 'AU',
+        '010': "AN"  // Antarctica
       };
       
       // Set fallback country or default to Germany if continent not found

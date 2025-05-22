@@ -31,7 +31,7 @@
       this.setupEventListeners();
 
       // Log initialization
-      this.log("GA4 Server-Side Tagging initialized v1");
+      this.log("GA4 Server-Side Tagging initialized v3");
     },
 
     trackPageView: function () {
@@ -230,55 +230,7 @@
         // Timestamp
         event_timestamp: Math.floor(Date.now() / 1000),
       };
-
-      // Check if IP anonymization is enabled
-      if (this.config.anonymizeIp == true) {
-        // Skip location tracking if anonymizeIp is enabled
-        this.log(
-          "IP anonymization is enabled - skipping IP-based location tracking"
-        );
-
-        // Use timezone-based general region information instead of precise location
-        try {
-          const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-          if (timezone) {
-            const timezoneRegions = timezone.split("/");
-            if (timezoneRegions.length > 0) {
-              // Add only general region information - no precise coordinates
-              sessionParams.continent = timezoneRegions[0] || "";
-            }
-          }
-        } catch (e) {
-          this.log("Error getting timezone info:", e);
-        }
-
-        // Proceed directly to page view tracking without precise location data
-        this.completePageViewTracking(sessionParams, isNewSession);
-      } else {
-        // Normal flow - try to get user location information
-        this.getUserLocation()
-          .then((locationData) => {
-            // Add location data to session parameters
-            if (locationData) {
-              sessionParams.geo_latitude = locationData.latitude;
-              sessionParams.geo_longitude = locationData.longitude;
-
-              // Add any additional location information if available
-              if (locationData.city) sessionParams.geo_city = locationData.city;
-              if (locationData.country)
-                sessionParams.geo_country = locationData.country;
-              if (locationData.region)
-                sessionParams.geo_region = locationData.region;
-            }
-
-            this.completePageViewTracking(sessionParams, isNewSession);
-          })
-          .catch((error) => {
-            // Continue with tracking even if location fetching fails
-            this.log("Location tracking error:", error);
-            this.completePageViewTracking(sessionParams, isNewSession);
-          });
-      }
+      this.completePageViewTracking(sessionParams, isNewSession);
     },
 
     // Method to complete page view tracking after location attempt
@@ -1532,6 +1484,54 @@
       // Add session_count to event params if not already present
       if (!params.hasOwnProperty("session_count")) {
         params.session_count = session.sessionCount;
+      }
+
+      if (!params.hasOwnProperty("engagement_time_msec")) {
+        params.engagement_time_msec = this.calculateEngagementTime();
+      }
+
+      // Check if IP anonymization is enabled
+      if (this.config.anonymizeIp == true) {
+        // Skip location tracking if anonymizeIp is enabled
+        this.log(
+          "IP anonymization is enabled - skipping IP-based location tracking"
+        );
+
+        // Use timezone-based general region information instead of precise location
+        try {
+          const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+          if (timezone) {
+            const timezoneRegions = timezone.split("/");
+            if (timezoneRegions.length > 0) {
+              // Add only general region information - no precise coordinates
+              params.continent = timezoneRegions[0] || "";
+            }
+          }
+        } catch (e) {
+          this.log("Error getting timezone info:", e);
+        }
+
+        // Proceed directly to page view tracking without precise location data
+      } else {
+        // Normal flow - try to get user location information
+        this.getUserLocation()
+          .then((locationData) => {
+            // Add location data to session parameters
+            if (locationData) {
+              params.geo_latitude = locationData.latitude;
+              params.geo_longitude = locationData.longitude;
+
+              // Add any additional location information if available
+              if (locationData.city) params.geo_city = locationData.city;
+              if (locationData.country)
+                params.geo_country = locationData.country;
+              if (locationData.region) params.geo_region = locationData.region;
+            }
+          })
+          .catch((error) => {
+            // Continue with tracking even if location fetching fails
+            this.log("Location tracking error:", error);
+          });
       }
 
       // Get client ID from cookie if available
