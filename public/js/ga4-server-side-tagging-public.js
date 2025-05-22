@@ -31,7 +31,7 @@
       this.setupEventListeners();
 
       // Log initialization
-      this.log("GA4 Server-Side Tagging initialized v4");
+      this.log("GA4 Server-Side Tagging initialized v5");
     },
 
     trackPageView: function () {
@@ -1467,7 +1467,7 @@
     },
 
     // Send server-side event
-    sendServerSideEvent: function (eventName, eventParams) {
+    sendServerSideEvent: async function (eventName, eventParams) {
       // Create a copy of the event params to avoid modifying the original
       var params = JSON.parse(JSON.stringify(eventParams));
       var session = this.getSession();
@@ -1513,25 +1513,24 @@
 
         // Proceed directly to page view tracking without precise location data
       } else {
-        // Normal flow - try to get user location information
-        this.getUserLocation()
-          .then((locationData) => {
-            // Add location data to session parameters
-            if (locationData) {
-              params.geo_latitude = locationData.latitude;
-              params.geo_longitude = locationData.longitude;
+        try {
+          // Normal flow - try to get user location information
+          const locationData = await this.getUserLocation();
 
-              // Add any additional location information if available
-              if (locationData.city) params.geo_city = locationData.city;
-              if (locationData.country)
-                params.geo_country = locationData.country;
-              if (locationData.region) params.geo_region = locationData.region;
-            }
-          })
-          .catch((error) => {
-            // Continue with tracking even if location fetching fails
-            this.log("Location tracking error:", error);
-          });
+          // Add location data to session parameters
+          if (locationData) {
+            params.geo_latitude = locationData.latitude;
+            params.geo_longitude = locationData.longitude;
+
+            // Add any additional location information if available
+            if (locationData.city) params.geo_city = locationData.city;
+            if (locationData.country) params.geo_country = locationData.country;
+            if (locationData.region) params.geo_region = locationData.region;
+          }
+        } catch (error) {
+          // Continue with tracking even if location fetching fails
+          this.log("Location tracking error:", error);
+        }
       }
 
       // Get client ID from cookie if available
