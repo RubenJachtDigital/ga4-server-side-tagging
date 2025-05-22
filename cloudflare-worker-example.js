@@ -720,6 +720,23 @@ function extractLocationData(params) {
   
   if(!userLocation.country_id) {
     userLocation.country_id = "NL";
+
+    if(userLocation.continent_id) {
+      // Define fallback country for each continent (based on UN geoscheme)
+      const continentFallbacks = {
+        '150': 'NL', // Europe - Germany
+        '019': 'US', // Americas - United States
+        '142': 'JP', // Asia - Japan
+        '002': 'NG', // Africa - Nigeria
+        '009': 'AU'  // Oceania - Australia
+      };
+      
+      // Set fallback country or default to Germany if continent not found
+      userLocation.country_id = continentFallbacks[userLocation.continent_id] || 'NL';
+    }
+    else{
+      userLocation.country_id = "NL";
+    }
   }
   // Remove lat/lng from params as they're not standard GA4 parameters
   if (params.geo_latitude) {

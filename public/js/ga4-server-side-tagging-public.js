@@ -31,7 +31,7 @@
       this.setupEventListeners();
 
       // Log initialization
-      this.log("GA4 Server-Side Tagging initialized v3");
+      this.log("GA4 Server-Side Tagging initialized v1");
     },
 
     trackPageView: function () {
@@ -178,6 +178,7 @@
       }
 
       this.log(this.calculateEngagementTime());
+      var traffic_type = this.determineTrafficType(source, medium);
 
       // Common session parameters needed for all page view events (limited to 25 params max)
       var sessionParams = {
@@ -212,7 +213,7 @@
         source: source,
         medium: medium,
         campaign: campaign,
-
+        traffic_type: traffic_type,
         // Add UTM content/term only if present to save param slots
         ...(content && { content: content }),
         ...(term && { term: term }),
@@ -224,9 +225,7 @@
         page_referrer: referrer,
 
         // Shortened user agent (max 100 chars)
-        user_agent: userAgentInfo.user_agent
-          ? userAgentInfo.user_agent.substring(0, 100)
-          : "",
+        user_agent: userAgentInfo.user_agent,
 
         // Timestamp
         event_timestamp: Math.floor(Date.now() / 1000),
@@ -1338,6 +1337,66 @@
       }
       return null;
     },
+    // Method to determine traffic type based on source and medium
+    determineTrafficType: function (source, medium) {
+      // Direct traffic
+      if (source === "(direct)" && medium === "none") {
+        return "direct";
+      }
+
+      // Organic search
+      if (medium === "organic") {
+        return "organic";
+      }
+
+      // Paid search
+      if (medium === "cpc" || medium === "ppc" || medium === "paidsearch") {
+        return "paid_search";
+      }
+
+      // Social media
+      if (
+        medium === "social" ||
+        medium === "sm" ||
+        source === "facebook" ||
+        source === "instagram" ||
+        source === "twitter" ||
+        source === "linkedin" ||
+        source === "pinterest" ||
+        source === "youtube"
+      ) {
+        return "social";
+      }
+
+      // Email marketing
+      if (medium === "email") {
+        return "email";
+      }
+
+      // Affiliates
+      if (medium === "affiliate") {
+        return "affiliate";
+      }
+
+      // Regular referral traffic (links from other sites)
+      if (medium === "referral") {
+        return "referral";
+      }
+
+      // Display or banner ads
+      if (medium === "display" || medium === "banner" || medium === "cpm") {
+        return "display";
+      }
+
+      // Video ads
+      if (medium === "video") {
+        return "video";
+      }
+
+      // Default fallback
+      return "other";
+    },
+
     // Method to get or create session information
     getSession: function () {
       var sessionId = localStorage.getItem("server_side_ga4_session_id");
@@ -1433,21 +1492,6 @@
     trackEvent: function (eventName, eventParams = {}) {
       // Log the event
       this.log("Tracking event: " + eventName, eventParams);
-      var session = this.getSession();
-
-      if (!eventParams.hasOwnProperty("user_id")) {
-        if (this.config.user_id) {
-          eventParams.user_id = this.config.user_id;
-        }
-      }
-      // Add session_id to event params if not already present
-      if (!eventParams.hasOwnProperty("session_id")) {
-        eventParams.session_id = session.id;
-      }
-      // Add session_count to event params if not already present
-      if (!eventParams.hasOwnProperty("session_count")) {
-        eventParams.session_count = session.sessionCount;
-      }
 
       // Add debug_mode to event params if not already present and ensure it's a boolean
       if (!eventParams.hasOwnProperty("debug_mode")) {
@@ -1474,6 +1518,21 @@
     sendServerSideEvent: function (eventName, eventParams) {
       // Create a copy of the event params to avoid modifying the original
       var params = JSON.parse(JSON.stringify(eventParams));
+      var session = this.getSession();
+
+      if (!params.hasOwnProperty("user_id")) {
+        if (this.config.user_id) {
+          params.user_id = this.config.user_id;
+        }
+      }
+      // Add session_id to event params if not already present
+      if (!params.hasOwnProperty("session_id")) {
+        params.session_id = session.id;
+      }
+      // Add session_count to event params if not already present
+      if (!params.hasOwnProperty("session_count")) {
+        params.session_count = session.sessionCount;
+      }
 
       // Get client ID from cookie if available
       var clientId = this.getClientId();
