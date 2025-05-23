@@ -71,9 +71,6 @@ class GA4_Server_Side_Tagging
         // Public classes
         require_once GA4_SERVER_SIDE_TAGGING_PLUGIN_DIR . 'public/class-ga4-server-side-tagging-public.php';
 
-        // WooCommerce integration
-        require_once GA4_SERVER_SIDE_TAGGING_PLUGIN_DIR . 'includes/class-ga4-server-side-tagging-woocommerce.php';
-
         // API endpoint for server-side tagging
         require_once GA4_SERVER_SIDE_TAGGING_PLUGIN_DIR . 'includes/class-ga4-server-side-tagging-endpoint.php';
     }
