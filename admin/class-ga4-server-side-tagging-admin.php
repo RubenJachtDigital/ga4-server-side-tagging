@@ -102,6 +102,7 @@ class GA4_Server_Side_Tagging_Admin {
      * @since    1.0.0
      */
     public function register_settings() {
+        // GA4 Settings
         register_setting(
             'ga4_server_side_tagging_settings',
             'ga4_measurement_id',
@@ -197,6 +198,127 @@ class GA4_Server_Side_Tagging_Admin {
                 'default'           => '',
             )
         );
+
+        // Google Ads Settings
+        register_setting(
+            'ga4_server_side_tagging_settings',
+            'ga4_google_ads_conversion_id',
+            array(
+                'type'              => 'string',
+                'description'       => 'Google Ads Conversion ID',
+                'sanitize_callback' => 'sanitize_text_field',
+                'show_in_rest'      => false,
+                'default'           => '',
+            )
+        );
+
+        register_setting(
+            'ga4_server_side_tagging_settings',
+            'ga4_google_ads_purchase_label',
+            array(
+                'type'              => 'string',
+                'description'       => 'Google Ads Purchase Conversion Label',
+                'sanitize_callback' => 'sanitize_text_field',
+                'show_in_rest'      => false,
+                'default'           => '',
+            )
+        );
+
+        register_setting(
+            'ga4_server_side_tagging_settings',
+            'ga4_google_ads_lead_label',
+            array(
+                'type'              => 'string',
+                'description'       => 'Google Ads Lead Conversion Label',
+                'sanitize_callback' => 'sanitize_text_field',
+                'show_in_rest'      => false,
+                'default'           => '',
+            )
+        );
+
+        register_setting(
+            'ga4_server_side_tagging_settings',
+            'ga4_google_ads_worker_url',
+            array(
+                'type'              => 'string',
+                'description'       => 'Google Ads Cloudflare Worker URL',
+                'sanitize_callback' => 'esc_url_raw',
+                'show_in_rest'      => false,
+                'default'           => '',
+            )
+        );
+
+        register_setting(
+            'ga4_server_side_tagging_settings',
+            'ga4_google_ads_default_lead_value',
+            array(
+                'type'              => 'number',
+                'description'       => 'Default Lead Value',
+                'sanitize_callback' => 'floatval',
+                'show_in_rest'      => false,
+                'default'           => 0,
+            )
+        );
+
+        register_setting(
+            'ga4_server_side_tagging_settings',
+            'ga4_google_ads_default_quote_value',
+            array(
+                'type'              => 'number',
+                'description'       => 'Default Quote Value',
+                'sanitize_callback' => 'floatval',
+                'show_in_rest'      => false,
+                'default'           => 0,
+            )
+        );
+
+        register_setting(
+            'ga4_server_side_tagging_settings',
+            'ga4_google_ads_phone_call_value',
+            array(
+                'type'              => 'number',
+                'description'       => 'Phone Call Conversion Value',
+                'sanitize_callback' => 'floatval',
+                'show_in_rest'      => false,
+                'default'           => 0,
+            )
+        );
+
+        register_setting(
+            'ga4_server_side_tagging_settings',
+            'ga4_google_ads_email_click_value',
+            array(
+                'type'              => 'number',
+                'description'       => 'Email Click Conversion Value',
+                'sanitize_callback' => 'floatval',
+                'show_in_rest'      => false,
+                'default'           => 0,
+            )
+        );
+
+        register_setting(
+            'ga4_server_side_tagging_settings',
+            'ga4_google_ads_track_phone_calls',
+            array(
+                'type'              => 'boolean',
+                'description'       => 'Track Phone Calls as Conversions',
+                'sanitize_callback' => array( $this, 'sanitize_checkbox' ),
+                'show_in_rest'      => false,
+                'default'           => false,
+            )
+        );
+
+        register_setting(
+            'ga4_server_side_tagging_settings',
+            'ga4_google_ads_track_email_clicks',
+            array(
+                'type'              => 'boolean',
+                'description'       => 'Track Email Clicks as Conversions',
+                'sanitize_callback' => array( $this, 'sanitize_checkbox' ),
+                'show_in_rest'      => false,
+                'default'           => false,
+            )
+        );
     }
 
     /**
@@ -232,6 +354,12 @@ class GA4_Server_Side_Tagging_Admin {
             $test_result = $this->test_ga4_connection();
         }
 
+        // Test Google Ads connection if requested
+        $google_ads_test_result = null;
+        if ( isset( $_POST['ga4_test_google_ads_connection'] ) && isset( $_POST['_wpnonce'] ) && wp_verify_nonce( sanitize_text_field( wp_unslash( $_POST['_wpnonce'] ) ), 'ga4_server_side_tagging_settings' ) ) {
+            $google_ads_test_result = $this->test_google_ads_connection();
+        }
+
         // Get current settings
         $measurement_id = get_option( 'ga4_measurement_id', '' );
         $api_secret = get_option( 'ga4_api_secret', '' );
@@ -241,6 +369,18 @@ class GA4_Server_Side_Tagging_Admin {
         $anonymize_ip = get_option( 'ga4_anonymize_ip', true );
         $ecommerce_tracking = get_option( 'ga4_ecommerce_tracking', true );
         $cloudflare_worker_url = get_option( 'ga4_cloudflare_worker_url', '' );
+
+        // Google Ads settings
+        $google_ads_conversion_id = get_option( 'ga4_google_ads_conversion_id', '' );
+        $google_ads_purchase_label = get_option( 'ga4_google_ads_purchase_label', '' );
+        $google_ads_lead_label = get_option( 'ga4_google_ads_lead_label', '' );
+        $google_ads_worker_url = get_option( 'ga4_google_ads_worker_url', '' );
+        $google_ads_default_lead_value = get_option( 'ga4_google_ads_default_lead_value', 0 );
+        $google_ads_default_quote_value = get_option( 'ga4_google_ads_default_quote_value', 0 );
+        $google_ads_phone_call_value = get_option( 'ga4_google_ads_phone_call_value', 0 );
+        $google_ads_email_click_value = get_option( 'ga4_google_ads_email_click_value', 0 );
+        $google_ads_track_phone_calls = get_option( 'ga4_google_ads_track_phone_calls', false );
+        $google_ads_track_email_clicks = get_option( 'ga4_google_ads_track_email_clicks', false );
 
         // Include the admin view
         include GA4_SERVER_SIDE_TAGGING_PLUGIN_DIR . 'admin/partials/ga4-server-side-tagging-admin-display.php';
@@ -280,7 +420,7 @@ class GA4_Server_Side_Tagging_Admin {
      * @since    1.0.0
      */
     private function save_settings() {
-        // Sanitize and save each setting
+        // Sanitize and save each GA4 setting
         if ( isset( $_POST['ga4_measurement_id'] ) ) {
             update_option( 'ga4_measurement_id', sanitize_text_field( wp_unslash( $_POST['ga4_measurement_id'] ) ) );
         }
@@ -293,12 +433,49 @@ class GA4_Server_Side_Tagging_Admin {
             update_option( 'ga4_cloudflare_worker_url', esc_url_raw( wp_unslash( $_POST['ga4_cloudflare_worker_url'] ) ) );
         }
 
-        // Checkbox options
+        // GA4 Checkbox options
         update_option( 'ga4_use_server_side', isset( $_POST['ga4_use_server_side'] ) );
         update_option( 'ga4_server_side_tagging_debug_mode', isset( $_POST['ga4_server_side_tagging_debug_mode'] ) );
         update_option( 'ga4_track_logged_in_users', isset( $_POST['ga4_track_logged_in_users'] ) );
         update_option( 'ga4_anonymize_ip', isset( $_POST['ga4_anonymize_ip'] ) );
         update_option( 'ga4_ecommerce_tracking', isset( $_POST['ga4_ecommerce_tracking'] ) );
+
+        // Save Google Ads settings
+        if ( isset( $_POST['ga4_google_ads_conversion_id'] ) ) {
+            update_option( 'ga4_google_ads_conversion_id', sanitize_text_field( wp_unslash( $_POST['ga4_google_ads_conversion_id'] ) ) );
+        }
+
+        if ( isset( $_POST['ga4_google_ads_purchase_label'] ) ) {
+            update_option( 'ga4_google_ads_purchase_label', sanitize_text_field( wp_unslash( $_POST['ga4_google_ads_purchase_label'] ) ) );
+        }
+
+        if ( isset( $_POST['ga4_google_ads_lead_label'] ) ) {
+            update_option( 'ga4_google_ads_lead_label', sanitize_text_field( wp_unslash( $_POST['ga4_google_ads_lead_label'] ) ) );
+        }
+
+        if ( isset( $_POST['ga4_google_ads_worker_url'] ) ) {
+            update_option( 'ga4_google_ads_worker_url', esc_url_raw( wp_unslash( $_POST['ga4_google_ads_worker_url'] ) ) );
+        }
+
+        if ( isset( $_POST['ga4_google_ads_default_lead_value'] ) ) {
+            update_option( 'ga4_google_ads_default_lead_value', floatval( wp_unslash( $_POST['ga4_google_ads_default_lead_value'] ) ) );
+        }
+
+        if ( isset( $_POST['ga4_google_ads_default_quote_value'] ) ) {
+            update_option( 'ga4_google_ads_default_quote_value', floatval( wp_unslash( $_POST['ga4_google_ads_default_quote_value'] ) ) );
+        }
+
+        if ( isset( $_POST['ga4_google_ads_phone_call_value'] ) ) {
+            update_option( 'ga4_google_ads_phone_call_value', floatval( wp_unslash( $_POST['ga4_google_ads_phone_call_value'] ) ) );
+        }
+
+        if ( isset( $_POST['ga4_google_ads_email_click_value'] ) ) {
+            update_option( 'ga4_google_ads_email_click_value', floatval( wp_unslash( $_POST['ga4_google_ads_email_click_value'] ) ) );
+        }
+
+        // Google Ads checkbox options
+        update_option( 'ga4_google_ads_track_phone_calls', isset( $_POST['ga4_google_ads_track_phone_calls'] ) );
+        update_option( 'ga4_google_ads_track_email_clicks', isset( $_POST['ga4_google_ads_track_email_clicks'] ) );
 
         // Update logger debug mode
         $this->logger->set_debug_mode( isset( $_POST['ga4_server_side_tagging_debug_mode'] ) );
@@ -438,6 +615,85 @@ class GA4_Server_Side_Tagging_Admin {
     }
 
     /**
+     * Test Google Ads connection.
+     *
+     * @since    1.0.0
+     * @return   array    The test result.
+     */
+    private function test_google_ads_connection() {
+        $conversion_id = get_option( 'ga4_google_ads_conversion_id', '' );
+        $worker_url = get_option( 'ga4_google_ads_worker_url', '' );
+        
+        if ( empty( $conversion_id ) ) {
+            return array(
+                'success' => false,
+                'message' => 'Missing Google Ads Conversion ID',
+            );
+        }
+
+        if ( empty( $worker_url ) ) {
+            return array(
+                'success' => false,
+                'message' => 'Missing Google Ads Cloudflare Worker URL',
+            );
+        }
+
+        // Prepare test conversion data
+        $test_payload = array(
+            'type' => 'google_ads_conversion',
+            'conversion_type' => 'test',
+            'data' => array(
+                'conversion_id' => $conversion_id,
+                'conversion_label' => 'test_conversion',
+                'conversion_action' => 'test',
+                'conversion_value' => 1.00,
+                'conversion_currency' => 'EUR',
+                'order_id' => 'test_' . time(),
+                'user_data' => array(
+                    'email_address' => 'test@example.com',
+                ),
+                'timestamp' => time(),
+                'user_agent' => 'WordPress Admin Test',
+                'page_url' => admin_url(),
+            )
+        );
+
+        $response = wp_remote_post( $worker_url, array(
+            'method' => 'POST',
+            'timeout' => 10,
+            'redirection' => 5,
+            'httpversion' => '1.1',
+            'blocking' => true,
+            'headers' => array( 'Content-Type' => 'application/json' ),
+            'body' => wp_json_encode( $test_payload ),
+            'cookies' => array(),
+        ) );
+
+        if ( is_wp_error( $response ) ) {
+            return array(
+                'success' => false,
+                'message' => 'Error: ' . $response->get_error_message(),
+            );
+        }
+
+        $response_code = wp_remote_retrieve_response_code( $response );
+        $response_body = wp_remote_retrieve_body( $response );
+        
+        if ( $response_code < 200 || $response_code >= 300 ) {
+            return array(
+                'success' => false,
+                'message' => 'Google Ads Worker error: ' . $response_code . ' - ' . $response_body,
+            );
+        }
+
+        return array(
+            'success' => true,
+            'message' => 'Google Ads Worker connection successful',
+            'response' => $response_body,
+        );
+    }
+
+    /**
      * Clear logs.
      *
      * @since    1.0.0
@@ -546,6 +802,7 @@ class GA4_Server_Side_Tagging_Admin {
                     <li>Look for any error messages that might indicate configuration issues.</li>
                     <li>Verify that your Measurement ID and API Secret are correctly configured.</li>
                     <li>If using a Cloudflare Worker, check the Cloudflare logs for additional information.</li>
+                    <li>For Google Ads conversions, check that the Conversion ID and labels are correct.</li>
                 </ul>
             </div>
             
@@ -727,4 +984,4 @@ class GA4_Server_Side_Tagging_Admin {
             ) );
         }
     }
-} 
+}
