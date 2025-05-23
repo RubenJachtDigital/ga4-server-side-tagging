@@ -238,18 +238,6 @@ class GA4_Server_Side_Tagging_Admin {
 
         register_setting(
             'ga4_server_side_tagging_settings',
-            'ga4_google_ads_worker_url',
-            array(
-                'type'              => 'string',
-                'description'       => 'Google Ads Cloudflare Worker URL',
-                'sanitize_callback' => 'esc_url_raw',
-                'show_in_rest'      => false,
-                'default'           => '',
-            )
-        );
-
-        register_setting(
-            'ga4_server_side_tagging_settings',
             'ga4_google_ads_default_lead_value',
             array(
                 'type'              => 'number',
@@ -374,7 +362,7 @@ class GA4_Server_Side_Tagging_Admin {
         $google_ads_conversion_id = get_option( 'ga4_google_ads_conversion_id', '' );
         $google_ads_purchase_label = get_option( 'ga4_google_ads_purchase_label', '' );
         $google_ads_lead_label = get_option( 'ga4_google_ads_lead_label', '' );
-        $google_ads_worker_url = get_option( 'ga4_google_ads_worker_url', '' );
+        $google_ads_worker_url = get_option( 'ga4_cloudflare_worker_url', '' );
         $google_ads_default_lead_value = get_option( 'ga4_google_ads_default_lead_value', 0 );
         $google_ads_default_quote_value = get_option( 'ga4_google_ads_default_quote_value', 0 );
         $google_ads_phone_call_value = get_option( 'ga4_google_ads_phone_call_value', 0 );
@@ -451,10 +439,6 @@ class GA4_Server_Side_Tagging_Admin {
 
         if ( isset( $_POST['ga4_google_ads_lead_label'] ) ) {
             update_option( 'ga4_google_ads_lead_label', sanitize_text_field( wp_unslash( $_POST['ga4_google_ads_lead_label'] ) ) );
-        }
-
-        if ( isset( $_POST['ga4_google_ads_worker_url'] ) ) {
-            update_option( 'ga4_google_ads_worker_url', esc_url_raw( wp_unslash( $_POST['ga4_google_ads_worker_url'] ) ) );
         }
 
         if ( isset( $_POST['ga4_google_ads_default_lead_value'] ) ) {
@@ -622,7 +606,7 @@ class GA4_Server_Side_Tagging_Admin {
      */
     private function test_google_ads_connection() {
         $conversion_id = get_option( 'ga4_google_ads_conversion_id', '' );
-        $worker_url = get_option( 'ga4_google_ads_worker_url', '' );
+        $worker_url = get_option( 'ga4_cloudflare_worker_url', '' );
         
         if ( empty( $conversion_id ) ) {
             return array(

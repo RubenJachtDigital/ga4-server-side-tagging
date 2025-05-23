@@ -245,7 +245,7 @@ class GA4_Server_Side_Tagging_Public
             'conversionId' => $google_ads_conversion_id,
             'purchaseConversionLabel' => get_option('ga4_google_ads_purchase_label', ''),
             'leadConversionLabel' => get_option('ga4_google_ads_lead_label', ''),
-            'cloudflareWorkerUrl' => get_option('ga4_google_ads_worker_url', ''),
+            'cloudflareWorkerUrl' => get_option('ga4_cloudflare_worker_url', ''),
             'debugMode' => get_option('ga4_server_side_tagging_debug_mode', false),
             'currency' => function_exists('get_woocommerce_currency') ? get_woocommerce_currency() : 'EUR',
 
