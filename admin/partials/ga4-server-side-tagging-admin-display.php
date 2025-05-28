@@ -135,6 +135,27 @@ if (!defined('WPINC')) {
                                 <p class="description">Your GA4 API Secret for server-side events</p>
                             </td>
                         </tr>
+                        <tr>
+                            <th scope="row">
+                                <label for="ga4_yith_raq_form_id">YITH Request a Quote Form id</label>
+                            </th>
+                            <td>
+                                <input type="text" id="ga4_yith_raq_form_id" name="ga4_yith_raq_form_id"
+                                    value="<?php echo esc_attr($yith_raq_form_id); ?>" class="regular-text" />
+                                <p class="description">Your YITH Request a Quote Form id(found in Gravity forms)</p>
+                            </td>
+                        </tr>
+                        </tr>
+                        <tr>
+                            <th scope="row">
+                                <label for="ga4_conversion_form_ids">Conversion form id(s)</label>
+                            </th>
+                            <td>
+                                <input type="text" id="ga4_conversion_form_ids" name="ga4_conversion_form_ids"
+                                    value="<?php echo esc_attr($conversion_form_ids); ?>" class="regular-text" />
+                                <p class="description">Your important conversion form id's(They should be in the following format "1,2,3,4")</p>
+                            </td>
+                        </tr>
                     </table>
                 </div>
 

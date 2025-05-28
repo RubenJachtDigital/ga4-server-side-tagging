@@ -92,7 +92,6 @@ class GA4_Server_Side_Tagging_Public
             GA4_SERVER_SIDE_TAGGING_VERSION,
             false
         );
-
         // Prepare data for the script
         $script_data = array(
             'measurementId' => $measurement_id,
@@ -104,6 +103,8 @@ class GA4_Server_Side_Tagging_Public
             'nonce' => wp_create_nonce('wp_rest'),
             'isEcommerceEnabled' => get_option('ga4_ecommerce_tracking', true),
             'cloudflareWorkerUrl' => get_option('ga4_cloudflare_worker_url', ''),
+            'yithRaqFormId' => get_option('ga4_yith_raq_form_id', ''),
+            'conversionFormIds' => get_option('ga4_conversion_form_ids', ''),
             'currency' => function_exists('get_woocommerce_currency') ? get_woocommerce_currency() : 'EUR',
             'siteName' => get_bloginfo('name'),
         );
