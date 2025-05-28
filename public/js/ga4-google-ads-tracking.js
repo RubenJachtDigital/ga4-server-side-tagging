@@ -1,6 +1,6 @@
 /**
  * Google Ads Conversion Tracking via Existing GA4 Cloudflare Worker
- * Sends conversion data to the same worker that handles GA4 events
+ * Refactored to use GA4Utils for cleaner code and consistent AJAX handling
  *
  * @since 1.0.0
  */
@@ -20,16 +20,13 @@
         return;
       }
 
-      if (!this.config.cloudflareWorkerUrl) {
-        this.log("Cloudflare Worker URL not configured - using existing GA4 worker");
-        // Try to use the GA4 worker URL if available
-        if (window.ga4ServerSideTagging && window.ga4ServerSideTagging.cloudflareWorkerUrl) {
-          this.config.cloudflareWorkerUrl = window.ga4ServerSideTagging.cloudflareWorkerUrl;
-          this.log("Using GA4 Cloudflare Worker URL: " + this.config.cloudflareWorkerUrl);
-        } else {
-          this.log("No Cloudflare Worker URL available");
-          return;
-        }
+      // Always use the existing GA4 Cloudflare Worker URL
+      if (window.ga4ServerSideTagging && window.ga4ServerSideTagging.cloudflareWorkerUrl) {
+        this.config.cloudflareWorkerUrl = window.ga4ServerSideTagging.cloudflareWorkerUrl;
+        this.log("Using existing GA4 Cloudflare Worker URL: " + this.config.cloudflareWorkerUrl);
+      } else {
+        this.log("No GA4 Cloudflare Worker URL available");
+        return;
       }
 
       // Set up conversion tracking
@@ -41,10 +38,8 @@
 
     // Set up conversion tracking based on page type and events
     setupConversionTracking: function () {
-      var self = this;
-
       // Track purchase conversions on order confirmation page
-      if (this.isOrderConfirmationPage()) {
+      if (GA4Utils.page.isOrderConfirmationPage(this.config, 'google_ads')) {
         this.trackPurchaseConversion();
       }
 
@@ -85,10 +80,12 @@
       this.sendConversionToWorker('google_ads_lead', conversionData);
     },
 
-    // Build purchase conversion data
+    // Build purchase conversion data (using utilities)
     buildPurchaseConversionData: function (orderData) {
-      var userInfo = this.getUserInfo();
-      var sessionInfo = this.getSessionInfo();
+      var userInfo = GA4Utils.user.getInfo(this.config);
+      var sessionInfo = GA4Utils.session.getInfo();
+      var utmParams = GA4Utils.utm.getAll();
+      var gclid = GA4Utils.gclid.get();
       
       return {
         // Event identification
@@ -112,15 +109,15 @@
         postal_code: orderData.customer_data ? orderData.customer_data.postcode : '',
         country: orderData.customer_data ? orderData.customer_data.country : '',
         
-        // Attribution Data
-        gclid: this.getGclid() || '',
-        utm_source: this.getUtmSource() || '',
-        utm_medium: this.getUtmMedium() || '',
-        utm_campaign: this.getUtmCampaign() || '',
-        utm_content: this.getUtmContent() || '',
-        utm_term: this.getUtmTerm() || '',
+        // Attribution Data (using utilities)
+        gclid: gclid || '',
+        utm_source: utmParams.utm_source,
+        utm_medium: utmParams.utm_medium,
+        utm_campaign: utmParams.utm_campaign,
+        utm_content: utmParams.utm_content,
+        utm_term: utmParams.utm_term,
         
-        // Session and tracking data
+        // Session and tracking data (using utilities)
         client_id: sessionInfo.client_id,
         session_id: sessionInfo.session_id,
         user_agent: navigator.userAgent,
@@ -141,10 +138,12 @@
       };
     },
 
-    // Build lead conversion data
+    // Build lead conversion data (using utilities)
     buildLeadConversionData: function (quoteData) {
-      var userInfo = this.getUserInfo();
-      var sessionInfo = this.getSessionInfo();
+      var userInfo = GA4Utils.user.getInfo(this.config);
+      var sessionInfo = GA4Utils.session.getInfo();
+      var utmParams = GA4Utils.utm.getAll();
+      var gclid = GA4Utils.gclid.get();
       
       return {
         // Event identification
@@ -153,7 +152,7 @@
         conversion_label: this.config.leadConversionLabel || '',
         
         // Lead Information
-        lead_id: quoteData.transaction_id || this.generateUniqueId(),
+        lead_id: quoteData.transaction_id || GA4Utils.helpers.generateUniqueId(),
         value: parseFloat(quoteData.value) || parseFloat(this.config.defaultLeadValue) || 0,
         currency: quoteData.currency || 'EUR',
         
@@ -163,15 +162,15 @@
         first_name: userInfo.firstName || '',
         last_name: userInfo.lastName || '',
         
-        // Attribution Data
-        gclid: this.getGclid() || '',
-        utm_source: this.getUtmSource() || '',
-        utm_medium: this.getUtmMedium() || '',
-        utm_campaign: this.getUtmCampaign() || '',
-        utm_content: this.getUtmContent() || '',
-        utm_term: this.getUtmTerm() || '',
+        // Attribution Data (using utilities)
+        gclid: gclid || '',
+        utm_source: utmParams.utm_source,
+        utm_medium: utmParams.utm_medium,
+        utm_campaign: utmParams.utm_campaign,
+        utm_content: utmParams.utm_content,
+        utm_term: utmParams.utm_term,
         
-        // Session and tracking data
+        // Session and tracking data (using utilities)
         client_id: sessionInfo.client_id,
         session_id: sessionInfo.session_id,
         user_agent: navigator.userAgent,
@@ -192,7 +191,7 @@
       };
     },
 
-    // Send conversion data to Cloudflare Worker (same format as GA4 events)
+    // Send conversion data to Cloudflare Worker using GA4Utils AJAX
     sendConversionToWorker: function (eventName, conversionData) {
       var self = this;
       
@@ -204,30 +203,31 @@
 
       this.log("Sending Google Ads conversion to Cloudflare Worker", payload);
 
-      fetch(this.config.cloudflareWorkerUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(payload)
-      })
-      .then(function(response) {
-        if (response.ok) {
-          return response.json();
-        }
-        throw new Error('Network response was not ok: ' + response.status);
-      })
-      .then(function(data) {
-        self.log("Google Ads conversion sent successfully", data);
-      })
-      .catch(function(error) {
-        self.log("Error sending Google Ads conversion", error);
-        console.error('[Google Ads Tracking] Error sending conversion:', error);
-      });
+      // Use GA4Utils AJAX functionality for consistent handling
+      GA4Utils.ajax.sendPayloadFetch(this.config.cloudflareWorkerUrl, payload, this.config, "[Google Ads Tracking]")
+        .then(function(data) {
+          self.log("Google Ads conversion sent successfully", data);
+        })
+        .catch(function(error) {
+          self.log("Error sending Google Ads conversion", error);
+        });
     },
 
     // Set up event listeners for other conversion types
     setupEventListeners: function () {
+      var self = this;
+
+      // Setup individual tracking methods
+      this.setupFormConversionTracking();
+      this.setupQuoteFormTracking();
+      this.setupPhoneCallTracking();
+      this.setupEmailClickTracking();
+    },
+
+    /**
+     * Setup form submission tracking as lead conversions
+     */
+    setupFormConversionTracking: function () {
       var self = this;
 
       // Track form submissions as leads (excluding WooCommerce forms)
@@ -252,6 +252,13 @@
         self.log("Tracking form submission as lead conversion", conversionData);
         self.sendConversionToWorker('google_ads_lead', conversionData);
       });
+    },
+
+    /**
+     * Setup specific quote form tracking
+     */
+    setupQuoteFormTracking: function () {
+      var self = this;
 
       // Track specific quote form submission
       if ($('#gform_3').length) {
@@ -273,6 +280,13 @@
           }
         });
       }
+    },
+
+    /**
+     * Setup phone call tracking
+     */
+    setupPhoneCallTracking: function () {
+      var self = this;
 
       // Track phone clicks as conversions (if configured)
       if (self.config.trackPhoneCalls) {
@@ -291,6 +305,13 @@
           self.sendConversionToWorker('google_ads_phone_call', conversionData);
         });
       }
+    },
+
+    /**
+     * Setup email click tracking
+     */
+    setupEmailClickTracking: function () {
+      var self = this;
 
       // Track email clicks as conversions (if configured)
       if (self.config.trackEmailClicks) {
@@ -311,151 +332,11 @@
       }
     },
 
-    // Helper function to get user information
-    getUserInfo: function () {
-      var userInfo = {
-        email: '',
-        phone: '',
-        firstName: '',
-        lastName: ''
-      };
-
-      // Try to get from logged-in user data if available
-      if (this.config.userData) {
-        userInfo.email = this.config.userData.email || '';
-        userInfo.phone = this.config.userData.phone || '';
-        userInfo.firstName = this.config.userData.first_name || '';
-        userInfo.lastName = this.config.userData.last_name || '';
-      }
-
-      // Try to get from form fields on the page
-      var $emailField = $('input[type="email"], input[name*="email"]').first();
-      if ($emailField.length && $emailField.val()) {
-        userInfo.email = $emailField.val();
-      }
-
-      var $phoneField = $('input[type="tel"], input[name*="phone"]').first();
-      if ($phoneField.length && $phoneField.val()) {
-        userInfo.phone = $phoneField.val();
-      }
-
-      var $firstNameField = $('input[name*="first_name"], input[name*="fname"]').first();
-      if ($firstNameField.length && $firstNameField.val()) {
-        userInfo.firstName = $firstNameField.val();
-      }
-
-      var $lastNameField = $('input[name*="last_name"], input[name*="lname"]').first();
-      if ($lastNameField.length && $lastNameField.val()) {
-        userInfo.lastName = $lastNameField.val();
-      }
-
-      return userInfo;
-    },
-
-    // Get session information (reuse GA4 session if available)
-    getSessionInfo: function () {
-      var sessionInfo = {
-        client_id: '',
-        session_id: ''
-      };
-
-      // Try to get from GA4 tracking if available
-      if (window.ga4ServerSideTagging && typeof window.ga4ServerSideTagging.getClientId === 'function') {
-        sessionInfo.client_id = window.ga4ServerSideTagging.getClientId();
-      } else {
-        // Generate our own client ID
-        sessionInfo.client_id = this.getClientId();
-      }
-
-      // Try to get session ID from localStorage
-      sessionInfo.session_id = localStorage.getItem('server_side_ga4_session_id') || this.generateUniqueId();
-
-      return sessionInfo;
-    },
-
-    // Get client ID (reuse from GA4 tracking or generate)
-    getClientId: function () {
-      // Try to get from localStorage if available
-      if (window.localStorage) {
-        var storedClientId = localStorage.getItem('server_side_ga4_client_id');
-        if (storedClientId) {
-          return storedClientId;
-        }
-      }
-      return this.generateClientId();
-    },
-
-    // Generate a random client ID and store it
-    generateClientId: function () {
-      var clientId = Math.round(2147483647 * Math.random()) + '.' + Math.round(Date.now() / 1000);
-
-      // Store in localStorage if available
-      if (window.localStorage) {
-        localStorage.setItem('server_side_ga4_client_id', clientId);
-      }
-
-      return clientId;
-    },
-
-    // Check if we're on an order confirmation page
-    isOrderConfirmationPage: function () {
-      return this.config.isThankYouPage === true ||
-             window.location.href.indexOf('/checkout/order-received/') > -1 ||
-             window.location.href.indexOf('/inschrijven/order-received/') > -1 ||
-             window.location.href.indexOf('/order-pay/') > -1 ||
-             window.location.href.indexOf('/thank-you/') > -1;
-    },
-
-    // Get UTM parameters
-    getUtmSource: function () {
-      return this.getParameterByName('utm_source');
-    },
-
-    getUtmMedium: function () {
-      return this.getParameterByName('utm_medium');
-    },
-
-    getUtmCampaign: function () {
-      return this.getParameterByName('utm_campaign');
-    },
-
-    getUtmContent: function () {
-      return this.getParameterByName('utm_content');
-    },
-
-    getUtmTerm: function () {
-      return this.getParameterByName('utm_term');
-    },
-
-    getGclid: function () {
-      return this.getParameterByName('gclid');
-    },
-
-    // Helper function to get URL parameters
-    getParameterByName: function (name, url) {
-      if (!url) url = window.location.href;
-      name = name.replace(/[\[\]]/g, '\\$&');
-      var regex = new RegExp('[?&]' + name + '(=([^&#]*)|&|#|$)'),
-          results = regex.exec(url);
-      if (!results) return null;
-      if (!results[2]) return '';
-      return decodeURIComponent(results[2].replace(/\+/g, ' '));
-    },
-
-    // Generate unique ID
-    generateUniqueId: function () {
-      return Date.now().toString() + '_' + Math.random().toString(36).substr(2, 9);
-    },
-
-    // Log messages if debug mode is enabled
+    /**
+     * Log messages using GA4Utils
+     */
     log: function (message, data) {
-      if (this.config.debugMode && window.console) {
-        if (data) {
-          console.log('[Google Ads Tracking] ' + message, data);
-        } else {
-          console.log('[Google Ads Tracking] ' + message);
-        }
-      }
+      GA4Utils.helpers.log(message, data, this.config, '[Google Ads Tracking]');
     }
   };
 

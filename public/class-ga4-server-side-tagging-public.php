@@ -75,6 +75,14 @@ class GA4_Server_Side_Tagging_Public
         if (is_user_logged_in() && !get_option('ga4_track_logged_in_users', true)) {
             return;
         }
+        // 1. First enqueue the utilities library (dependency for other scripts)
+        wp_enqueue_script(
+            'ga4-utilities',
+            GA4_SERVER_SIDE_TAGGING_PLUGIN_URL . 'public/js/ga4-utilities.js',
+            array('jquery'),
+            GA4_SERVER_SIDE_TAGGING_VERSION,
+            false
+        );
 
         // Enqueue the main tracking script
         wp_enqueue_script(
