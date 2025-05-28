@@ -1043,10 +1043,10 @@
        */
       shouldTrackPurchase: function (trackingType) {
         trackingType = trackingType || "ga4";
-        
+
         // First check if this is actually an order confirmation page
         var isOrderPage = this.isOrderConfirmationPage({}, trackingType);
-        
+
         if (!isOrderPage) {
           GA4Utils.helpers.log(
             "Not an order confirmation page - skipping purchase tracking",
@@ -1056,10 +1056,10 @@
           );
           return false;
         }
-        
+
         // Extract order ID from various sources
         var orderId = this.extractOrderId();
-        
+
         if (!orderId) {
           GA4Utils.helpers.log(
             "No order ID found - cannot track purchase",
@@ -1069,27 +1069,30 @@
           );
           return false;
         }
-        
+
         // Check if this order has already been tracked for this tracking type
         var hasBeenTracked = this.hasOrderBeenTracked(orderId, trackingType);
-        
+
         if (hasBeenTracked) {
           GA4Utils.helpers.log(
-            "Order " + orderId + " has already been tracked for " + trackingType,
+            "Order " +
+              orderId +
+              " has already been tracked for " +
+              trackingType,
             null,
             { debugMode: true },
             "[Purchase Tracking]"
           );
           return false;
         }
-        
+
         GA4Utils.helpers.log(
           "Order " + orderId + " should be tracked for " + trackingType,
           { orderId: orderId, trackingType: trackingType },
           { debugMode: true },
           "[Purchase Tracking]"
         );
-        
+
         return true;
       },
 
@@ -1099,34 +1102,37 @@
        */
       extractOrderId: function () {
         var orderId = null;
-        
+
         // Method 1: Check URL parameters
         var urlParams = new URLSearchParams(window.location.search);
-        if (urlParams.has('order')) {
-          orderId = urlParams.get('order');
-        } else if (urlParams.has('order_id')) {
-          orderId = urlParams.get('order_id');
+        if (urlParams.has("order")) {
+          orderId = urlParams.get("order");
+        } else if (urlParams.has("order_id")) {
+          orderId = urlParams.get("order_id");
         }
-        
+
         // Method 2: Check URL path for WooCommerce order-received pattern
         if (!orderId) {
-          var orderIdMatch = window.location.pathname.match(/order-received\/(\d+)/);
+          var orderIdMatch = window.location.pathname.match(
+            /order-received\/(\d+)/
+          );
           if (orderIdMatch && orderIdMatch[1]) {
             orderId = orderIdMatch[1];
           }
         }
-        
+
         // Method 3: Check for order ID in page content
         if (!orderId) {
           var orderElements = document.querySelectorAll(
-            '.woocommerce-order-overview__order .woocommerce-order-overview__order-number, ' +
-            '.woocommerce-thankyou-order-details .woocommerce-order-overview__order-number, ' +
-            '.order-number, ' +
-            '.order_details .order-number'
+            ".woocommerce-order-overview__order .woocommerce-order-overview__order-number, " +
+              ".woocommerce-thankyou-order-details .woocommerce-order-overview__order-number, " +
+              ".order-number, " +
+              ".order_details .order-number"
           );
-          
+
           for (var i = 0; i < orderElements.length; i++) {
-            var orderText = orderElements[i].textContent || orderElements[i].innerText;
+            var orderText =
+              orderElements[i].textContent || orderElements[i].innerText;
             var orderMatch = orderText.match(/\d+/);
             if (orderMatch) {
               orderId = orderMatch[0];
@@ -1134,23 +1140,25 @@
             }
           }
         }
-        
+
         // Method 4: Check for order ID in scripts or data attributes
         if (!orderId) {
-          var orderDataElements = document.querySelectorAll('[data-order-id]');
+          var orderDataElements = document.querySelectorAll("[data-order-id]");
           if (orderDataElements.length > 0) {
-            orderId = orderDataElements[0].getAttribute('data-order-id');
+            orderId = orderDataElements[0].getAttribute("data-order-id");
           }
         }
-        
+
         // Method 5: Check for order ID in hidden form fields
         if (!orderId) {
-          var hiddenOrderInput = document.querySelector('input[name="order_id"], input[name="order-id"]');
+          var hiddenOrderInput = document.querySelector(
+            'input[name="order_id"], input[name="order-id"]'
+          );
           if (hiddenOrderInput) {
             orderId = hiddenOrderInput.value;
           }
         }
-        
+
         // Clean and validate order ID
         if (orderId) {
           orderId = orderId.toString().trim();
@@ -1159,14 +1167,14 @@
             orderId = null;
           }
         }
-        
+
         GA4Utils.helpers.log(
           "Extracted order ID: " + (orderId || "none"),
           { orderId: orderId },
           { debugMode: true },
           "[Purchase Tracking]"
         );
-        
+
         return orderId;
       },
 
@@ -1180,21 +1188,21 @@
         if (!orderId || !trackingType) {
           return false;
         }
-        
+
         var storageKey = "purchase_tracked_" + trackingType + "_" + orderId;
         var trackedData = localStorage.getItem(storageKey);
-        
+
         if (!trackedData) {
           return false;
         }
-        
+
         try {
           var data = JSON.parse(trackedData);
           var now = Date.now();
           var thirtyMinutes = 30 * 60 * 1000; // 30 minutes in milliseconds
-          
+
           // Check if the tracking record is still valid (within 30 minutes)
-          if (data.timestamp && (now - data.timestamp) < thirtyMinutes) {
+          if (data.timestamp && now - data.timestamp < thirtyMinutes) {
             return true;
           } else {
             // Expired, remove it
@@ -1236,16 +1244,16 @@
           );
           return;
         }
-        
+
         var storageKey = "purchase_tracked_" + trackingType + "_" + orderId;
         var trackingData = {
           orderId: orderId,
           trackingType: trackingType,
           timestamp: Date.now(),
           url: window.location.href,
-          ...(additionalData || {})
+          ...(additionalData || {}),
         };
-        
+
         try {
           localStorage.setItem(storageKey, JSON.stringify(trackingData));
           GA4Utils.helpers.log(
@@ -1272,14 +1280,14 @@
        */
       isOrderConfirmationPageWithTracking: function (config, trackingType) {
         trackingType = trackingType || "ga4";
-        
+
         // First check if this is actually an order confirmation page
         var isOrderPage = this.isOrderConfirmationPage(config, trackingType);
-        
+
         if (!isOrderPage) {
           return false;
         }
-        
+
         // If it's an order page, check if we should track it
         return this.shouldTrackPurchase(trackingType);
       },
@@ -1292,13 +1300,18 @@
        * @param {Object} additionalData Additional data to store with tracking record
        * @returns {boolean} True if tracking was executed, false if skipped
        */
-      trackPurchaseSafely: function (trackingCallback, trackingType, orderData, additionalData) {
+      trackPurchaseSafely: function (
+        trackingCallback,
+        trackingType,
+        orderData,
+        additionalData
+      ) {
         if (!this.shouldTrackPurchase(trackingType)) {
           return false;
         }
-        
+
         var orderId = orderData.transaction_id || this.extractOrderId();
-        
+
         if (!orderId) {
           GA4Utils.helpers.log(
             "Cannot track purchase - no order ID available",
@@ -1308,27 +1321,27 @@
           );
           return false;
         }
-        
+
         try {
           // Execute the tracking callback
-          if (typeof trackingCallback === 'function') {
+          if (typeof trackingCallback === "function") {
             trackingCallback(orderData);
-            
+
             // Mark as tracked after successful execution
             this.markOrderAsTracked(orderId, trackingType, {
               value: orderData.value,
               currency: orderData.currency,
               items_count: orderData.items ? orderData.items.length : 0,
-              ...(additionalData || {})
+              ...(additionalData || {}),
             });
-            
+
             GA4Utils.helpers.log(
               "Successfully tracked purchase for order: " + orderId,
               { trackingType: trackingType, orderData: orderData },
               { debugMode: true },
               "[Purchase Tracking]"
             );
-            
+
             return true;
           } else {
             GA4Utils.helpers.log(
@@ -1356,27 +1369,27 @@
        */
       getTrackedPurchases: function () {
         var trackedPurchases = [];
-        
+
         if (!window.localStorage) {
           return trackedPurchases;
         }
-        
+
         for (var i = 0; i < localStorage.length; i++) {
           var key = localStorage.key(i);
-          
+
           if (key && key.startsWith("purchase_tracked_")) {
             try {
               var data = JSON.parse(localStorage.getItem(key));
               trackedPurchases.push({
                 key: key,
-                data: data
+                data: data,
               });
             } catch (e) {
               // Invalid data, skip it
             }
           }
         }
-        
+
         return trackedPurchases;
       },
 
@@ -1388,25 +1401,29 @@
         if (!window.localStorage) {
           return;
         }
-        
+
         var keysToRemove = [];
-        var prefix = trackingType ? "purchase_tracked_" + trackingType + "_" : "purchase_tracked_";
-        
+        var prefix = trackingType
+          ? "purchase_tracked_" + trackingType + "_"
+          : "purchase_tracked_";
+
         for (var i = 0; i < localStorage.length; i++) {
           var key = localStorage.key(i);
-          
+
           if (key && key.startsWith(prefix)) {
             keysToRemove.push(key);
           }
         }
-        
+
         keysToRemove.forEach(function (key) {
           localStorage.removeItem(key);
         });
-        
+
         GA4Utils.helpers.log(
-          "Cleared " + keysToRemove.length + " purchase tracking records" + 
-          (trackingType ? " for " + trackingType : ""),
+          "Cleared " +
+            keysToRemove.length +
+            " purchase tracking records" +
+            (trackingType ? " for " + trackingType : ""),
           null,
           { debugMode: true },
           "[Purchase Tracking]"
@@ -1794,7 +1811,7 @@
     GA4Utils.helpers.log(
       "GA4Utils initialized and cleanup completed",
       null,
-      { debugMode: true },
+      {},
       "[GA4Utils Init]"
     );
   });
