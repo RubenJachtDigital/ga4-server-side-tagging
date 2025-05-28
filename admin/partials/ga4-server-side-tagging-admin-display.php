@@ -153,7 +153,7 @@ if (!defined('WPINC')) {
                             <td>
                                 <input type="text" id="ga4_conversion_form_ids" name="ga4_conversion_form_ids"
                                     value="<?php echo esc_attr($conversion_form_ids); ?>" class="regular-text" />
-                                <p class="description">Your important conversion form id's(They should be in the following format "1,2,3,4")</p>
+                                <p class="description">Your important conversion form id's(They should be in the following format "1,2,3,4")<br>Only works with gravity forms</p>
                             </td>
                         </tr>
                     </table>
