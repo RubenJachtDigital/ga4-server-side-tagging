@@ -33,7 +33,7 @@
       this.setupEventListeners();
 
       // Log initialization
-      this.log("GA4 Server-Side Tagging initialized v5");
+      this.log("GA4 Server-Side Tagging initialized v1");
     },
 
     trackPageView: function () {
@@ -1112,24 +1112,82 @@
     setupPurchaseTracking: function () {
       var self = this;
 
-      // Track purchase event on order received page
-      if (GA4Utils.page.isOrderConfirmationPage(this.config, "ga4")) {
+      // Track purchase event on order received page using safe tracking
+      if (
+        GA4Utils.page.isOrderConfirmationPageWithTracking(this.config, "ga4")
+      ) {
         // Check if we have order data from the server
         if (this.config.orderData) {
           self.log(
-            "Order data found, tracking purchase event with attribution",
+            "Order data found, attempting safe purchase tracking",
             this.config.orderData
           );
-          self.trackEvent("purchase", this.config.orderData);
+
+          // Use safe tracking to prevent duplicates
+          var wasTracked = GA4Utils.page.trackPurchaseSafely(
+            function (orderData) {
+              self.trackEvent("purchase", orderData);
+            },
+            "ga4",
+            this.config.orderData,
+            {
+              source: "server_side_tracking",
+              data_source: "server_config",
+              timestamp_tracked: Date.now(),
+            }
+          );
+
+          if (wasTracked) {
+            self.log("Purchase event tracked successfully");
+          } else {
+            self.log(
+              "Purchase event skipped - already tracked or invalid data"
+            );
+          }
         } else {
           // Try to extract order data from the page
-          self.log("Attempting to extract order data from the page");
+          self.log(
+            "No server order data found, attempting to extract from page"
+          );
           var orderData = this.extractOrderDataFromPage();
 
           if (orderData.transaction_id) {
-            self.trackEvent("purchase", orderData);
+            // Use safe tracking with extracted data
+            var wasTracked = GA4Utils.page.trackPurchaseSafely(
+              function (extractedOrderData) {
+                self.trackEvent("purchase", extractedOrderData);
+              },
+              "ga4",
+              orderData,
+              {
+                source: "server_side_tracking",
+                data_source: "page_extraction",
+                timestamp_tracked: Date.now(),
+              }
+            );
+
+            if (wasTracked) {
+              self.log("Purchase event tracked from extracted data");
+            } else {
+              self.log(
+                "Purchase event skipped - already tracked or invalid extracted data"
+              );
+            }
           } else {
-            self.log("Could not extract order data from the page");
+            self.log("Could not extract valid order data from the page");
+          }
+        }
+      } else {
+        // Check if we're on an order page but tracking was skipped
+        if (GA4Utils.page.isOrderConfirmationPage(this.config, "ga4")) {
+          var orderId = GA4Utils.page.extractOrderId();
+          if (orderId) {
+            self.log(
+              "Order confirmation page detected but purchase already tracked for order: " +
+                orderId
+            );
+          } else {
+            self.log("Order confirmation page detected but no order ID found");
           }
         }
       }
