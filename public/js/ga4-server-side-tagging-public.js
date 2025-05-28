@@ -33,7 +33,7 @@
       this.setupEventListeners();
 
       // Log initialization
-      this.log("GA4 Server-Side Tagging initialized v1");
+      this.log("GA4 Server-Side Tagging initialized v4");
     },
 
     trackPageView: function () {
@@ -467,6 +467,24 @@
         trackForms = `form:not(.cart, .woocommerce-cart-form, .checkout, .woocommerce-checkout, ${conversionFormExclusions})`;
       }
 
+      // Helper function to sanitize field names
+      function sanitizeFieldName(fieldName) {
+        if (!fieldName || fieldName === "unknown_field") {
+          return fieldName;
+        }
+
+        // Remove array brackets and sanitize
+        var sanitized = fieldName
+          .replace(/\[\]/g, "") // Remove empty brackets
+          .replace(/\[.*?\]/g, "") // Remove brackets with content
+          .replace(/[^a-zA-Z0-9_-]/g, "_") // Replace special chars with underscore
+          .replace(/_{2,}/g, "_") // Replace multiple underscores with single
+          .replace(/^_+|_+$/g, ""); // Remove leading/trailing underscores
+
+        // Ensure it's not empty after sanitization
+        return sanitized || "sanitized_field";
+      }
+
       // Track form submissions (excluding WooCommerce forms and conversion forms)
       $(document).on("submit", trackForms, function () {
         // Skip tracking form submissions that are WooCommerce add to cart forms
@@ -497,89 +515,15 @@
         conversionIds.forEach(function (id) {
           var trimmedId = id.trim();
           $(`#gform_${trimmedId}`).on("submit", function (event) {
-            var formData = {};
             var formId = $(this).attr("id") || "unknown";
-
-            // Collect all filled form field values
-            $(this)
-              .find("input, textarea, select")
-              .each(function () {
-                var field = $(this);
-                var fieldName =
-                  field.attr("name") || field.attr("id") || "unknown_field";
-                var fieldType =
-                  field.attr("type") || field.prop("tagName").toLowerCase();
-
-                // Handle different input types
-                if (field.is("input")) {
-                  if (field.is(":checkbox")) {
-                    if (field.is(":checked")) {
-                      // For checkboxes, collect checked values
-                      if (!formData[fieldName]) {
-                        formData[fieldName] = [];
-                      }
-                      if (Array.isArray(formData[fieldName])) {
-                        formData[fieldName].push(field.val());
-                      } else {
-                        formData[fieldName] = [
-                          formData[fieldName],
-                          field.val(),
-                        ];
-                      }
-                    }
-                  } else if (field.is(":radio")) {
-                    if (field.is(":checked")) {
-                      formData[fieldName] = field.val();
-                    }
-                  } else if (fieldType === "file") {
-                    // For file inputs, get file names
-                    var files = field[0].files;
-                    if (files && files.length > 0) {
-                      var fileNames = [];
-                      for (var i = 0; i < files.length; i++) {
-                        fileNames.push(files[i].name);
-                      }
-                      formData[fieldName] = fileNames.join(", ");
-                    }
-                  } else {
-                    // Text, email, tel, url, number, date, etc.
-                    var fieldValue = field.val();
-                    if (fieldValue && fieldValue.trim() !== "") {
-                      formData[fieldName] = fieldValue;
-                    }
-                  }
-                } else if (field.is("textarea")) {
-                  // Textarea fields
-                  var textValue = field.val();
-                  if (textValue && textValue.trim() !== "") {
-                    formData[fieldName] = textValue;
-                  }
-                } else if (field.is("select")) {
-                  // Dropdown/select fields
-                  if (field.prop("multiple")) {
-                    // Multi-select dropdown
-                    var selectedValues = field.val();
-                    if (selectedValues && selectedValues.length > 0) {
-                      formData[fieldName] = selectedValues;
-                    }
-                  } else {
-                    // Single select dropdown
-                    var selectedValue = field.val();
-                    if (
-                      selectedValue &&
-                      selectedValue !== "" &&
-                      selectedValue !== null
-                    ) {
-                      formData[fieldName] = selectedValue;
-                    }
-                  }
-                }
-              });
-
-            self.trackEvent("form_conversion", {
+            var formAction = $(this).attr("action") || "unknown";
+            var trackingData = {
               form_id: formId,
-              form_data: formData,
-            });
+              form_action: formAction,
+              pageTitle: document.title,
+            };
+
+            self.trackEvent("form_conversion", trackingData);
           });
         });
       }
