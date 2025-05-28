@@ -1140,7 +1140,7 @@
        * @returns {string}
        */
       generateUniqueId: function() {
-        return Date.now().toString() + '_' + Math.random().toString(36).substr(2, 9);
+        return Date.now().toString();
       },
 
       /**
