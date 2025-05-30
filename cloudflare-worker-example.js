@@ -1,14 +1,14 @@
 /**
- * GA4 Server-Side Tagging + Google Ads Conversion Cloudflare Worker
+ * Enhanced GA4 Server-Side Tagging + Google Ads Conversion Cloudflare Worker
  *
  * This worker receives events from the WordPress plugin and forwards them to GA4
- * and Google Ads conversions.
+ * and Google Ads conversions using multiple methods.
  *
- * @version 1.3.0
+ * @version 2.0.0
  */
 
 // GA4 Configuration
-var DEBUG_MODE = false; // Set to true to enable debug logging
+var DEBUG_MODE = true; // Set to true to enable debug logging
 const GA4_ENDPOINT = "https://www.google-analytics.com/mp/collect";
 const GA4_MEASUREMENT_ID = "G-xx"; // Your GA4 Measurement ID
 const GA4_API_SECRET = "xx"; // Your GA4 API Secret
@@ -18,6 +18,9 @@ const GOOGLE_ADS_ENDPOINT = "https://googleads.googleapis.com/v17/customers";
 const GOOGLE_ADS_DEVELOPER_TOKEN = ""; // Your Google Ads Developer Token
 const GOOGLE_ADS_CUSTOMER_ID = ""; // Your Google Ads Customer ID (without dashes)
 const GOOGLE_ADS_ACCESS_TOKEN = ""; // OAuth2 Access Token (needs refresh mechanism)
+
+// Enhanced Conversions Endpoint (Alternative method)
+const ENHANCED_CONVERSIONS_ENDPOINT = "https://googleads.googleapis.com/v17/customers";
 
 addEventListener("fetch", (event) => {
   event.respondWith(handleRequest(event.request));
@@ -44,6 +47,10 @@ async function handleRequest(request) {
   try {
     // Parse the request body
     const payload = await request.json();
+
+    if (DEBUG_MODE) {
+      console.log("Received payload:", JSON.stringify(payload));
+    }
 
     // Check if this is a Google Ads conversion event
     if (isGoogleAdsConversion(payload.name)) {
@@ -117,17 +124,34 @@ async function handleGoogleAdsConversion(payload, request) {
   }
 
   try {
-    // Method 1: Enhanced Conversions via Measurement Protocol (Simpler)
-    const success = await sendEnhancedConversion(conversionData, request);
+    // Try multiple methods for Google Ads conversion tracking
+    const results = await Promise.allSettled([
+      // Method 1: Enhanced Conversions via Google Click ID
+      sendEnhancedConversionViaGCLID(conversionData, request),
+      
+      // Method 2: Enhanced Conversions via User Data
+      sendEnhancedConversionViaUserData(conversionData, request),
+      
+      // Method 3: Backup via GA4 (for importing to Google Ads)
+      sendToGA4AsCustomEvent(conversionData, request)
+    ]);
+
+    // Check if at least one method succeeded
+    const successfulMethods = results.filter(result => result.status === 'fulfilled' && result.value);
     
-    if (success) {
+    if (successfulMethods.length > 0) {
       return new Response(
         JSON.stringify({
           success: true,
           event: payload.name,
           conversion_id: conversionData.conversion_id,
           conversion_label: conversionData.conversion_label,
-          method: 'enhanced_conversions',
+          methods_used: results.map((result, index) => ({
+            method: ['gclid', 'user_data', 'ga4_backup'][index],
+            success: result.status === 'fulfilled' && result.value,
+            error: result.status === 'rejected' ? result.reason?.message : null
+          })),
+          debug: DEBUG_MODE ? conversionData : undefined,
         }),
         {
           headers: {
@@ -137,7 +161,7 @@ async function handleGoogleAdsConversion(payload, request) {
         }
       );
     } else {
-      throw new Error("Failed to send enhanced conversion");
+      throw new Error("All Google Ads conversion methods failed");
     }
   } catch (error) {
     console.error("Google Ads conversion error:", error);
@@ -159,42 +183,242 @@ async function handleGoogleAdsConversion(payload, request) {
 }
 
 /**
- * Send Enhanced Conversion using Google Ads Measurement Protocol
+ * Send Enhanced Conversion via GCLID (Method 1)
  * @param {Object} conversionData
  * @param {Request} request
  */
-async function sendEnhancedConversion(conversionData, request) {
-  // Build the conversion payload
+async function sendEnhancedConversionViaGCLID(conversionData, request) {
+  if (!conversionData.gclid) {
+    if (DEBUG_MODE) {
+      console.log("No GCLID available for enhanced conversion");
+    }
+    return false;
+  }
+
+  // Build conversion payload for GCLID method
   const conversionPayload = {
-    conversion_action: `customers/${GOOGLE_ADS_CUSTOMER_ID}/conversionActions/${conversionData.conversion_label}`,
-    conversion_date_time: new Date(conversionData.timestamp * 1000).toISOString(),
-    conversion_value: conversionData.value || 0,
-    currency_code: conversionData.currency || 'EUR',
+    conversions: [{
+      conversion_action: `customers/${GOOGLE_ADS_CUSTOMER_ID}/conversionActions/${conversionData.conversion_label}`,
+      conversion_date_time: new Date(conversionData.timestamp * 1000).toISOString(),
+      conversion_value: parseFloat(conversionData.value) || 0,
+      currency_code: conversionData.currency || 'EUR',
+      gclid: conversionData.gclid,
+      order_id: conversionData.transaction_id || conversionData.lead_id,
+      
+      // Enhanced conversion data
+      user_identifiers: await buildUserIdentifiers(conversionData),
+      
+      // Cart data if available
+      cart_data: conversionData.items ? {
+        items: conversionData.items.map(item => ({
+          product_id: item.item_id,
+          quantity: parseInt(item.quantity) || 1,
+          unit_price: parseFloat(item.price) || 0
+        }))
+      } : undefined
+    }],
+    
+    // Validate only flag
+    validate_only: false
   };
 
-  // Add order ID if available
-  if (conversionData.transaction_id) {
-    conversionPayload.order_id = conversionData.transaction_id;
-  } else if (conversionData.lead_id) {
-    conversionPayload.order_id = conversionData.lead_id;
+  if (DEBUG_MODE) {
+    console.log("GCLID conversion payload:", JSON.stringify(conversionPayload));
   }
 
-  // Add GCLID if available
-  if (conversionData.gclid) {
-    conversionPayload.gclid = conversionData.gclid;
+  // If we have proper API credentials, send to Google Ads API
+  if (GOOGLE_ADS_ACCESS_TOKEN && GOOGLE_ADS_DEVELOPER_TOKEN) {
+    try {
+      const response = await fetch(
+        `${GOOGLE_ADS_ENDPOINT}/${GOOGLE_ADS_CUSTOMER_ID}/conversionUploads:uploadConversions`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${GOOGLE_ADS_ACCESS_TOKEN}`,
+            "developer-token": GOOGLE_ADS_DEVELOPER_TOKEN,
+          },
+          body: JSON.stringify(conversionPayload),
+        }
+      );
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Google Ads API error: ${response.status} ${errorText}`);
+      }
+
+      const result = await response.json();
+      if (DEBUG_MODE) {
+        console.log("Google Ads API response:", result);
+      }
+      
+      return true;
+    } catch (error) {
+      console.error("Google Ads API GCLID method failed:", error);
+      return false;
+    }
   }
 
-  // Add enhanced conversion data (user identifiers)
+  return false;
+}
+
+/**
+ * Send Enhanced Conversion via User Data (Method 2)
+ * @param {Object} conversionData
+ * @param {Request} request
+ */
+async function sendEnhancedConversionViaUserData(conversionData, request) {
+  // This method uses user identifiers without GCLID
+  const userIdentifiers = await buildUserIdentifiers(conversionData);
+  
+  if (userIdentifiers.length === 0) {
+    if (DEBUG_MODE) {
+      console.log("No user identifiers available for enhanced conversion");
+    }
+    return false;
+  }
+
+  const conversionPayload = {
+    conversions: [{
+      conversion_action: `customers/${GOOGLE_ADS_CUSTOMER_ID}/conversionActions/${conversionData.conversion_label}`,
+      conversion_date_time: new Date(conversionData.timestamp * 1000).toISOString(),
+      conversion_value: parseFloat(conversionData.value) || 0,
+      currency_code: conversionData.currency || 'EUR',
+      order_id: conversionData.transaction_id || conversionData.lead_id,
+      
+      // Enhanced conversion data
+      user_identifiers: userIdentifiers,
+      
+      // Cart data if available
+      cart_data: conversionData.items ? {
+        items: conversionData.items.map(item => ({
+          product_id: item.item_id,
+          quantity: parseInt(item.quantity) || 1,
+          unit_price: parseFloat(item.price) || 0
+        }))
+      } : undefined
+    }],
+    
+    validate_only: false
+  };
+
+  if (DEBUG_MODE) {
+    console.log("User data conversion payload:", JSON.stringify(conversionPayload));
+  }
+
+  // If we have proper API credentials, send to Google Ads API
+  if (GOOGLE_ADS_ACCESS_TOKEN && GOOGLE_ADS_DEVELOPER_TOKEN) {
+    try {
+      const response = await fetch(
+        `${GOOGLE_ADS_ENDPOINT}/${GOOGLE_ADS_CUSTOMER_ID}/conversionUploads:uploadConversions`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${GOOGLE_ADS_ACCESS_TOKEN}`,
+            "developer-token": GOOGLE_ADS_DEVELOPER_TOKEN,
+          },
+          body: JSON.stringify(conversionPayload),
+        }
+      );
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Google Ads API error: ${response.status} ${errorText}`);
+      }
+
+      const result = await response.json();
+      if (DEBUG_MODE) {
+        console.log("Google Ads API user data response:", result);
+      }
+      
+      return true;
+    } catch (error) {
+      console.error("Google Ads API user data method failed:", error);
+      return false;
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Send to GA4 as custom event for importing to Google Ads (Method 3)
+ * @param {Object} conversionData
+ * @param {Request} request
+ */
+async function sendToGA4AsCustomEvent(conversionData, request) {
+  try {
+    // Create a comprehensive GA4 event that can be imported to Google Ads
+    const ga4ConversionEvent = {
+      name: 'ads_conversion',
+      params: {
+        // Google Ads specific parameters
+        conversion_id: conversionData.conversion_id,
+        conversion_label: conversionData.conversion_label,
+        conversion_type: conversionData.conversion_type,
+        
+        // Transaction data
+        transaction_id: conversionData.transaction_id || conversionData.lead_id,
+        value: parseFloat(conversionData.value) || 0,
+        currency: conversionData.currency || 'EUR',
+        
+        // Attribution data
+        gclid: conversionData.gclid || '',
+        utm_source: conversionData.utm_source || '',
+        utm_medium: conversionData.utm_medium || '',
+        utm_campaign: conversionData.utm_campaign || '',
+        utm_content: conversionData.utm_content || '',
+        utm_term: conversionData.utm_term || '',
+        
+        // Session data
+        client_id: conversionData.client_id,
+        session_id: conversionData.session_id,
+        
+        // Additional conversion data
+        conversion_timestamp: conversionData.timestamp,
+        page_location: conversionData.page_location,
+        page_referrer: conversionData.page_referrer,
+        
+        // User data (non-PII)
+        user_agent: conversionData.user_agent,
+        
+        // Items data for enhanced ecommerce
+        items: conversionData.items || []
+      }
+    };
+
+    // Send to GA4
+    await sendEventToGA4(ga4ConversionEvent, conversionData.client_id);
+    
+    if (DEBUG_MODE) {
+      console.log("GA4 conversion event sent successfully");
+    }
+    
+    return true;
+  } catch (error) {
+    console.error("GA4 backup method failed:", error);
+    return false;
+  }
+}
+
+/**
+ * Build user identifiers for enhanced conversions
+ * @param {Object} conversionData
+ * @returns {Promise<Array>}
+ */
+async function buildUserIdentifiers(conversionData) {
   const userIdentifiers = [];
   
+  // Email identifier
   if (conversionData.email) {
     userIdentifiers.push({
       hashed_email: await hashString(conversionData.email.toLowerCase().trim())
     });
   }
   
+  // Phone identifier
   if (conversionData.phone) {
-    // Normalize phone number (remove non-digits, add country code if needed)
     const normalizedPhone = normalizePhoneNumber(conversionData.phone);
     if (normalizedPhone) {
       userIdentifiers.push({
@@ -203,7 +427,7 @@ async function sendEnhancedConversion(conversionData, request) {
     }
   }
   
-  // Add address information if available
+  // Address information
   if (conversionData.first_name || conversionData.last_name || conversionData.street_address) {
     const addressInfo = {};
     
@@ -236,52 +460,7 @@ async function sendEnhancedConversion(conversionData, request) {
     }
   }
 
-  if (userIdentifiers.length > 0) {
-    conversionPayload.user_identifiers = userIdentifiers;
-  }
-
-  // Add cart data if available
-  if (conversionData.items && conversionData.items.length > 0) {
-    conversionPayload.cart_data = {
-      items: conversionData.items.map(item => ({
-        product_id: item.item_id,
-        quantity: item.quantity || 1,
-        unit_price: item.price || 0
-      }))
-    };
-  }
-
-  // For now, we'll use a simplified approach since the full Google Ads API requires OAuth
-  // We'll send this data to Google Analytics as a custom event that can be imported
-  // This is a workaround until you set up proper Google Ads API credentials
-  
-  if (DEBUG_MODE) {
-    console.log("Google Ads conversion payload:", JSON.stringify(conversionPayload));
-  }
-
-  // Alternative: Send as custom GA4 event for later import to Google Ads
-  const ga4ConversionEvent = {
-    name: 'ads_conversion',
-    params: {
-      conversion_id: conversionData.conversion_id,
-      conversion_label: conversionData.conversion_label,
-      conversion_type: conversionData.conversion_type,
-      transaction_id: conversionData.transaction_id || conversionData.lead_id,
-      value: conversionData.value || 0,
-      currency: conversionData.currency || 'EUR',
-      client_id: conversionData.client_id,
-      // Add other relevant data
-      gclid: conversionData.gclid || '',
-      utm_source: conversionData.utm_source || '',
-      utm_medium: conversionData.utm_medium || '',
-      utm_campaign: conversionData.utm_campaign || '',
-    }
-  };
-
-  // Send to GA4 as a backup/alternative method
-  await sendEventToGA4(ga4ConversionEvent, conversionData.client_id);
-  
-  return true; // Return success for now
+  return userIdentifiers;
 }
 
 /**
@@ -431,6 +610,8 @@ async function handleGA4Event(payload, request) {
  * @returns {Promise<string>}
  */
 async function hashString(str) {
+  if (!str) return '';
+  
   const encoder = new TextEncoder();
   const data = encoder.encode(str);
   const hashBuffer = await crypto.subtle.digest('SHA-256', data);
@@ -658,8 +839,11 @@ function extractLocationData(params) {
   const userLocation = {};
 
   // Map location parameters to GA4 user_location format
+  // GA4 accepts city names as strings (not IDs)
   if (params.geo_city || params.city) {
-    userLocation.city = params.geo_city || params.city;
+    const cityName = params.geo_city || params.city;
+    // Clean and format city name properly
+    userLocation.city = cleanLocationString(cityName);
     delete params.geo_city;
     delete params.city;
   }
@@ -673,10 +857,20 @@ function extractLocationData(params) {
   }
 
   if (params.geo_region || params.region) {
-    // Convert region to ISO format if needed
+    // Convert region to proper ISO format (country-region)
     const regionName = params.geo_region || params.region;
     const countryCode = userLocation.country_id || "NL"; // Default to NL if no country
-    userLocation.region_id = `${countryCode}-${regionName.toUpperCase().substring(0, 2)}`;
+    
+    // Handle different region formats
+    if (regionName) {
+      // For Netherlands, use proper province codes
+      if (countryCode === "NL") {
+        userLocation.region_id = formatDutchRegion(regionName, countryCode);
+      } else {
+        // For other countries, use standard format
+        userLocation.region_id = formatRegionId(regionName, countryCode);
+      }
+    }
     delete params.geo_region;
     delete params.region;
   }
@@ -694,6 +888,7 @@ function extractLocationData(params) {
     }
   }
   
+  // Set default country if not provided
   if (!userLocation.country_id) {
     userLocation.country_id = "NL";
   }
@@ -708,12 +903,128 @@ function extractLocationData(params) {
   
   // Remove any empty values
   Object.keys(userLocation).forEach(key => {
-    if (!userLocation[key]) {
+    if (!userLocation[key] || userLocation[key] === "") {
       delete userLocation[key];
     }
   });
 
+  // Log the final user_location for debugging
+  if (DEBUG_MODE && Object.keys(userLocation).length > 0) {
+    console.log("Final user_location object:", JSON.stringify(userLocation));
+  }
+
   return userLocation;
+}
+
+/**
+ * Clean and format location strings
+ * @param {string} locationString
+ * @returns {string}
+ */
+function cleanLocationString(locationString) {
+  if (!locationString) return "";
+  
+  // Trim whitespace and convert to proper case
+  return locationString.trim()
+    .replace(/\s+/g, ' ') // Replace multiple spaces with single space
+    .split(' ')
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join(' ');
+}
+
+/**
+ * Format Dutch region/province names to proper codes
+ * @param {string} regionName
+ * @param {string} countryCode
+ * @returns {string}
+ */
+function formatDutchRegion(regionName, countryCode) {
+  const dutchProvinces = {
+    "Noord-Holland": "NL-NH",
+    "Noord Holland": "NL-NH",
+    "North Holland": "NL-NH",
+    "NH": "NL-NH",
+    "Zuid-Holland": "NL-ZH", 
+    "Zuid Holland": "NL-ZH",
+    "South Holland": "NL-ZH",
+    "ZH": "NL-ZH",
+    "Utrecht": "NL-UT",
+    "UT": "NL-UT",
+    "Gelderland": "NL-GE",
+    "GE": "NL-GE",
+    "Overijssel": "NL-OV",
+    "OV": "NL-OV",
+    "Drenthe": "NL-DR",
+    "DR": "NL-DR",
+    "Friesland": "NL-FR",
+    "Fryslân": "NL-FR",
+    "FR": "NL-FR",
+    "Groningen": "NL-GR",
+    "GR": "NL-GR",
+    "Limburg": "NL-LI",
+    "LI": "NL-LI",
+    "Noord-Brabant": "NL-NB",
+    "Noord Brabant": "NL-NB",
+    "North Brabant": "NL-NB",
+    "NB": "NL-NB",
+    "Zeeland": "NL-ZE",
+    "ZE": "NL-ZE",
+    "Flevoland": "NL-FL",
+    "FL": "NL-FL"
+  };
+  
+  // First try exact match
+  if (dutchProvinces[regionName]) {
+    return dutchProvinces[regionName];
+  }
+  
+  // Try case-insensitive match
+  const lowerRegion = regionName.toLowerCase();
+  for (const [key, value] of Object.entries(dutchProvinces)) {
+    if (key.toLowerCase() === lowerRegion) {
+      return value;
+    }
+  }
+  
+  // If no match found, use the standard format
+  return formatRegionId(regionName, countryCode);
+}
+
+/**
+ * Format region ID for other countries
+ * @param {string} regionName
+ * @param {string} countryCode
+ * @returns {string}
+ */
+function formatRegionId(regionName, countryCode) {
+  if (!regionName) return "";
+  
+  // If it already includes the country code, return as-is
+  if (regionName.includes("-") && regionName.startsWith(countryCode)) {
+    return regionName;
+  }
+  
+  // Common US state abbreviations
+  const usStates = {
+    "California": "US-CA", "CA": "US-CA",
+    "New York": "US-NY", "NY": "US-NY",
+    "Texas": "US-TX", "TX": "US-TX",
+    "Florida": "US-FL", "FL": "US-FL",
+    "Illinois": "US-IL", "IL": "US-IL",
+    "Pennsylvania": "US-PA", "PA": "US-PA",
+    "Ohio": "US-OH", "OH": "US-OH",
+    "Georgia": "US-GA", "GA": "US-GA",
+    "North Carolina": "US-NC", "NC": "US-NC",
+    "Michigan": "US-MI", "MI": "US-MI"
+  };
+  
+  if (countryCode === "US" && usStates[regionName]) {
+    return usStates[regionName];
+  }
+  
+  // For other countries, create a standard format
+  let regionCode = regionName.length <= 3 ? regionName.toUpperCase() : regionName.substring(0, 2).toUpperCase();
+  return `${countryCode}-${regionCode}`;
 }
 
 /**
@@ -746,7 +1057,7 @@ function getCORSHeaders(request) {
 }
 
 /**
- * Process and normalize event data (your existing function - abbreviated for space)
+ * Process and normalize event data
  * @param {Object} data - The raw event data
  * @param {Request} request - The original request object
  * @returns {Object} - Processed event data
@@ -769,7 +1080,7 @@ function processEventData(data, request) {
     ? new URL(referer).host
     : request.headers.get("Host");
 
-  // Handle specific event types (abbreviated - include your full logic here)
+  // Handle specific event types
   switch (processedData.name) {
     case "page_view":
       if (!processedData.params.page_title) {
@@ -805,16 +1116,38 @@ function processEventData(data, request) {
 }
 
 /**
- * Instructions for deploying this updated worker:
+ * Deployment Instructions:
  *
- * 1. Update your existing Cloudflare Worker with this code
- * 2. Replace GA4_MEASUREMENT_ID and GA4_API_SECRET with your actual values
- * 3. The worker now handles both GA4 events and Google Ads conversions
- * 4. Google Ads conversions are sent as custom GA4 events (ads_conversion) for backup
- * 5. For full Google Ads API integration, you'll need to add OAuth credentials
- * 6. Set DEBUG_MODE to true to see detailed logs
- * 7. Save and deploy the worker
+ * 1. Update your existing Cloudflare Worker with this enhanced code
+ * 2. Replace the configuration variables at the top:
+ *    - GA4_MEASUREMENT_ID: Your GA4 Measurement ID (G-XXXXXXXXXX)
+ *    - GA4_API_SECRET: Your GA4 API Secret
+ *    - GOOGLE_ADS_CUSTOMER_ID: Your Google Ads Customer ID (numbers only, no dashes)
+ *    - GOOGLE_ADS_DEVELOPER_TOKEN: Your Google Ads Developer Token
+ *    - GOOGLE_ADS_ACCESS_TOKEN: OAuth2 Access Token (requires refresh mechanism)
  *
- * The worker will automatically detect Google Ads conversion events by their name prefix
- * and route them to the appropriate handler.
+ * 3. The worker now uses a multi-method approach for Google Ads conversions:
+ *    - Method 1: Enhanced Conversions via GCLID (if available)
+ *    - Method 2: Enhanced Conversions via User Data (email, phone, address)
+ *    - Method 3: Backup via GA4 custom events (for importing to Google Ads)
+ *
+ * 4. Set DEBUG_MODE to true to see detailed logs during testing
+ * 5. Save and deploy the worker
+ *
+ * 6. Google Ads API Setup Required:
+ *    - Enable Google Ads API in Google Cloud Console
+ *    - Create OAuth2 credentials
+ *    - Get your Developer Token from Google Ads
+ *    - Implement token refresh mechanism for production
+ *
+ * 7. The worker automatically detects Google Ads conversion events by their name prefix
+ *    and routes them to the appropriate enhanced conversion handlers
+ *
+ * Key Features:
+ * - Enhanced Conversions support with SHA-256 hashing
+ * - Multiple fallback methods for maximum reliability
+ * - Comprehensive user identifier collection
+ * - Cart data support for enhanced ecommerce
+ * - Proper error handling and logging
+ * - CORS support for cross-origin requests
  */
