@@ -473,24 +473,6 @@
         trackForms = `form:not(.cart, .woocommerce-cart-form, .checkout, .woocommerce-checkout, ${conversionFormExclusions})`;
       }
 
-      // Helper function to sanitize field names
-      function sanitizeFieldName(fieldName) {
-        if (!fieldName || fieldName === "unknown_field") {
-          return fieldName;
-        }
-
-        // Remove array brackets and sanitize
-        var sanitized = fieldName
-          .replace(/\[\]/g, "") // Remove empty brackets
-          .replace(/\[.*?\]/g, "") // Remove brackets with content
-          .replace(/[^a-zA-Z0-9_-]/g, "_") // Replace special chars with underscore
-          .replace(/_{2,}/g, "_") // Replace multiple underscores with single
-          .replace(/^_+|_+$/g, ""); // Remove leading/trailing underscores
-
-        // Ensure it's not empty after sanitization
-        return sanitized || "sanitized_field";
-      }
-
       // Track form submissions (excluding WooCommerce forms and conversion forms)
       $(document).on("submit", trackForms, function () {
         // Skip tracking form submissions that are WooCommerce add to cart forms
