@@ -33,7 +33,7 @@
       this.setupEventListeners();
 
       // Log initialization
-      this.log("GA4 Server-Side Tagging initialized v1");
+      this.log("GA4 Server-Side Tagging initialized v2");
     },
 
     trackPageView: function () {
@@ -105,6 +105,12 @@
         referrer,
         ignore_referrer
       );
+      if (isNewSession) {
+        this.trackEvent("custom_session_start", sessionParams);
+      }
+      if (session.isFirstVisit && isNewSession) {
+        this.trackEvent("custom_first_visit", sessionParams);
+      }
 
       this.completePageViewTracking(sessionParams, isNewSession);
     },
