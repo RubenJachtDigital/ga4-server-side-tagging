@@ -33,7 +33,7 @@
       this.setupEventListeners();
 
       // Log initialization
-      this.log("GA4 Server-Side Tagging initialized v4");
+      this.log("GA4 Server-Side Tagging initialized v6");
     },
 
     trackPageView: function () {
@@ -152,15 +152,15 @@
         campaign = "(organic)";
       }
 
-      // No UTM and no referrer (or ignored referrer) means direct traffic
+      // Handle cases where no attribution is determined yet
       if (!source && !medium) {
-        var directAttribution = this.handleDirectTraffic(isNewSession);
-        source = directAttribution.source;
-        medium = directAttribution.medium;
-        campaign = directAttribution.campaign;
-        content = directAttribution.content;
-        term = directAttribution.term;
-        gclid = directAttribution.gclid;
+        var fallbackAttribution = this.handleNoAttribution(isNewSession);
+        source = fallbackAttribution.source;
+        medium = fallbackAttribution.medium;
+        campaign = fallbackAttribution.campaign;
+        content = fallbackAttribution.content;
+        term = fallbackAttribution.term;
+        gclid = fallbackAttribution.gclid;
       }
 
       return { source, medium, campaign, content, term, gclid };
@@ -208,24 +208,37 @@
     },
 
     /**
-     * Handle direct traffic attribution
+     * Handle cases where no attribution is determined (replaces handleDirectTraffic)
      */
-    handleDirectTraffic: function (isNewSession) {
-      // For direct traffic, check if we should use last non-direct attribution
-      if (!isNewSession) {
-        // For subsequent hits in an existing session, try to use stored attribution
-        return {
-          source:
-            localStorage.getItem("server_side_ga4_last_source") || "(direct)",
-          medium: localStorage.getItem("server_side_ga4_last_medium") || "none",
-          campaign:
-            localStorage.getItem("server_side_ga4_last_campaign") ||
-            "(not set)",
-          content: localStorage.getItem("server_side_ga4_last_content") || "",
-          term: localStorage.getItem("server_side_ga4_last_term") || "",
-          gclid: localStorage.getItem("server_side_ga4_last_gclid") || "",
-        };
-      } else {
+    handleNoAttribution: function (isNewSession) {
+      // Always try to get stored attribution first (for session continuity)
+      var storedAttribution = this.getStoredAttribution();
+
+      // If we have stored attribution and it's not a new session, use it
+      if (
+        !isNewSession &&
+        storedAttribution.source &&
+        storedAttribution.source !== "(direct)"
+      ) {
+        return storedAttribution;
+      }
+
+      // If it's a new session but we have stored attribution and no current attribution
+      // This handles the case where someone bookmarked a page or typed URL directly
+      // but we want to preserve the last known traffic source for analysis
+      if (
+        isNewSession &&
+        storedAttribution.source &&
+        storedAttribution.source !== "(direct)"
+      ) {
+        // For new sessions with no current attribution, we can either:
+        // 1. Use stored attribution (commented out below)
+        // 2. Mark as direct but keep stored for reference
+
+        // Option 1: Use stored attribution
+        // return storedAttribution;
+
+        // Option 2: Mark as direct (default GA4 behavior)
         return {
           source: "(direct)",
           medium: "none",
@@ -235,6 +248,31 @@
           gclid: "",
         };
       }
+
+      // Default to direct traffic
+      return {
+        source: "(direct)",
+        medium: "none",
+        campaign: "(not set)",
+        content: "",
+        term: "",
+        gclid: "",
+      };
+    },
+
+    /**
+     * Get stored attribution from localStorage
+     */
+    getStoredAttribution: function () {
+      return {
+        source: localStorage.getItem("server_side_ga4_last_source") || "",
+        medium: localStorage.getItem("server_side_ga4_last_medium") || "",
+        campaign:
+          localStorage.getItem("server_side_ga4_last_campaign") || "(not set)",
+        content: localStorage.getItem("server_side_ga4_last_content") || "",
+        term: localStorage.getItem("server_side_ga4_last_term") || "",
+        gclid: localStorage.getItem("server_side_ga4_last_gclid") || "",
+      };
     },
 
     /**
@@ -246,14 +284,18 @@
       utmParams,
       gclid
     ) {
-      if (
-        (isNewSession ||
-          utmParams.utm_source ||
-          utmParams.utm_medium ||
-          gclid) &&
-        attribution.source &&
-        attribution.medium
-      ) {
+      // Store attribution if:
+      // 1. It's a new session with any attribution, OR
+      // 2. We have UTM parameters or gclid (new campaign data), OR
+      // 3. The attribution is not direct traffic (preserve non-direct sources)
+      var shouldStore =
+        isNewSession ||
+        utmParams.utm_source ||
+        utmParams.utm_medium ||
+        gclid ||
+        (attribution.source && attribution.source !== "(direct)");
+
+      if (shouldStore && attribution.source && attribution.medium) {
         localStorage.setItem("server_side_ga4_last_source", attribution.source);
         localStorage.setItem("server_side_ga4_last_medium", attribution.medium);
         if (attribution.campaign)
