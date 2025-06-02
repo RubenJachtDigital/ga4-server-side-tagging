@@ -887,9 +887,9 @@
        * @param {string} medium Traffic medium
        * @returns {string}
        */
-      getType: function (source, medium, hostname) {
-        // Internal traffic - links within the same domain
-        if (hostname && source && source.includes(hostname)) {
+      getType: function (source, medium, referrerDomain) {
+        // Internal traffic - check if referrer domain matches current domain
+        if (referrerDomain && referrerDomain === window.location.hostname) {
           return "internal";
         }
 
