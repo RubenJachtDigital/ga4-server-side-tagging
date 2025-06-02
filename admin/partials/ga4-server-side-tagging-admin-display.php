@@ -160,7 +160,7 @@ if (!defined('WPINC')) {
                 </div>
 
                 <!-- Google Ads Settings -->
-                <div class="ga4-server-side-tagging-admin-section">
+                <!-- <div class="ga4-server-side-tagging-admin-section">
                     <h3>Google Ads Conversion Tracking</h3>
 
                     <table class="form-table">
@@ -170,7 +170,7 @@ if (!defined('WPINC')) {
                             </th>
                             <td>
                                 <input type="text" id="ga4_google_ads_conversion_id" name="ga4_google_ads_conversion_id"
-                                    value="<?php echo esc_attr($google_ads_conversion_id); ?>"
+                                    value="<?php // echo esc_attr($google_ads_conversion_id); ?>"
                                     placeholder="AW-123456789" class="regular-text" />
                                 <p class="description">Your Google Ads Conversion ID (e.g., AW-123456789)</p>
                             </td>
@@ -182,7 +182,7 @@ if (!defined('WPINC')) {
                             <td>
                                 <input type="text" id="ga4_google_ads_purchase_label"
                                     name="ga4_google_ads_purchase_label"
-                                    value="<?php echo esc_attr($google_ads_purchase_label); ?>"
+                                    value="<?php // echo esc_attr($google_ads_purchase_label); ?>"
                                     placeholder="AbCdEfGhIj12345678" class="regular-text" />
                                 <p class="description">Conversion label for purchase/order completion events</p>
                             </td>
@@ -193,7 +193,7 @@ if (!defined('WPINC')) {
                             </th>
                             <td>
                                 <input type="text" id="ga4_google_ads_lead_label" name="ga4_google_ads_lead_label"
-                                    value="<?php echo esc_attr($google_ads_lead_label); ?>"
+                                    value="<?php // echo esc_attr($google_ads_lead_label); ?>"
                                     placeholder="XyZaBc123456789" class="regular-text" />
                                 <p class="description">Conversion label for lead generation events (quotes, form
                                     submissions)</p>
@@ -210,7 +210,7 @@ if (!defined('WPINC')) {
                             <td>
                                 <input type="number" id="ga4_google_ads_default_lead_value"
                                     name="ga4_google_ads_default_lead_value"
-                                    value="<?php echo esc_attr($google_ads_default_lead_value); ?>" step="0.01" min="0"
+                                    value="<?php // echo esc_attr($google_ads_default_lead_value); ?>" step="0.01" min="0"
                                     class="small-text" />
                                 <p class="description">Default value for lead conversions (form submissions)</p>
                             </td>
@@ -222,7 +222,7 @@ if (!defined('WPINC')) {
                             <td>
                                 <input type="number" id="ga4_google_ads_default_quote_value"
                                     name="ga4_google_ads_default_quote_value"
-                                    value="<?php echo esc_attr($google_ads_default_quote_value); ?>" step="0.01" min="0"
+                                    value="<?php // echo esc_attr($google_ads_default_quote_value); ?>" step="0.01" min="0"
                                     class="small-text" />
                                 <p class="description">Default value for quote request conversions</p>
                             </td>
@@ -234,7 +234,7 @@ if (!defined('WPINC')) {
                             <td>
                                 <input type="number" id="ga4_google_ads_phone_call_value"
                                     name="ga4_google_ads_phone_call_value"
-                                    value="<?php echo esc_attr($google_ads_phone_call_value); ?>" step="0.01" min="0"
+                                    value="<?php // echo esc_attr($google_ads_phone_call_value); ?>" step="0.01" min="0"
                                     class="small-text" />
                                 <p class="description">Value for phone call conversions</p>
                             </td>
@@ -246,7 +246,7 @@ if (!defined('WPINC')) {
                             <td>
                                 <input type="number" id="ga4_google_ads_email_click_value"
                                     name="ga4_google_ads_email_click_value"
-                                    value="<?php echo esc_attr($google_ads_email_click_value); ?>" step="0.01" min="0"
+                                    value="<?php // echo esc_attr($google_ads_email_click_value); ?>" step="0.01" min="0"
                                     class="small-text" />
                                 <p class="description">Value for email click conversions</p>
                             </td>
@@ -260,20 +260,20 @@ if (!defined('WPINC')) {
                             <td>
                                 <label for="ga4_google_ads_track_phone_calls">
                                     <input type="checkbox" id="ga4_google_ads_track_phone_calls"
-                                        name="ga4_google_ads_track_phone_calls" <?php checked($google_ads_track_phone_calls); ?> />
+                                        name="ga4_google_ads_track_phone_calls" <?php // checked($google_ads_track_phone_calls); ?> />
                                     Track phone calls as conversions
                                 </label>
                                 <br />
                                 <label for="ga4_google_ads_track_email_clicks">
                                     <input type="checkbox" id="ga4_google_ads_track_email_clicks"
-                                        name="ga4_google_ads_track_email_clicks" <?php checked($google_ads_track_email_clicks); ?> />
+                                        name="ga4_google_ads_track_email_clicks" <?php // checked($google_ads_track_email_clicks); ?> />
                                     Track email clicks as conversions
                                 </label>
                                 <p class="description">Track tel: and mailto: link clicks as conversion events</p>
                             </td>
                         </tr>
                     </table>
-                </div>
+                </div> -->
 
 
 
@@ -282,8 +282,8 @@ if (!defined('WPINC')) {
                         value="Save Settings" />
                     <input type="submit" name="ga4_test_connection" class="button-secondary"
                         value="Test GA4 Connection" />
-                    <input type="submit" name="ga4_test_google_ads_connection" class="button-secondary"
-                        value="Test Google Ads Connection" />
+                    <!-- <input type="submit" name="ga4_test_google_ads_connection" class="button-secondary"
+                        value="Test Google Ads Connection" /> -->
                 </p>
             </form>
 
@@ -328,14 +328,14 @@ if (!defined('WPINC')) {
                 <h3>Getting Started</h3>
                 <ol>
                     <li>Enter your GA4 Measurement ID and API Secret</li>
-                    <li>Configure your Google Ads Conversion ID and labels</li>
+                    <!-- <li>Configure your Google Ads Conversion ID and labels</li> -->
                     <li>Set up your Cloudflare Workers (optional)</li>
                     <li>Adjust tracking options as needed</li>
                     <li>Save settings and test the connections</li>
                 </ol>
             </div>
 
-            <div class="ga4-server-side-tagging-admin-box">
+            <!-- <div class="ga4-server-side-tagging-admin-box">
                 <h3>Google Ads Setup</h3>
                 <p>To track Google Ads conversions:</p>
                 <ol>
@@ -346,13 +346,13 @@ if (!defined('WPINC')) {
                 </ol>
                 <p><a href="https://support.google.com/google-ads/answer/1722054" target="_blank">Learn about Google Ads
                         conversions</a></p>
-            </div>
+            </div> -->
 
             <div class="ga4-server-side-tagging-admin-box">
                 <h3>Cloudflare Worker Setup</h3>
                 <p>To use server-side tagging with Cloudflare:</p>
                 <ol>
-                    <li>Create separate Cloudflare Workers for GA4 and Google Ads</li>
+                    <li>Create a Cloudflare worker</li>
                     <li>Deploy the respective proxy code to each worker</li>
                     <li>Enter the worker URLs in the settings</li>
                 </ol>
