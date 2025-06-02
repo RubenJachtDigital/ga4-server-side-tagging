@@ -887,7 +887,12 @@
        * @param {string} medium Traffic medium
        * @returns {string}
        */
-      getType: function (source, medium) {
+      getType: function (source, medium, hostname) {
+        // Internal traffic - links within the same domain
+        if (hostname && source && source.includes(hostname)) {
+          return "internal";
+        }
+
         // Direct traffic
         if (source === "(direct)" && medium === "none") {
           return "direct";

@@ -33,7 +33,7 @@
       this.setupEventListeners();
 
       // Log initialization
-      this.log("GA4 Server-Side Tagging initialized v2");
+      this.log("GA4 Server-Side Tagging initialized v3");
     },
 
     trackPageView: function () {
@@ -93,7 +93,8 @@
 
       var traffic_type = GA4Utils.traffic.getType(
         attribution.source,
-        attribution.medium
+        attribution.medium,
+        referrerDomain
       );
 
       // Common session parameters needed for all page view events
