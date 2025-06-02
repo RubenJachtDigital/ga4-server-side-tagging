@@ -33,7 +33,7 @@
       this.setupEventListeners();
 
       // Log initialization
-      this.log("GA4 Server-Side Tagging initialized v6");
+      this.log("GA4 Server-Side Tagging initialized v7");
     },
 
     trackPageView: function () {
@@ -816,7 +816,7 @@
 
       $(document).on(
         "click",
-        '.single_add_to_cart_button.buy-now, input[name="wc-buy-now"], .direct-inschrijven, .add-request-quote-button',
+        '.single_add_to_cart_button.buy-now, .cart button[type="submit"], .cart button[name="add-to-cart"], input[name="wc-buy-now"], .direct-inschrijven, .add-request-quote-button',
         function () {
           var quantity = parseInt($("input.qty").val()) || 1;
           var productData = self.config.productData;
