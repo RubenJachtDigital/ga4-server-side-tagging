@@ -888,6 +888,11 @@
        * @returns {string}
        */
       getType: function (source, medium, referrerDomain) {
+        // Payment provider traffic - check if referrer is a payment provider
+        if (referrerDomain && this.isPaymentProvider(referrerDomain)) {
+          return "payment_referrer";
+        }
+
         // Internal traffic - check if referrer domain matches current domain
         if (referrerDomain && referrerDomain === window.location.hostname) {
           return "internal";
@@ -949,6 +954,65 @@
 
         // Default fallback
         return "other";
+      },
+
+      // Helper function to identify payment providers
+      isPaymentProvider: function (domain) {
+        const paymentProviders = [
+          // PayPal
+          "paypal.com",
+          "paypal.me",
+          "paypalobjects.com",
+
+          // Stripe
+          "stripe.com",
+          "checkout.stripe.com",
+
+          // Square
+          "squareup.com",
+          "square.com",
+          "cash.app",
+
+          // Apple Pay
+          "apple.com",
+          "icloud.com",
+
+          // Google Pay
+          "pay.google.com",
+          "payments.google.com",
+
+          // Amazon Pay
+          "payments.amazon.com",
+          "amazon.com",
+
+          // Other major payment providers
+          "checkout.com",
+          "adyen.com",
+          "worldpay.com",
+          "authorize.net",
+          "braintreepayments.com",
+          "razorpay.com",
+          "payu.com",
+          "mollie.com",
+          "klarna.com",
+          "afterpay.com",
+          "affirm.com",
+          "sezzle.com",
+          "zip.co",
+          "laybuy.com",
+          "paymi.com",
+          "venmo.com",
+          "zelle.com",
+          "wise.com",
+          "remitly.com",
+          "xoom.com",
+        ];
+
+        // Check if the domain matches any payment provider
+        return paymentProviders.some((provider) => {
+          // Check exact match or subdomain match
+          return domain === provider || domain.endsWith("." + provider);
+        });
       },
     },
 
