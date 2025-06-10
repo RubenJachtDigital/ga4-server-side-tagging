@@ -172,7 +172,7 @@
           GA4Utils.helpers.log(
             "Removed expired purchase tracking: " + key,
             null,
-            { },
+            {},
             "[Purchase Tracking Cleanup]"
           );
         });
@@ -183,7 +183,7 @@
               keysToRemove.length +
               " expired purchase tracking entries",
             null,
-            { },
+            {},
             "[Purchase Tracking Cleanup]"
           );
         }
@@ -211,7 +211,7 @@
               GA4Utils.helpers.log(
                 "Removed expired location data",
                 null,
-                {  },
+                {},
                 "[Location Data Cleanup]"
               );
             }
@@ -221,7 +221,7 @@
             GA4Utils.helpers.log(
               "Removed invalid location data",
               null,
-              {  },
+              {},
               "[Location Data Cleanup]"
             );
           }
@@ -595,7 +595,7 @@
                 GA4Utils.helpers.log(
                   "Using cached location data",
                   locationData,
-                  {  },
+                  {},
                   "[Location Utils]"
                 );
                 resolve(locationData);
@@ -606,7 +606,7 @@
                 GA4Utils.helpers.log(
                   "Cached location data expired, fetching fresh data",
                   null,
-                  {  },
+                  {},
                   "[Location Utils]"
                 );
               }
@@ -614,7 +614,7 @@
               GA4Utils.helpers.log(
                 "Error parsing cached location data",
                 e,
-                {  },
+                {},
                 "[Location Utils]"
               );
               localStorage.removeItem("user_location_data");
@@ -630,7 +630,7 @@
               GA4Utils.helpers.log(
                 "IP location error",
                 err,
-                {  },
+                {},
                 "[Location Utils]"
               );
               resolve({});
@@ -647,7 +647,7 @@
           GA4Utils.helpers.log(
             "Fetching fresh location data",
             null,
-            {  },
+            {},
             "[Location Utils]"
           );
 
@@ -672,7 +672,7 @@
               GA4Utils.helpers.log(
                 "Location obtained from ipapi.co",
                 locationData,
-                {  },
+                {},
                 "[Location Utils]"
               );
               resolve(locationData);
@@ -681,7 +681,7 @@
               GA4Utils.helpers.log(
                 "First IP location service failed, trying fallback",
                 error,
-                {  },
+                {},
                 "[Location Utils]"
               );
 
@@ -711,7 +711,7 @@
                   GA4Utils.helpers.log(
                     "Location obtained from fallback service",
                     locationData,
-                    {  },
+                    {},
                     "[Location Utils]"
                   );
                   resolve(locationData);
@@ -720,7 +720,7 @@
                   GA4Utils.helpers.log(
                     "Second IP location service failed, trying final fallback",
                     secondError,
-                    {  },
+                    {},
                     "[Location Utils]"
                   );
 
@@ -746,7 +746,7 @@
                       GA4Utils.helpers.log(
                         "Location obtained from final fallback service",
                         locationData,
-                        {  },
+                        {},
                         "[Location Utils]"
                       );
                       resolve(locationData);
@@ -755,7 +755,7 @@
                       GA4Utils.helpers.log(
                         "All IP location services failed",
                         finalError,
-                        {  },
+                        {},
                         "[Location Utils]"
                       );
                       resolve({});
@@ -782,14 +782,14 @@
           GA4Utils.helpers.log(
             "Location data cached successfully",
             null,
-            {  },
+            {},
             "[Location Utils]"
           );
         } catch (e) {
           GA4Utils.helpers.log(
             "Error caching location data",
             e,
-            {  },
+            {},
             "[Location Utils]"
           );
         }
@@ -823,7 +823,7 @@
             GA4Utils.helpers.log(
               "Error parsing cached location data",
               e,
-              {  },
+              {},
               "[Location Utils]"
             );
             this.clearCache();
@@ -842,7 +842,7 @@
         GA4Utils.helpers.log(
           "Location cache cleared",
           null,
-          {  },
+          {},
           "[Location Utils]"
         );
       },
@@ -1120,7 +1120,7 @@
           GA4Utils.helpers.log(
             "Not an order confirmation page - skipping purchase tracking",
             null,
-            {  },
+            {},
             "[Purchase Tracking]"
           );
           return false;
@@ -1133,7 +1133,7 @@
           GA4Utils.helpers.log(
             "No order ID found - cannot track purchase",
             null,
-            {  },
+            {},
             "[Purchase Tracking]"
           );
           return false;
@@ -1149,7 +1149,7 @@
               " has already been tracked for " +
               trackingType,
             null,
-            {  },
+            {},
             "[Purchase Tracking]"
           );
           return false;
@@ -1158,7 +1158,7 @@
         GA4Utils.helpers.log(
           "Order " + orderId + " should be tracked for " + trackingType,
           { orderId: orderId, trackingType: trackingType },
-          {  },
+          {},
           "[Purchase Tracking]"
         );
 
@@ -1240,7 +1240,7 @@
         GA4Utils.helpers.log(
           "Extracted order ID: " + (orderId || "none"),
           { orderId: orderId },
-          {  },
+          {},
           "[Purchase Tracking]"
         );
 
@@ -1279,7 +1279,7 @@
             GA4Utils.helpers.log(
               "Expired purchase tracking record removed: " + storageKey,
               null,
-              {  },
+              {},
               "[Purchase Tracking]"
             );
             return false;
@@ -1290,7 +1290,7 @@
           GA4Utils.helpers.log(
             "Invalid purchase tracking record removed: " + storageKey,
             null,
-            {  },
+            {},
             "[Purchase Tracking]"
           );
           return false;
@@ -1308,7 +1308,7 @@
           GA4Utils.helpers.log(
             "Cannot mark order as tracked - missing orderId or trackingType",
             { orderId: orderId, trackingType: trackingType },
-            {  },
+            {},
             "[Purchase Tracking]"
           );
           return;
@@ -1328,14 +1328,14 @@
           GA4Utils.helpers.log(
             "Marked order as tracked: " + orderId + " for " + trackingType,
             trackingData,
-            {  },
+            {},
             "[Purchase Tracking]"
           );
         } catch (e) {
           GA4Utils.helpers.log(
             "Error marking order as tracked",
             { error: e, orderId: orderId, trackingType: trackingType },
-            {  },
+            {},
             "[Purchase Tracking]"
           );
         }
@@ -1385,7 +1385,7 @@
           GA4Utils.helpers.log(
             "Cannot track purchase - no order ID available",
             orderData,
-            {  },
+            {},
             "[Purchase Tracking]"
           );
           return false;
@@ -1407,7 +1407,7 @@
             GA4Utils.helpers.log(
               "Successfully tracked purchase for order: " + orderId,
               { trackingType: trackingType, orderData: orderData },
-              {  },
+              {},
               "[Purchase Tracking]"
             );
 
@@ -1416,7 +1416,7 @@
             GA4Utils.helpers.log(
               "Invalid tracking callback provided",
               { trackingType: trackingType },
-              {  },
+              {},
               "[Purchase Tracking]"
             );
             return false;
@@ -1425,7 +1425,7 @@
           GA4Utils.helpers.log(
             "Error executing purchase tracking",
             { error: error, orderId: orderId, trackingType: trackingType },
-            {  },
+            {},
             "[Purchase Tracking]"
           );
           return false;
@@ -1494,7 +1494,7 @@
             " purchase tracking records" +
             (trackingType ? " for " + trackingType : ""),
           null,
-          {  },
+          {},
           "[Purchase Tracking]"
         );
       },
@@ -1541,7 +1541,7 @@
             ", type: " +
             trackingType,
           null,
-          {  },
+          {},
           "[Purchase Tracking]"
         );
       },

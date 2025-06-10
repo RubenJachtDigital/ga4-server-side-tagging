@@ -33,7 +33,10 @@
       this.setupEventListeners();
 
       // Log initialization
-      this.log("GA4 Server-Side Tagging initialized v1");
+      this.log(
+        "%c GA4 Server-Side Tagging initialized v6 ",
+        "background: #4CAF50; color: white; font-size: 16px; font-weight: bold; padding: 8px 12px; border-radius: 4px;"
+      );
     },
 
     trackPageView: function () {
@@ -814,28 +817,262 @@
     setupAddToCartTracking: function () {
       var self = this;
 
-      $(document).on(
-        "click",
-        '.single_add_to_cart_button.buy-now, .cart button[type="submit"], .cart button[name="add-to-cart"], input[name="wc-buy-now"], .direct-inschrijven, .add-request-quote-button',
-        function () {
-          var quantity = parseInt($("input.qty").val()) || 1;
-          var productData = self.config.productData;
+      // Enhanced selector for more add-to-cart cases
+      var addToCartSelectors = [
+        ".single_add_to_cart_button.buy-now",
+        '.cart button[type="submit"]',
+        '.cart button[name="add-to-cart"]',
+        'input[name="wc-buy-now"]',
+        ".direct-inschrijven",
+        ".add-request-quote-button",
+        // Additional common WooCommerce selectors
+        ".single_add_to_cart_button",
+        'button[name="add-to-cart"]',
+        ".ajax_add_to_cart",
+        ".add_to_cart_button",
+        ".product-add-to-cart button",
+        ".wc-forward",
+        // Shop/archive page buttons
+        ".add-to-cart-button",
+        ".product .button",
+        ".woocommerce-loop-add-to-cart-link",
+        // Variable product buttons
+        ".variations_form .single_add_to_cart_button",
+        // Quick view buttons
+        ".quick-view-add-to-cart",
+        // Mobile specific
+        ".mobile-add-to-cart",
+        // Links with add-to-cart parameter
+        'a[href*="?add-to-cart="]',
+        'a[href*="&add-to-cart="]',
+      ].join(", ");
 
-          if (productData && productData.item_id && productData.item_name) {
-            var itemData = Object.assign({}, productData, {
-              quantity: quantity,
-            });
+      $(document).on("click", addToCartSelectors, function (e) {
+        var $button = $(this);
+        var $productContainer = $button.closest(
+          ".product, .woocommerce-loop-product, .post, .shop-item, [data-product-id]"
+        );
+        var quantity =
+          parseInt($("input.qty, input[name='quantity'], .qty").val()) || 1;
+        var productData = self.config.productData;
 
+        // Extract product data from HTML if not available from config
+        if (!productData || !productData.item_id || !productData.item_name) {
+          productData = self.extractProductDataFromHTML(
+            $button,
+            $productContainer
+          );
+        }
+
+        // If we have complete product data, send full event
+        if (productData && productData.item_id && productData.item_name) {
+          var itemData = Object.assign({}, productData, {
+            quantity: quantity,
+          });
+
+          self.trackEvent("add_to_cart", {
+            currency: productData.currency || "EUR",
+            value: (productData.price || 0) * quantity,
+            items: [itemData],
+          });
+        }
+        // If we only have item_id, send minimal event
+        else {
+          var item_id = self.getProductIdOnly($button, $productContainer);
+          if (item_id) {
             self.trackEvent("add_to_cart", {
-              currency: productData.currency,
-              value: productData.price * quantity,
-              items: [itemData],
+              currency: "EUR",
+              value: 0,
+              items: [
+                {
+                  item_id: item_id,
+                  quantity: quantity,
+                },
+              ],
             });
+            self.log(
+              "Tracked minimal 'add_to_cart' with item_id only: " + item_id
+            );
           } else {
-            self.log("Not tracked 'add_to_cart' - missing product data");
+            self.log("Could not track 'add_to_cart' - no product ID found", {
+              button: $button.attr("class"),
+              container: $productContainer.length,
+            });
           }
         }
-      );
+      });
+    },
+
+    // Simplified function to just get product ID
+    getProductIdOnly: function ($button, $container) {
+      var item_id = null;
+
+      try {
+        // Method 1: Get from button data attributes
+        item_id = $button.data("product_id") || $button.data("product-id");
+
+        // Method 2: Get from container data attributes
+        if (!item_id && $container.length) {
+          item_id =
+            $container.data("product-id") ||
+            $container.data("product_id") ||
+            $container.attr("data-ff-post-id") ||
+            $container.find("[data-product-id]").first().data("product-id");
+        }
+
+        // Method 3: Get from hidden input or form
+        if (!item_id) {
+          var $form = $button.closest("form");
+          if ($form.length) {
+            item_id = $form
+              .find('input[name="add-to-cart"], input[name="product_id"]')
+              .val();
+          }
+        }
+
+        // Method 4: Extract from URL or href
+        if (!item_id) {
+          var href = $button.attr("href");
+          if (href && href.includes("add-to-cart=")) {
+            var match = href.match(/add-to-cart=(\d+)/);
+            if (match) item_id = match[1];
+          }
+        }
+
+        return item_id ? String(item_id) : null;
+      } catch (error) {
+        return null;
+      }
+    },
+
+    // Helper function to extract product data from HTML (no GTM data)
+    extractProductDataFromHTML: function ($button, $container) {
+      var self = this;
+      var productData = {};
+
+      try {
+        // Get product ID first
+        productData.item_id = self.getProductIdOnly($button, $container);
+
+        if (!productData.item_id) {
+          return null;
+        }
+
+        // Get product name
+        productData.item_name =
+          $container
+            .find(
+              ".woocommerce-loop-product__title a, .woocommerce-loop-product__title"
+            )
+            .first()
+            .text()
+            .trim() ||
+          $container
+            .find(".product-title, .product_title, h1, h2, h3, .entry-title")
+            .first()
+            .text()
+            .trim() ||
+          $container.find("a[title]").first().attr("title") ||
+          $button.attr("aria-label") ||
+          $button.attr("title") ||
+          "";
+
+        // Get price
+        var priceText = "";
+        var $priceElements = $container.find(".price");
+
+        if ($priceElements.length) {
+          var $salePrice = $priceElements.find("ins .woocommerce-Price-amount");
+          var $regularPrice = $priceElements.find(".woocommerce-Price-amount");
+
+          if ($salePrice.length) {
+            priceText = $salePrice.first().text();
+          } else if ($regularPrice.length) {
+            priceText = $regularPrice.last().text();
+          }
+        }
+
+        // Extract numeric price value
+        if (priceText) {
+          var priceMatch = priceText.match(/[\d,]+[.,]?\d*/);
+          if (priceMatch) {
+            productData.price = parseFloat(priceMatch[0].replace(",", "."));
+          }
+        }
+
+        // Get currency
+        var currencySymbol =
+          $container.find(".woocommerce-Price-currencySymbol").first().text() ||
+          "€";
+        productData.currency = self.getCurrencyFromSymbol(currencySymbol);
+
+        // Get category from CSS classes
+        var classList = $container.attr("class") || "";
+        var categoryMatch = classList.match(/product_cat-([^\s]+)/);
+        if (categoryMatch) {
+          productData.item_category = categoryMatch[1].replace(/-/g, " ");
+          productData.item_list_id = productData.item_category;
+          productData.item_list_name = productData.item_category;
+        }
+
+        // Get SKU
+        productData.item_sku =
+          $button.data("product_sku") || $container.find(".sku").text().trim();
+
+        // Get variant info for variable products
+        var $variations = $container.find(
+          ".variations select, .variation-selector"
+        );
+        if ($variations.length) {
+          var variants = [];
+          $variations.each(function () {
+            var $select = $(this);
+            var selectedValue = $select.val();
+            if (selectedValue && selectedValue !== "") {
+              variants.push($select.find("option:selected").text().trim());
+            }
+          });
+          if (variants.length) {
+            productData.item_variant = variants.join(" / ");
+          }
+        }
+
+        // Clean up the item_name
+        if (productData.item_name) {
+          productData.item_name = productData.item_name
+            .replace(/^["']|["']$/g, "")
+            .trim();
+          productData.item_name = productData.item_name
+            .replace(/^Toevoegen aan winkelwagen:\s*["']?|["']?$/g, "")
+            .trim();
+        }
+
+        // If we don't have a name, return null to trigger minimal tracking
+        if (!productData.item_name) {
+          return null;
+        }
+
+        self.log("Extracted product data from HTML:", productData);
+        return productData;
+      } catch (error) {
+        self.log("Error extracting product data from HTML:", error.message);
+        return null;
+      }
+    },
+
+    // Helper function to convert currency symbols to codes
+    getCurrencyFromSymbol: function (symbol) {
+      var currencyMap = {
+      "€": "EUR",
+      "$": "USD",
+      "£": "GBP",
+      "¥": "JPY",
+      "kr": "SEK",
+      "zł": "PLN",
+      "₹": "INR",
+      };
+
+      return currencyMap[symbol.trim()] || "EUR";
     },
 
     /**

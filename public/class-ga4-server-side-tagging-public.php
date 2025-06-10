@@ -413,6 +413,7 @@ class GA4_Server_Side_Tagging_Public
 
         $cart_items = array();
         $item_index = 1;
+        $primary_item_list = null; // Will be set to the first product's primary category
 
         foreach ($cart->get_cart() as $cart_item_key => $cart_item) {
             $product = $cart_item['data'];
@@ -422,6 +423,11 @@ class GA4_Server_Side_Tagging_Public
             // Get product categories
             $categories = wp_get_post_terms($product_id, 'product_cat', array('fields' => 'names'));
             $category = !empty($categories) ? $categories[0] : '';
+
+            // Set primary item_list from first product's category if not already set
+            if ($primary_item_list === null && !empty($category)) {
+                $primary_item_list = $category;
+            }
 
             // Get additional category levels for GA4
             $category2 = isset($categories[1]) ? $categories[1] : '';
@@ -440,7 +446,7 @@ class GA4_Server_Side_Tagging_Public
             }
 
             $cart_items[] = array(
-                'item_id' => $variation_id ? $variation_id : $product_id,
+                'item_id' => $product_id,
                 'item_name' => $product->get_name(),
                 'affiliation' => get_bloginfo('name'),
                 'coupon' => '', // Will be set later if coupon is applied
@@ -452,8 +458,8 @@ class GA4_Server_Side_Tagging_Public
                 'item_category3' => $category3,
                 'item_category4' => $category4,
                 'item_category5' => $category5,
-                'item_list_id' => 'cart',
-                'item_list_name' => 'Shopping Cart',
+                'item_list_id' => !empty($category) ? $category : 'cart',
+                'item_list_name' => !empty($category) ? $category : 'Shopping Cart',
                 'item_variant' => $variation_id ? $this->get_variation_attributes($cart_item) : '',
                 'location_id' => '', // Set if you have multiple store locations
                 'price' => floatval($product->get_price()),
@@ -480,7 +486,7 @@ class GA4_Server_Side_Tagging_Public
             }
         }
 
-        return array(
+        $cart_data = array(
             'currency' => get_woocommerce_currency(),
             'value' => floatval($cart->get_total('edit')),
             'coupon' => $coupon_codes,
@@ -492,6 +498,17 @@ class GA4_Server_Side_Tagging_Public
             'discount' => floatval($discount_amount),
             'items_count' => $cart->get_cart_contents_count()
         );
+
+        // Add item_list information to the main cart data
+        if ($primary_item_list !== null) {
+            $cart_data['item_list_id'] = $primary_item_list;
+            $cart_data['item_list_name'] = $primary_item_list;
+        } else {
+            $cart_data['item_list_id'] = 'cart';
+            $cart_data['item_list_name'] = 'Shopping Cart';
+        }
+
+        return $cart_data;
     }
 
     /**
@@ -536,6 +553,8 @@ class GA4_Server_Side_Tagging_Public
 
         // Get order items
         $items = array();
+        $item_list_id = null; // Will be set to the first product's primary category
+
         foreach ($order->get_items() as $item) {
             $product = $item->get_product();
             if (!$product) {
@@ -565,6 +584,15 @@ class GA4_Server_Side_Tagging_Public
                 if (!empty($categories)) {
                     $product_data['item_category'] = $categories[0];
 
+                    // Set item_list_id to the first product's primary category if not already set
+                    if ($item_list_id === null) {
+                        $item_list_id = $categories[0];
+                    }
+
+                    // Add item_list_id to each product
+                    $product_data['item_list_id'] = $categories[0];
+                    $product_data['item_list_name'] = $categories[0];
+
                     // Add additional categories if available
                     for ($i = 1; $i < min(5, count($categories)); $i++) {
                         $product_data['item_category' . ($i + 1)] = $categories[$i];
@@ -585,6 +613,12 @@ class GA4_Server_Side_Tagging_Public
             'currency' => $order->get_currency(),
             'items' => $items,
         );
+
+        // Add item_list_id to the main order data if we found one
+        if ($item_list_id !== null) {
+            $order_data['item_list_id'] = $item_list_id;
+            $order_data['item_list_name'] = $item_list_id;
+        }
 
         // Add coupon data if available
         if ($order->get_coupon_codes()) {
@@ -744,135 +778,104 @@ class GA4_Server_Side_Tagging_Public
 
         $this->logger->info('Getting product data for view_item event: ' . $product->get_name());
 
-        // Get product categories
-        $categories = [];
-        if ($product->get_category_ids()) {
-            foreach ($product->get_category_ids() as $cat_id) {
-                $term = get_term_by('id', $cat_id, 'product_cat');
-                if ($term) {
-                    $categories[] = $term->name;
-                }
-            }
+        // Use the enhanced build_product_data_array function
+        $product_data = $this->build_product_data_array($product, null, 'product_page', 0);
+
+        if (!$product_data) {
+            return [];
         }
 
-        // Get product brand (if you have a brand taxonomy or custom field)
-        $brand = '';
-        if (taxonomy_exists('product_brand')) {
-            $brands = wp_get_post_terms($product->get_id(), 'product_brand', array('fields' => 'names'));
-            $brand = !empty($brands) ? $brands[0] : '';
-        } else {
-            // Alternative: get brand from custom field
-            $brand = get_post_meta($product->get_id(), '_product_brand', true);
+        // Add product page specific data
+        $product_data['item_url'] = get_permalink($product->get_id());
+
+        // Add product rating if available
+        if ($product->get_average_rating()) {
+            $product_data['item_rating'] = (float) $product->get_average_rating();
+            $product_data['item_rating_count'] = (int) $product->get_rating_count();
         }
 
-        // Base product data with proper GA4 formatting
-        $product_data = [
-            'item_id' => (string) $product->get_id(), // Convert to string for GA4
-            'item_name' => $product->get_name(),
-            'affiliation' => get_bloginfo('name'),
-            'coupon' => '', // Will be set if coupon is applied
-            'discount' => 0, // Will be set if discount is applied
-            'index' => 0, // Position in list (if applicable)
-            'item_brand' => $brand,
-            'item_category' => !empty($categories) ? $categories[0] : '',
-            'item_category2' => isset($categories[1]) ? $categories[1] : '',
-            'item_category3' => isset($categories[2]) ? $categories[2] : '',
-            'item_category4' => isset($categories[3]) ? $categories[3] : '',
-            'item_category5' => isset($categories[4]) ? $categories[4] : '',
-            'item_list_id' => '', // Set if product is in a specific list
-            'item_list_name' => '', // Set if product is in a specific list
-            'item_variant' => '',
-            'location_id' => '', // Set if you have multiple store locations
-            'price' => (float) $product->get_price(),
-            'quantity' => 1, // Default quantity for view_item events
-            'currency' => get_woocommerce_currency()
-        ];
+        // Add product gallery count
+        $gallery_ids = $product->get_gallery_image_ids();
+        $product_data['item_image_count'] = count($gallery_ids) + 1; // +1 for main image
 
-        // Add SKU if available
-        if ($product->get_sku()) {
-            $product_data['item_sku'] = $product->get_sku();
+        // Add sale percentage if on sale
+        if ($product->is_on_sale() && $product->get_regular_price()) {
+            $regular_price = (float) $product->get_regular_price();
+            $sale_price = (float) $product->get_sale_price();
+            $discount_percentage = round((($regular_price - $sale_price) / $regular_price) * 100);
+            $product_data['discount_percentage'] = $discount_percentage;
         }
 
-        // Handle variable products
+        // Handle variable products - check for selected variation in URL
         if ($product->is_type('variable')) {
-            $product_data['item_variant'] = 'Variable Product';
+            $variation_id = null;
+            $variation = null;
 
-            // If we're on a variation page, get the specific variation data
+            // Check if variation is selected via URL parameters
             if (isset($_GET) && !empty($_GET)) {
                 $variation_attributes = [];
                 foreach ($_GET as $key => $value) {
-                    if (strpos($key, 'attribute_') === 0) {
-                        $attribute_name = str_replace('attribute_', '', $key);
-                        $attribute_name = str_replace('pa_', '', $attribute_name);
-                        $attribute_name = ucfirst(str_replace('-', ' ', $attribute_name));
-                        $variation_attributes[] = $attribute_name . ': ' . $value;
+                    if (strpos($key, 'attribute_') === 0 && !empty($value)) {
+                        $variation_attributes[$key] = $value;
                     }
                 }
+
                 if (!empty($variation_attributes)) {
-                    $product_data['item_variant'] = implode(', ', $variation_attributes);
+                    // Find matching variation
+                    $data_store = WC_Data_Store::load('product');
+                    $variation_id = $data_store->find_matching_product_variation($product, $variation_attributes);
+
+                    if ($variation_id) {
+                        $variation = wc_get_product($variation_id);
+                        if ($variation && $variation->exists()) {
+                            // Update product data with variation-specific information
+                            $variation_data = $this->build_product_data_array($product, $variation, 'product_page', 0);
+                            if ($variation_data) {
+                                $product_data = array_merge($product_data, $variation_data);
+                            }
+                        }
+                    }
                 }
+            }
+
+            // If no specific variation selected, keep as variable product
+            if (!$variation) {
+                $product_data['item_variant'] = 'Variable Product';
             }
         }
 
         // Handle grouped products
         if ($product->is_type('grouped')) {
             $product_data['item_variant'] = 'Grouped Product';
+
+            // Add information about grouped products
+            $grouped_products = $product->get_children();
+            if (!empty($grouped_products)) {
+                $product_data['grouped_products_count'] = count($grouped_products);
+            }
         }
 
         // Handle subscription products (if WooCommerce Subscriptions is active)
         if ($product->is_type('subscription') || $product->is_type('variable-subscription')) {
             $product_data['item_variant'] = 'Subscription Product';
+
+            // Add subscription-specific data if available
+            if (method_exists($product, 'get_subscription_period')) {
+                $product_data['subscription_period'] = $product->get_subscription_period();
+                $product_data['subscription_period_interval'] = $product->get_subscription_period_interval();
+            }
         }
 
+        // Add product tags if available
+        $product_tags = wp_get_post_terms($product->get_id(), 'product_tag', array('fields' => 'names'));
+        if (!empty($product_tags)) {
+            $product_data['item_tags'] = implode(', ', array_slice($product_tags, 0, 5)); // Limit to 5 tags
+        }
+ 
         // Remove empty values to keep the data clean
         $product_data = array_filter($product_data, function ($value) {
-            return $value !== '' && $value !== null;
+            return $value !== '' && $value !== null && $value !== 0;
         });
-
-        return $product_data;
-    }
-
-    /**
-     * Get current product data for view_item event (wrapper for proper event structure)
-     */
-    public function get_view_item_event_data()
-    {
-        $product_data = $this->get_current_product_data();
-
-        if (empty($product_data)) {
-            return [];
-        }
-
-        // Structure for view_item event
-        return [
-            'currency' => $product_data['currency'],
-            'value' => $product_data['price'],
-            'items' => [$product_data]
-        ];
-    }
-
-    /**
-     * Enhanced function to get product data with variation support
-     */
-    private function get_current_product_data_with_variation()
-    {
-        global $product;
-
-        if (!is_object($product)) {
-            $product = wc_get_product(get_the_ID());
-        }
-
-        if (!$product) {
-            return [];
-        }
-
-        // If this is a variation, get both parent and variation data
-        if ($product->is_type('variation')) {
-            $parent_product = wc_get_product($product->get_parent_id());
-            $product_data = $this->build_product_data_array($parent_product, $product);
-        } else {
-            $product_data = $this->build_product_data_array($product);
-        }
 
         return $product_data;
     }
@@ -880,7 +883,7 @@ class GA4_Server_Side_Tagging_Public
     /**
      * Helper function to build product data array
      */
-    private function build_product_data_array($product, $variation = null)
+    private function build_product_data_array($product, $variation = null, $context = 'general', $index = 0)
     {
         $actual_product = $variation ?: $product;
 
@@ -904,8 +907,51 @@ class GA4_Server_Side_Tagging_Public
             $brand = get_post_meta($product->get_id(), '_product_brand', true);
         }
 
+        // Determine item_list based on context
+        $item_list_id = '';
+        $item_list_name = '';
+
+        switch ($context) {
+            case 'cart':
+                $item_list_id = !empty($categories) ? $categories[0] : 'cart';
+                $item_list_name = !empty($categories) ? $categories[0] : 'Shopping Cart';
+                break;
+            case 'purchase':
+                $item_list_id = !empty($categories) ? $categories[0] : 'purchase';
+                $item_list_name = !empty($categories) ? $categories[0] : 'Purchase';
+                break;
+            case 'product_page':
+                $item_list_id = !empty($categories) ? $categories[0] : 'product_detail';
+                $item_list_name = !empty($categories) ? $categories[0] : 'Product Detail';
+                break;
+            case 'search_results':
+                $item_list_id = 'search_results';
+                $item_list_name = 'Search Results';
+                break;
+            case 'category':
+                // If we know the specific category being viewed
+                $item_list_id = !empty($categories) ? $categories[0] : 'category';
+                $item_list_name = !empty($categories) ? $categories[0] : 'Category';
+                break;
+            case 'related_products':
+                $item_list_id = 'related_products';
+                $item_list_name = 'Related Products';
+                break;
+            case 'cross_sell':
+                $item_list_id = 'cross_sell';
+                $item_list_name = 'Cross-sell Products';
+                break;
+            case 'upsell':
+                $item_list_id = 'upsell';
+                $item_list_name = 'Up-sell Products';
+                break;
+            default:
+                $item_list_id = !empty($categories) ? $categories[0] : 'general';
+                $item_list_name = !empty($categories) ? $categories[0] : 'Product List';
+        }
+
         $product_data = [
-            'item_id' => (string) $actual_product->get_id(),
+            'item_id' => (string) $product->get_id(), // Always use parent product ID
             'item_name' => $actual_product->get_name(),
             'affiliation' => get_bloginfo('name'),
             'item_brand' => $brand,
@@ -914,15 +960,33 @@ class GA4_Server_Side_Tagging_Public
             'item_category3' => isset($categories[2]) ? $categories[2] : '',
             'item_category4' => isset($categories[3]) ? $categories[3] : '',
             'item_category5' => isset($categories[4]) ? $categories[4] : '',
+            'item_list_id' => $item_list_id,
+            'item_list_name' => $item_list_name,
             'price' => (float) $actual_product->get_price(),
             'quantity' => 1,
-            'currency' => get_woocommerce_currency()
+            'currency' => get_woocommerce_currency(),
+            'index' => $index, // Important for GA4 position tracking
         ];
 
         // Add SKU
         if ($actual_product->get_sku()) {
             $product_data['item_sku'] = $actual_product->get_sku();
         }
+
+        // Add discount information if product is on sale
+        if ($actual_product->is_on_sale()) {
+            $regular_price = (float) $actual_product->get_regular_price();
+            $sale_price = (float) $actual_product->get_sale_price();
+            if ($regular_price > $sale_price) {
+                $product_data['discount'] = $regular_price - $sale_price;
+            }
+        }
+
+        // Add stock status
+        $product_data['item_stock_status'] = $actual_product->is_in_stock() ? 'in_stock' : 'out_of_stock';
+
+        // Add product type
+        $product_data['item_type'] = $actual_product->get_type(); // simple, variable, grouped, etc.
 
         // Add variation attributes if this is a variation
         if ($variation) {
@@ -943,9 +1007,27 @@ class GA4_Server_Side_Tagging_Public
             }
         }
 
+        // Add location ID if you have multiple stores/warehouses
+
+        // Add custom fields if available
+        $custom_fields = [
+            '_product_condition' => 'item_condition', // new, used, refurbished
+            '_product_google_category' => 'google_product_category',
+            '_product_gtin' => 'item_gtin',
+            '_product_mpn' => 'item_mpn',
+        ];
+
+        foreach ($custom_fields as $meta_key => $item_key) {
+            $meta_value = get_post_meta($actual_product->get_id(), $meta_key, true);
+            if (!empty($meta_value)) {
+                $product_data[$item_key] = $meta_value;
+            }
+        }
+
         // Remove empty values
         return array_filter($product_data, function ($value) {
-            return $value !== '' && $value !== null;
+            return $value !== '' && $value !== null && $value !== 0;
         });
     }
+
 }
