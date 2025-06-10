@@ -75,6 +75,14 @@ class GA4_Server_Side_Tagging_Public
         if (is_user_logged_in() && !get_option('ga4_track_logged_in_users', true)) {
             return;
         }
+        // 1. First enqueue the utilities library (dependency for other scripts)
+        wp_enqueue_script(
+            'ga4-utilities',
+            GA4_SERVER_SIDE_TAGGING_PLUGIN_URL . 'public/js/ga4-utilities.js',
+            array('jquery'),
+            GA4_SERVER_SIDE_TAGGING_VERSION,
+            false
+        );
 
         // Enqueue the main tracking script
         wp_enqueue_script(
@@ -84,7 +92,6 @@ class GA4_Server_Side_Tagging_Public
             GA4_SERVER_SIDE_TAGGING_VERSION,
             false
         );
-
         // Prepare data for the script
         $script_data = array(
             'measurementId' => $measurement_id,
@@ -96,6 +103,8 @@ class GA4_Server_Side_Tagging_Public
             'nonce' => wp_create_nonce('wp_rest'),
             'isEcommerceEnabled' => get_option('ga4_ecommerce_tracking', true),
             'cloudflareWorkerUrl' => get_option('ga4_cloudflare_worker_url', ''),
+            'yithRaqFormId' => get_option('ga4_yith_raq_form_id', ''),
+            'conversionFormIds' => get_option('ga4_conversion_form_ids', ''),
             'currency' => function_exists('get_woocommerce_currency') ? get_woocommerce_currency() : 'EUR',
             'siteName' => get_bloginfo('name'),
         );
@@ -148,6 +157,8 @@ class GA4_Server_Side_Tagging_Public
             'ga4ServerSideTagging',
             $script_data
         );
+        $this->enqueue_google_ads_script();
+
     }
 
     /**
@@ -215,6 +226,174 @@ class GA4_Server_Side_Tagging_Public
         <!-- End GA4 Server-Side Tagging -->
         <?php
     }
+
+    public function enqueue_google_ads_script()
+    {
+        // Check if Google Ads tracking is enabled
+        $google_ads_conversion_id = get_option('ga4_google_ads_conversion_id', '');
+        if (empty($google_ads_conversion_id)) {
+            return;
+        }
+
+        // Check if we should track logged-in users
+        if (is_user_logged_in() && !get_option('ga4_track_logged_in_users', true)) {
+            return;
+        }
+
+        // Enqueue the Google Ads tracking script
+        wp_enqueue_script(
+            'ga4-google-ads-tracking',
+            GA4_SERVER_SIDE_TAGGING_PLUGIN_URL . 'public/js/ga4-google-ads-tracking.js',
+            array('jquery'),
+            GA4_SERVER_SIDE_TAGGING_VERSION,
+            false
+        );
+
+        // Prepare data for the Google Ads script
+        $google_ads_data = array(
+            'conversionId' => $google_ads_conversion_id,
+            'purchaseConversionLabel' => get_option('ga4_google_ads_purchase_label', ''),
+            'leadConversionLabel' => get_option('ga4_google_ads_lead_label', ''),
+            'cloudflareWorkerUrl' => get_option('ga4_cloudflare_worker_url', ''),
+            'debugMode' => get_option('ga4_server_side_tagging_debug_mode', false),
+            'currency' => function_exists('get_woocommerce_currency') ? get_woocommerce_currency() : 'EUR',
+
+            // Conversion Values
+            'defaultLeadValue' => get_option('ga4_google_ads_default_lead_value', 0),
+            'defaultQuoteValue' => get_option('ga4_google_ads_default_quote_value', 0),
+            'phoneCallValue' => get_option('ga4_google_ads_phone_call_value', 0),
+            'emailClickValue' => get_option('ga4_google_ads_email_click_value', 0),
+
+            // Tracking Options
+            'trackPhoneCalls' => get_option('ga4_google_ads_track_phone_calls', false),
+            'trackEmailClicks' => get_option('ga4_google_ads_track_email_clicks', false),
+        );
+
+        // Add user data if logged in
+        if (function_exists('is_user_logged_in') && is_user_logged_in()) {
+            $current_user = wp_get_current_user();
+            $google_ads_data['userData'] = array(
+                'email' => $current_user->user_email,
+                'first_name' => $current_user->first_name,
+                'last_name' => $current_user->last_name,
+            );
+        }
+
+        // Add order data if we're on order confirmation page
+        if (function_exists('is_order_received_page') && is_order_received_page()) {
+            $google_ads_data['isThankYouPage'] = true;
+
+            // Get order data if key is present
+            if (isset($_GET['key'])) {
+                $order_id = wc_get_order_id_by_order_key(wc_clean(wp_unslash($_GET['key'])));
+                if ($order_id) {
+                    $order = wc_get_order($order_id);
+                    if ($order) {
+                        $google_ads_data['orderData'] = $this->get_order_data_for_google_ads($order);
+                        $this->logger->info('Added order data for Google Ads conversion tracking. Order ID: ' . $order_id);
+                    }
+                }
+            }
+        } else {
+            $google_ads_data['isThankYouPage'] = false;
+        }
+
+        // Add quote data if available
+        if (!empty($this->get_raq_cart_data())) {
+            $quote_data = $this->get_quote_data_for_google_ads();
+            $google_ads_data['quoteData'] = $quote_data;
+            $this->logger->info('Added quote data for Google Ads conversion tracking.');
+        }
+
+        // Pass data to the script
+        wp_localize_script(
+            'ga4-google-ads-tracking',
+            'googleAdsTracking',
+            $google_ads_data
+        );
+    }
+
+    /**
+     * Get order data formatted for Google Ads conversions
+     */
+    private function get_order_data_for_google_ads($order)
+    {
+        if (!$order) {
+            return null;
+        }
+
+        $order_data = array(
+            'transaction_id' => $order->get_order_number(),
+            'value' => floatval($order->get_total()),
+            'currency' => $order->get_currency(),
+            'customer_data' => array(
+                'email' => $order->get_billing_email(),
+                'phone' => $order->get_billing_phone(),
+                'first_name' => $order->get_billing_first_name(),
+                'last_name' => $order->get_billing_last_name(),
+                'address' => $order->get_billing_address_1(),
+                'city' => $order->get_billing_city(),
+                'state' => $order->get_billing_state(),
+                'postcode' => $order->get_billing_postcode(),
+                'country' => $order->get_billing_country(),
+            ),
+            'items' => array()
+        );
+
+        // Get order items
+        foreach ($order->get_items() as $item) {
+            $product = $item->get_product();
+            if ($product) {
+                $order_data['items'][] = array(
+                    'item_id' => (string) $product->get_id(),
+                    'item_name' => $item->get_name(),
+                    'item_category' => $this->get_product_category($product),
+                    'quantity' => $item->get_quantity(),
+                    'price' => floatval($item->get_total() / $item->get_quantity())
+                );
+            }
+        }
+
+        return $order_data;
+    }
+
+    /**
+     * Get quote data formatted for Google Ads conversions
+     */
+    private function get_quote_data_for_google_ads()
+    {
+        $cart_data = $this->get_raq_cart_data();
+        if (empty($cart_data)) {
+            return null;
+        }
+
+        $quote_data = array(
+            'transaction_id' => 'quote_' . time() . '_' . wp_rand(1000, 9999),
+            'value' => 0, // Set appropriate value for quote requests
+            'currency' => function_exists('get_woocommerce_currency') ? get_woocommerce_currency() : 'EUR',
+            'items' => array()
+        );
+
+        $total_value = 0;
+
+        foreach ($cart_data as $item) {
+            $item_data = array(
+                'item_id' => (string) $item['product_id'],
+                'item_name' => $item['name'],
+                'item_category' => '',
+                'quantity' => $item['quantity'],
+                'price' => floatval($item['price'])
+            );
+
+            $quote_data['items'][] = $item_data;
+            $total_value += floatval($item['price']) * intval($item['quantity']);
+        }
+
+        $quote_data['value'] = $total_value;
+
+        return $quote_data;
+    }
+
     /**
      * Get current cart data for GA4 tracking
      * 

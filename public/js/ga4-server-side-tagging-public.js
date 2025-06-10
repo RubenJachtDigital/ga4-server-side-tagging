@@ -1,5 +1,6 @@
 /**
  * Public JavaScript for GA4 Server-Side Tagging
+ * Refactored to use GA4Utils for cleaner code
  *
  * @since      1.0.0
  */
@@ -11,6 +12,7 @@
   var GA4ServerSideTagging = {
     // Configuration
     config: window.ga4ServerSideTagging || {},
+    pageStartTime: Date.now(),
 
     init: function () {
       // Check if we have the required configuration
@@ -31,17 +33,17 @@
       this.setupEventListeners();
 
       // Log initialization
-      this.log("GA4 Server-Side Tagging initialized v4");
+      this.log("GA4 Server-Side Tagging initialized v1");
     },
 
     trackPageView: function () {
-      // Get current session information
-      var session = this.getSession();
+      // Get current session information using utils
+      var session = GA4Utils.session.get();
       this.log("session data: " + session.start);
-      var isNewSession = session.isNew; // Track if this is a new session
+      var isNewSession = session.isNew;
 
-      // Get user agent and device information
-      var userAgentInfo = this.parseUserAgent();
+      // Get user agent and device information using utils
+      var userAgentInfo = GA4Utils.device.parseUserAgent();
 
       // Get referrer information
       var referrer = document.referrer || "";
@@ -64,173 +66,317 @@
         }
       }
 
-      // Get UTM parameters from URL
-      var utmSource = this.getUtmSource();
-      var utmMedium = this.getUtmMedium();
-      var utmCampaign = this.getUtmCampaign();
-      var utmContent = this.getUtmContent();
-      var utmTerm = this.getUtmTerm();
-
-      // Get Google Click ID (gclid) from URL
-      var gclid = this.getGclid();
+      // Get UTM parameters using utils
+      var utmParams = GA4Utils.utm.getAll();
+      var gclid = GA4Utils.gclid.get();
 
       // Determine source and medium according to GA4 rules
-      var source = utmSource || "";
-      var medium = utmMedium || "";
-      var campaign = utmCampaign || "(not set)";
-      var content = utmContent || "";
-      var term = utmTerm || "";
-
-      // If no UTM parameters but we have a referrer, determine source/medium
-      if (!source && !medium && referrerDomain && !ignore_referrer) {
-        // Handle search engines - this is critical for organic search attribution
-        if (referrerDomain.indexOf("google") > -1) {
-          // Check if it's Google Ads or organic
-          if (referrer.indexOf("gclid=") > -1 || gclid) {
-            source = "google";
-            medium = "cpc";
-            campaign = "(organic)";
-          } else {
-            // Google organic search
-            source = "google";
-            medium = "organic";
-            campaign = "(organic)";
-          }
-        } else if (referrerDomain.indexOf("bing") > -1) {
-          source = "bing";
-          medium = "organic";
-          campaign = "(organic)";
-        } else if (referrerDomain.indexOf("yahoo") > -1) {
-          source = "yahoo";
-          medium = "organic";
-          campaign = "(organic)";
-        } else if (
-          referrerDomain.indexOf("facebook.com") > -1 ||
-          referrerDomain.indexOf("instagram.com") > -1
-        ) {
-          // Social referrals
-          source = referrerDomain.replace("www.", "").split(".")[0];
-          medium = "social";
-          campaign = "(social)";
-        } else if (
-          referrerDomain !== window.location.hostname &&
-          referrerDomain !== ""
-        ) {
-          // Regular referral - ensure it's not from the same domain
-          source = referrerDomain;
-          medium = "referral";
-          campaign = "(referral)";
-        }
-      }
-
-      // If we have a gclid but no UTM source/medium/campaign was set, override with Google Ads attribution
-      if (gclid && !utmSource && !utmMedium) {
-        source = "google";
-        medium = "cpc";
-        campaign = "(organic)";
-      }
-      // No UTM and no referrer (or ignored referrer) means direct traffic
-      if (!source && !medium) {
-        // For direct traffic, check if we should use last non-direct attribution
-        if (!isNewSession) {
-          // For subsequent hits in an existing session, try to use stored attribution
-          source =
-            localStorage.getItem("server_side_ga4_last_source") || "(direct)";
-          medium =
-            localStorage.getItem("server_side_ga4_last_medium") || "none";
-          campaign =
-            localStorage.getItem("server_side_ga4_last_campaign") ||
-            "(not set)";
-          content = localStorage.getItem("server_side_ga4_last_content") || "";
-          term = localStorage.getItem("server_side_ga4_last_term") || "";
-          gclid = localStorage.getItem("server_side_ga4_last_gclid") || "";
-        } else {
-          source = "(direct)";
-          medium = "none";
-          campaign = "(not set)";
-        }
-      }
+      var attribution = this.calculateAttribution(
+        utmParams,
+        gclid,
+        referrerDomain,
+        referrer,
+        ignore_referrer,
+        isNewSession
+      );
 
       this.log("Source and medium data:", {
         referrer: referrer,
         referrerDomain: referrerDomain,
-        medium: medium,
-        source: source,
-        campaign: campaign,
+        ...attribution,
         isNewSession: isNewSession,
         ignore_referrer: ignore_referrer,
       });
 
-      // Store attribution data when it's available (for new sessions or when UTM params are present)
-      if (
-        (isNewSession || utmSource || utmMedium || gclid) &&
-        source &&
-        medium
-      ) {
-        localStorage.setItem("server_side_ga4_last_source", source);
-        localStorage.setItem("server_side_ga4_last_medium", medium);
-        if (campaign)
-          localStorage.setItem("server_side_ga4_last_campaign", campaign);
-        if (content)
-          localStorage.setItem("server_side_ga4_last_content", content);
-        if (term) localStorage.setItem("server_side_ga4_last_term", term);
-        if (gclid) localStorage.setItem("server_side_ga4_last_gclid", gclid);
+      // Store attribution data when it's available
+      this.storeAttributionData(attribution, isNewSession, utmParams, gclid);
+
+      var traffic_type = GA4Utils.traffic.getType(
+        attribution.source,
+        attribution.medium,
+        referrerDomain
+      );
+
+      // Common session parameters needed for all page view events
+      var sessionParams = this.buildSessionParams(
+        session,
+        userAgentInfo,
+        attribution,
+        traffic_type,
+        referrer,
+        ignore_referrer
+      );
+      if (isNewSession) {
+        this.trackEvent("custom_session_start", sessionParams);
+      }
+      if (session.isFirstVisit && isNewSession) {
+        this.trackEvent("custom_first_visit", sessionParams);
       }
 
-      this.log(this.calculateEngagementTime());
-      var traffic_type = this.determineTrafficType(source, medium);
+      this.completePageViewTracking(sessionParams, isNewSession);
+    },
 
-      // Common session parameters needed for all page view events (limited to 25 params max)
+    /**
+     * Calculate attribution based on UTM parameters, referrer, and other factors
+     */
+    calculateAttribution: function (
+      utmParams,
+      gclid,
+      referrerDomain,
+      referrer,
+      ignore_referrer,
+      isNewSession
+    ) {
+      var source = utmParams.utm_source || "";
+      var medium = utmParams.utm_medium || "";
+      var campaign = utmParams.utm_campaign || "(not set)";
+      var content = utmParams.utm_content || "";
+      var term = utmParams.utm_term || "";
+
+      // If no UTM parameters but we have a referrer, determine source/medium
+      if (!source && !medium && referrerDomain && !ignore_referrer) {
+        var referrerAttribution = this.determineReferrerAttribution(
+          referrerDomain,
+          referrer,
+          gclid
+        );
+        source = referrerAttribution.source;
+        medium = referrerAttribution.medium;
+        campaign = referrerAttribution.campaign;
+      }
+
+      // If we have a gclid but no UTM source/medium/campaign was set, override with Google Ads attribution
+      if (gclid && !utmParams.utm_source && !utmParams.utm_medium) {
+        source = "google";
+        medium = "cpc";
+        campaign = "(organic)";
+      }
+
+      // Handle cases where no attribution is determined yet
+      if (!source && !medium) {
+        var fallbackAttribution = this.handleNoAttribution(isNewSession);
+        source = fallbackAttribution.source;
+        medium = fallbackAttribution.medium;
+        campaign = fallbackAttribution.campaign;
+        content = fallbackAttribution.content;
+        term = fallbackAttribution.term;
+        gclid = fallbackAttribution.gclid;
+      }
+
+      return { source, medium, campaign, content, term, gclid };
+    },
+
+    /**
+     * Determine attribution from referrer
+     */
+    determineReferrerAttribution: function (referrerDomain, referrer, gclid) {
+      // Handle search engines - this is critical for organic search attribution
+      if (referrerDomain.indexOf("google") > -1) {
+        // Check if it's Google Ads or organic
+        if (referrer.indexOf("gclid=") > -1 || gclid) {
+          return { source: "google", medium: "cpc", campaign: "(organic)" };
+        } else {
+          return { source: "google", medium: "organic", campaign: "(organic)" };
+        }
+      } else if (referrerDomain.indexOf("bing") > -1) {
+        return { source: "bing", medium: "organic", campaign: "(organic)" };
+      } else if (referrerDomain.indexOf("yahoo") > -1) {
+        return { source: "yahoo", medium: "organic", campaign: "(organic)" };
+      } else if (
+        referrerDomain.indexOf("facebook.com") > -1 ||
+        referrerDomain.indexOf("instagram.com") > -1
+      ) {
+        // Social referrals
+        return {
+          source: referrerDomain.replace("www.", "").split(".")[0],
+          medium: "social",
+          campaign: "(social)",
+        };
+      } else if (
+        referrerDomain !== window.location.hostname &&
+        referrerDomain !== ""
+      ) {
+        // Regular referral - ensure it's not from the same domain
+        return {
+          source: referrerDomain,
+          medium: "referral",
+          campaign: "(referral)",
+        };
+      }
+
+      return { source: "", medium: "", campaign: "(not set)" };
+    },
+
+    /**
+     * Handle cases where no attribution is determined (replaces handleDirectTraffic)
+     */
+    handleNoAttribution: function (isNewSession) {
+      // Always try to get stored attribution first (for session continuity)
+      var storedAttribution = this.getStoredAttribution();
+
+      // If we have stored attribution and it's not a new session, use it
+      if (
+        !isNewSession &&
+        storedAttribution.source &&
+        storedAttribution.source !== "(direct)"
+      ) {
+        return storedAttribution;
+      }
+
+      // If it's a new session but we have stored attribution and no current attribution
+      // This handles the case where someone bookmarked a page or typed URL directly
+      // but we want to preserve the last known traffic source for analysis
+      if (
+        isNewSession &&
+        storedAttribution.source &&
+        storedAttribution.source !== "(direct)"
+      ) {
+        // For new sessions with no current attribution, we can either:
+        // 1. Use stored attribution (commented out below)
+        // 2. Mark as direct but keep stored for reference
+
+        // Option 1: Use stored attribution
+        // return storedAttribution;
+
+        // Option 2: Mark as direct (default GA4 behavior)
+        return {
+          source: "(direct)",
+          medium: "none",
+          campaign: "(not set)",
+          content: "",
+          term: "",
+          gclid: "",
+        };
+      }
+
+      // Default to direct traffic
+      return {
+        source: "(direct)",
+        medium: "none",
+        campaign: "(not set)",
+        content: "",
+        term: "",
+        gclid: "",
+      };
+    },
+
+    /**
+     * Get stored attribution from localStorage
+     */
+    getStoredAttribution: function () {
+      return {
+        source: localStorage.getItem("server_side_ga4_last_source") || "",
+        medium: localStorage.getItem("server_side_ga4_last_medium") || "",
+        campaign:
+          localStorage.getItem("server_side_ga4_last_campaign") || "(not set)",
+        content: localStorage.getItem("server_side_ga4_last_content") || "",
+        term: localStorage.getItem("server_side_ga4_last_term") || "",
+        gclid: localStorage.getItem("server_side_ga4_last_gclid") || "",
+      };
+    },
+
+    /**
+     * Store attribution data in localStorage
+     */
+    storeAttributionData: function (
+      attribution,
+      isNewSession,
+      utmParams,
+      gclid
+    ) {
+      // Store attribution if:
+      // 1. It's a new session with any attribution, OR
+      // 2. We have UTM parameters or gclid (new campaign data), OR
+      // 3. The attribution is not direct traffic (preserve non-direct sources)
+      var shouldStore =
+        isNewSession ||
+        utmParams.utm_source ||
+        utmParams.utm_medium ||
+        gclid ||
+        (attribution.source && attribution.source !== "(direct)");
+
+      if (shouldStore && attribution.source && attribution.medium) {
+        localStorage.setItem("server_side_ga4_last_source", attribution.source);
+        localStorage.setItem("server_side_ga4_last_medium", attribution.medium);
+        if (attribution.campaign)
+          localStorage.setItem(
+            "server_side_ga4_last_campaign",
+            attribution.campaign
+          );
+        if (attribution.content)
+          localStorage.setItem(
+            "server_side_ga4_last_content",
+            attribution.content
+          );
+        if (attribution.term)
+          localStorage.setItem("server_side_ga4_last_term", attribution.term);
+        if (attribution.gclid)
+          localStorage.setItem("server_side_ga4_last_gclid", attribution.gclid);
+      }
+    },
+
+    /**
+     * Build session parameters for tracking
+     */
+    buildSessionParams: function (
+      session,
+      userAgentInfo,
+      attribution,
+      traffic_type,
+      referrer,
+      ignore_referrer
+    ) {
       var sessionParams = {
         // Core identification (required)
         session_id: session.id,
-        client_id: this.getClientId(),
+        client_id: GA4Utils.clientId.get(),
 
-        // Critical for GA4 real-time reporting (calculate actual engagement time)
-        engagement_time_msec: this.calculateEngagementTime(),
+        // Critical for GA4 real-time reporting
+        engagement_time_msec: GA4Utils.time.calculateEngagementTime(
+          session.start
+        ),
+
         // Session flags
-        ...(isNewSession && { session_start: 1 }),
+        ...(session.isNew && { session_start: 1 }),
 
-        // Device and browser (most important UA info)
+        // Device and browser information
         browser_name: userAgentInfo.browser_name,
         device_type: userAgentInfo.device_type,
+        screen_resolution: GA4Utils.device.getScreenResolution(),
 
-        // Add screen resolution
-        screen_resolution: this.getScreenResolution(),
-
-        // Adding ignore referrer
+        // Device type specific flags - only when true
         ...(ignore_referrer === true && { ignore_referrer: true }),
-
-        // Add device type specific flags - only when true
         ...(userAgentInfo.is_mobile === true && { is_mobile: true }),
-
         ...(userAgentInfo.device_type === "tablet" && { is_tablet: true }),
         ...(userAgentInfo.device_type === "desktop" && { is_desktop: true }),
 
-        // Language
+        // Language and attribution
         language: navigator.language || "",
-
-        source: source,
-        medium: medium,
-        campaign: campaign,
+        source: attribution.source,
+        medium: attribution.medium,
+        campaign: attribution.campaign,
         traffic_type: traffic_type,
-        // Add UTM content/term only if present to save param slots
-        ...(content && { content: content }),
-        ...(term && { term: term }),
-        ...(gclid && { gclid: gclid }),
 
-        // Page information (essential)
+        // Add UTM content/term only if present to save param slots
+        ...(attribution.content && { content: attribution.content }),
+        ...(attribution.term && { term: attribution.term }),
+        ...(attribution.gclid && { gclid: attribution.gclid }),
+
+        // Page information
         page_title: document.title,
-        page_location: this.getPageLocationWithoutParams(window.location.href),
+        page_location: GA4Utils.url.getLocationWithoutParams(
+          window.location.href
+        ),
         page_referrer: referrer,
 
-        // Shortened user agent (max 100 chars)
+        // Shortened user agent
         user_agent: userAgentInfo.user_agent,
 
         // Timestamp
         event_timestamp: Math.floor(Date.now() / 1000),
       };
-      this.completePageViewTracking(sessionParams, isNewSession);
+
+      return sessionParams;
     },
 
     // Method to complete page view tracking after location attempt
@@ -238,50 +384,65 @@
       // Log session information
       this.log("Page view params:", sessionParams);
       this.log("Is new session: " + isNewSession);
-      this.log("Is order received page: " + this.isOrderConfirmationPage());
+      this.log(
+        "Is order received page: " +
+          GA4Utils.page.isOrderConfirmationPage(this.config, "ga4")
+      );
 
       // Track appropriate event based on page type
-      if (this.isProductListPage()) {
-        // Product list page - track view_item_list instead of page_view
-        var productListData = this.getProductListItems();
-
-        if (productListData.items.length > 0) {
-          // Combine session parameters with item list data
-          var itemListData = {
-            ...sessionParams,
-            item_list_name: productListData.listName,
-            item_list_id: productListData.listId,
-            items: productListData.items,
-          };
-
-          this.trackEvent("view_item_list", itemListData);
-
-          // Setup click tracking for products
-          this.setupProductClickTracking(
-            productListData.listName,
-            productListData.listId,
-            sessionParams
-          );
-        } else {
-          // Fall back to page_view if no products found
-          this.trackEvent("page_view", sessionParams);
-        }
-      } else if (this.isProductPage()) {
-        // Single product page - track view_item
-        var productData = this.config.productData;
-
-        var viewItemData = {
-          ...sessionParams,
-          currency: this.config.currency || "EUR",
-          value: productData.price,
-          items: [productData],
-        };
-
-        this.trackEvent("view_item", viewItemData);
+      if (GA4Utils.page.isProductListPage()) {
+        this.trackProductListView(sessionParams);
+      } else if (GA4Utils.page.isProductPage(this.config)) {
+        this.trackProductView(sessionParams);
       } else {
         // Regular page - track page_view
         this.trackEvent("page_view", sessionParams);
       }
+    },
+
+    /**
+     * Track product list view
+     */
+    trackProductListView: function (sessionParams) {
+      var productListData = this.getProductListItems();
+
+      if (productListData.items.length > 0) {
+        // Combine session parameters with item list data
+        var itemListData = {
+          ...sessionParams,
+          item_list_name: productListData.listName,
+          item_list_id: productListData.listId,
+          items: productListData.items,
+        };
+
+        this.trackEvent("view_item_list", itemListData);
+
+        // Setup click tracking for products
+        this.setupProductClickTracking(
+          productListData.listName,
+          productListData.listId,
+          sessionParams
+        );
+      } else {
+        // Fall back to page_view if no products found
+        this.trackEvent("page_view", sessionParams);
+      }
+    },
+
+    /**
+     * Track single product view
+     */
+    trackProductView: function (sessionParams) {
+      var productData = this.config.productData;
+
+      var viewItemData = {
+        ...sessionParams,
+        currency: this.config.currency || "EUR",
+        value: productData.price,
+        items: [productData],
+      };
+
+      this.trackEvent("view_item", viewItemData);
     },
 
     // Set up event listeners
@@ -303,17 +464,59 @@
         }
       );
 
+      this.setupFormTracking();
+      this.setupEcommerceTracking();
+      this.setupScrollTracking();
+      this.setupEngagementTracking();
+      this.setupFileDownloadTracking();
+      this.setupVideoTracking();
+      this.setupSearchTracking();
+      this.setupContactTracking();
+      this.setupSocialTracking();
+      this.setupButtonTracking();
+      this.setupVisibilityTracking();
+    },
+
+    /**
+     * Setup form tracking
+     */
+
+    setupFormTracking: function () {
+      var self = this;
       var trackForms =
         "form:not(.cart, .woocommerce-cart-form, .checkout, .woocommerce-checkout)";
+
+      // Build exclusion selectors for conversion forms
+      var conversionFormExclusions = "";
       if (
-        typeof self.config.quoteData !== "undefined" &&
-        self.config.quoteData
+        typeof self.config.conversionFormIds !== "undefined" &&
+        self.config.conversionFormIds
       ) {
-        trackForms =
-          "form:not(.cart, .woocommerce-cart-form, .checkout, .woocommerce-checkout, #gform_3)";
+        var conversionIds = self.config.conversionFormIds.split(",");
+        conversionFormExclusions = conversionIds
+          .map((id) => `#gform_${id.trim()}`)
+          .join(", ");
       }
 
-      // Track form submissions (excluding WooCommerce forms)
+      // Add YITH RAQ form exclusion if it exists
+      if (
+        typeof self.config.quoteData !== "undefined" &&
+        self.config.quoteData &&
+        self.config.yithRaqFormId
+      ) {
+        if (conversionFormExclusions) {
+          conversionFormExclusions += `, #gform_${self.config.yithRaqFormId}`;
+        } else {
+          conversionFormExclusions = `#gform_${self.config.yithRaqFormId}`;
+        }
+      }
+
+      // Update trackForms selector with all exclusions
+      if (conversionFormExclusions) {
+        trackForms = `form:not(.cart, .woocommerce-cart-form, .checkout, .woocommerce-checkout, ${conversionFormExclusions})`;
+      }
+
+      // Track form submissions (excluding WooCommerce forms and conversion forms)
       $(document).on("submit", trackForms, function () {
         // Skip tracking form submissions that are WooCommerce add to cart forms
         if (
@@ -333,17 +536,35 @@
         });
       });
 
-      // Track WooCommerce specific events if enabled
-      if (this.config.isEcommerceEnabled) {
-        this.setupEcommerceTracking();
+      // Track conversion form submissions
+      if (
+        typeof self.config.conversionFormIds !== "undefined" &&
+        self.config.conversionFormIds
+      ) {
+        var conversionIds = self.config.conversionFormIds.split(",");
+
+        conversionIds.forEach(function (id) {
+          var trimmedId = id.trim();
+          $(`#gform_${trimmedId}`).on("submit", function (event) {
+            var formId = $(this).attr("id") || "unknown";
+            var formAction = $(this).attr("action") || "unknown";
+            var trackingData = {
+              form_id: formId,
+              form_action: formAction,
+              pageTitle: document.title,
+            };
+
+            self.trackEvent("form_conversion", trackingData);
+          });
+        });
       }
-      // Track scroll depth
-      self.setupScrollTracking();
+    },
+    /**
+     * Setup file download tracking
+     */
+    setupFileDownloadTracking: function () {
+      var self = this;
 
-      // Track user engagement (time on page)
-      self.setupEngagementTracking();
-
-      // Track file downloads
       $(document).on(
         "click",
         'a[href*=".pdf"], a[href*=".zip"], a[href*=".doc"], a[href*=".docx"], a[href*=".xls"], a[href*=".xlsx"], a[href*=".ppt"], a[href*=".pptx"]',
@@ -359,11 +580,14 @@
           });
         }
       );
+    },
 
-      // Track video interactions (for embedded YouTube/Vimeo)
-      self.setupVideoTracking();
+    /**
+     * Setup search tracking
+     */
+    setupSearchTracking: function () {
+      var self = this;
 
-      // Track search queries (if you have a search form)
       $(document).on(
         "submit",
         'form[role="search"], .search-form',
@@ -380,8 +604,15 @@
           }
         }
       );
+    },
 
-      // Track phone number clicks (tel: links)
+    /**
+     * Setup contact tracking (phone and email)
+     */
+    setupContactTracking: function () {
+      var self = this;
+
+      // Track phone number clicks
       $(document).on("click", 'a[href^="tel:"]', function () {
         var phone = $(this).attr("href").replace("tel:", "");
         self.trackEvent("phone_call", {
@@ -389,21 +620,27 @@
         });
       });
 
-      // Track email clicks (mailto: links)
+      // Track email clicks
       $(document).on("click", 'a[href^="mailto:"]', function () {
         var email = $(this).attr("href").replace("mailto:", "");
         self.trackEvent("email_click", {
           email_address: email,
         });
       });
+    },
 
-      // Track social media link clicks
+    /**
+     * Setup social media tracking
+     */
+    setupSocialTracking: function () {
+      var self = this;
+
       $(document).on(
         "click",
         'a[href*="facebook.com"], a[href*="twitter.com"], a[href*="linkedin.com"], a[href*="instagram.com"], a[href*="youtube.com"], a[href*="tiktok.com"]',
         function () {
           var href = $(this).attr("href");
-          var platform = self.getSocialPlatform(href);
+          var platform = GA4Utils.helpers.getSocialPlatform(href);
 
           self.trackEvent("social_click", {
             platform: platform,
@@ -411,8 +648,14 @@
           });
         }
       );
+    },
 
-      // Track button clicks (for important CTAs)
+    /**
+     * Setup button tracking
+     */
+    setupButtonTracking: function () {
+      var self = this;
+
       $(document).on(
         "click",
         'button, .btn, .button, input[type="submit"], input[type="button"]',
@@ -440,8 +683,14 @@
           });
         }
       );
+    },
 
-      // Track page visibility changes (tab switching)
+    /**
+     * Setup visibility tracking
+     */
+    setupVisibilityTracking: function () {
+      var self = this;
+
       document.addEventListener("visibilitychange", function () {
         if (document.hidden) {
           self.trackEvent("page_hidden", {
@@ -475,7 +724,7 @@
       });
     },
 
-    // Setup user engagement tracking (sends periodic engagement events)
+    // Setup user engagement tracking
     setupEngagementTracking: function () {
       var self = this;
       var engagementIntervals = [15, 30, 60, 120]; // seconds
@@ -500,7 +749,7 @@
       }, 15000); // Check every 15 seconds
     },
 
-    // Setup video tracking (basic implementation for YouTube/Vimeo embeds)
+    // Setup video tracking
     setupVideoTracking: function () {
       var self = this;
 
@@ -535,31 +784,44 @@
       );
     },
 
-    // Helper function to determine social media platform
-    getSocialPlatform: function (url) {
-      if (url.indexOf("facebook.com") > -1) return "Facebook";
-      if (url.indexOf("twitter.com") > -1) return "Twitter";
-      if (url.indexOf("linkedin.com") > -1) return "LinkedIn";
-      if (url.indexOf("instagram.com") > -1) return "Instagram";
-      if (url.indexOf("youtube.com") > -1) return "YouTube";
-      if (url.indexOf("tiktok.com") > -1) return "TikTok";
-      return "Other";
-    },
-
     // Set up e-commerce tracking
     setupEcommerceTracking: function () {
+      if (!this.config.isEcommerceEnabled) {
+        return;
+      }
+
+      var self = this;
+
+      // Track add to cart events
+      this.setupAddToCartTracking();
+
+      // Track remove from cart events
+      this.setupRemoveFromCartTracking();
+
+      // Track checkout events
+      this.setupCheckoutTracking();
+
+      // Track purchase events
+      this.setupPurchaseTracking();
+
+      // Track quote form submission
+      this.setupQuoteTracking();
+    },
+
+    /**
+     * Setup add to cart tracking
+     */
+    setupAddToCartTracking: function () {
       var self = this;
 
       $(document).on(
         "click",
-        '.single_add_to_cart_button.buy-now, input[name="wc-buy-now"], .direct-inschrijven, .add-request-quote-button',
+        '.single_add_to_cart_button.buy-now, .cart button[type="submit"], .cart button[name="add-to-cart"], input[name="wc-buy-now"], .direct-inschrijven, .add-request-quote-button',
         function () {
-          var $button = $(this);
           var quantity = parseInt($("input.qty").val()) || 1;
           var productData = self.config.productData;
 
           if (productData && productData.item_id && productData.item_name) {
-            // item_id is already a string from PHP
             var itemData = Object.assign({}, productData, {
               quantity: quantity,
             });
@@ -574,30 +836,14 @@
           }
         }
       );
+    },
 
-      // Track product detail views
-      if ($(".woocommerce-product-gallery").length) {
-        var productId =
-          $('input[name="product_id"]').val() ||
-          $('input[name="add-to-cart"]').val();
-        var productName = $(".product_title").text();
-        var productPrice = $(".woocommerce-Price-amount")
-          .first()
-          .text()
-          .replace(/[^0-9,.]/g, "");
+    /**
+     * Setup remove from cart tracking
+     */
+    setupRemoveFromCartTracking: function () {
+      var self = this;
 
-        if (productId && productName) {
-          if (self.config.useServerSide != true) {
-            self.trackEvent("view_item", {
-              item_id: productId,
-              item_name: productName,
-              price: parseFloat(productPrice),
-            });
-          }
-        }
-      }
-
-      // Track remove from cart events
       $(document).on("click", ".woocommerce-cart-form .remove", function () {
         var $row = $(this).closest("tr");
         var $removeLink = $(this);
@@ -606,1078 +852,383 @@
         var productId = $removeLink.data("product_id") || "";
         var cartItemKey = $removeLink.data("cart_item_key") || "";
 
-        // Extract product name (clean up any HTML and trim)
-        var productName =
-          $row.find(".product-name a").text().trim() ||
-          $row.find(".product-name").text().trim();
-
-        // Extract price - try multiple selectors for different themes
-        var priceText = "";
-        var $priceElement = $row
-          .find(".product-price .woocommerce-Price-amount")
-          .first();
-        if ($priceElement.length === 0) {
-          $priceElement = $row.find(".product-price .amount").first();
-        }
-        if ($priceElement.length === 0) {
-          $priceElement = $row.find(".product-price").first();
-        }
-
-        if ($priceElement.length > 0) {
-          priceText = $priceElement.text().replace(/[^\d.,]/g, "");
-        }
-
-        var price = parseFloat(priceText.replace(",", ".")) || 0;
-
-        // Get quantity
-        var quantity =
-          parseInt($row.find(".product-quantity input.qty").val()) ||
-          parseInt($row.find(".qty input").val()) ||
-          1;
-
-        // Try to get additional product data from cart data if available
-        var productData = {};
-        if (
-          typeof self.config.cartData !== "undefined" &&
-          self.config.cartData &&
-          self.config.cartData.items
-        ) {
-          // Find matching item in cart data
-          var matchingItem = self.config.cartData.items.find(function (item) {
-            return String(item.item_id) === String(productId);
-          });
-
-          if (matchingItem) {
-            productData = matchingItem;
-            // Override with actual quantity being removed
-            productData.quantity = quantity;
-          }
-        }
-
-        // Build the item data for GA4
-        var itemData = {
-          item_id: String(productId), // Ensure string format
-          item_name: productName,
-          affiliation:
-            productData.affiliation || self.config.siteName || "Website",
-          coupon: productData.coupon || "",
-          discount: productData.discount || 0,
-          index: productData.index || 0,
-          item_brand: productData.item_brand || "",
-          item_category: productData.item_category || "",
-          item_category2: productData.item_category2 || "",
-          item_category3: productData.item_category3 || "",
-          item_category4: productData.item_category4 || "",
-          item_category5: productData.item_category5 || "",
-          item_list_id: "cart",
-          item_list_name: "Shopping Cart",
-          item_variant: productData.item_variant || "",
-          location_id: productData.location_id || "",
-          price: price,
-          quantity: quantity,
-        };
-
-        // Remove empty values to keep payload clean
-        Object.keys(itemData).forEach((key) => {
-          if (
-            itemData[key] === "" ||
-            itemData[key] === null ||
-            itemData[key] === undefined
-          ) {
-            delete itemData[key];
-          }
-        });
+        // Extract product information
+        var productInfo = self.extractCartProductInfo($row, productId);
 
         // Track the remove_from_cart event
-        if (productId && productName) {
+        if (productId && productInfo.name) {
           self.trackEvent("remove_from_cart", {
             currency:
               (self.config.cartData && self.config.cartData.currency) ||
               self.config.currency ||
               "EUR",
-            value: price * quantity, // Total value being removed
-            items: [itemData],
+            value: productInfo.price * productInfo.quantity,
+            items: [productInfo.itemData],
           });
         } else {
           self.log("Not tracked 'remove_from_cart' - missing required data:", {
             productId: productId,
-            productName: productName,
-            price: price,
-            quantity: quantity,
+            productName: productInfo.name,
+            price: productInfo.price,
+            quantity: productInfo.quantity,
           });
         }
       });
-      // Track checkout steps
-      if ($(".woocommerce-checkout").length) {
-        if (!self.isOrderConfirmationPage()) {
-          // Check if we have cart data from PHP
-          if (
-            typeof self.config.cartData !== "undefined" &&
-            self.config.cartData &&
-            self.config.cartData.items &&
-            self.config.cartData.items.length > 0
-          ) {
-            var cartData = self.config.cartData;
+    },
 
-            // Track begin_checkout with cart data
+    /**
+     * Extract product information from cart row
+     */
+    extractCartProductInfo: function ($row, productId) {
+      // Extract product name
+      var productName =
+        $row.find(".product-name a").text().trim() ||
+        $row.find(".product-name").text().trim();
+
+      // Extract price
+      var priceText = "";
+      var $priceElement = $row
+        .find(".product-price .woocommerce-Price-amount")
+        .first();
+      if ($priceElement.length === 0) {
+        $priceElement = $row.find(".product-price .amount").first();
+      }
+      if ($priceElement.length === 0) {
+        $priceElement = $row.find(".product-price").first();
+      }
+
+      if ($priceElement.length > 0) {
+        priceText = $priceElement.text().replace(/[^\d.,]/g, "");
+      }
+
+      var price = parseFloat(priceText.replace(",", ".")) || 0;
+      var quantity =
+        parseInt($row.find(".product-quantity input.qty").val()) ||
+        parseInt($row.find(".qty input").val()) ||
+        1;
+
+      // Try to get additional product data from cart data if available
+      var productData = {};
+      if (this.config.cartData && this.config.cartData.items) {
+        var matchingItem = this.config.cartData.items.find(function (item) {
+          return String(item.item_id) === String(productId);
+        });
+
+        if (matchingItem) {
+          productData = matchingItem;
+          productData.quantity = quantity;
+        }
+      }
+
+      // Build the item data for GA4
+      var itemData = {
+        item_id: String(productId),
+        item_name: productName,
+        affiliation:
+          productData.affiliation || this.config.siteName || "Website",
+        coupon: productData.coupon || "",
+        discount: productData.discount || 0,
+        index: productData.index || 0,
+        item_brand: productData.item_brand || "",
+        item_category: productData.item_category || "",
+        item_category2: productData.item_category2 || "",
+        item_category3: productData.item_category3 || "",
+        item_category4: productData.item_category4 || "",
+        item_category5: productData.item_category5 || "",
+        item_list_id: "cart",
+        item_list_name: "Shopping Cart",
+        item_variant: productData.item_variant || "",
+        location_id: productData.location_id || "",
+        price: price,
+        quantity: quantity,
+      };
+
+      // Remove empty values
+      Object.keys(itemData).forEach((key) => {
+        if (
+          itemData[key] === "" ||
+          itemData[key] === null ||
+          itemData[key] === undefined
+        ) {
+          delete itemData[key];
+        }
+      });
+
+      return {
+        name: productName,
+        price: price,
+        quantity: quantity,
+        itemData: itemData,
+      };
+    },
+
+    /**
+     * Setup checkout tracking
+     */
+    setupCheckoutTracking: function () {
+      var self = this;
+
+      if ($(".woocommerce-checkout").length) {
+        if (!GA4Utils.page.isOrderConfirmationPage(this.config)) {
+          this.trackBeginCheckout();
+          this.setupCheckoutStepTracking();
+        }
+      }
+    },
+
+    /**
+     * Track begin checkout
+     */
+    trackBeginCheckout: function () {
+      // Check if we have cart data from PHP
+      if (
+        this.config.cartData &&
+        this.config.cartData.items &&
+        this.config.cartData.items.length > 0
+      ) {
+        var cartData = this.config.cartData;
+
+        // Track begin_checkout with cart data
+        this.trackEvent("begin_checkout", {
+          currency: cartData.currency,
+          value: cartData.value,
+          coupon: cartData.coupon || undefined,
+          items: cartData.items,
+        });
+      } else {
+        this.log("No cart data available for checkout tracking");
+
+        // Fallback: Track basic begin_checkout without items
+        this.trackEvent("begin_checkout", {
+          currency: this.config.currency || "EUR",
+          value: 0,
+        });
+      }
+    },
+
+    /**
+     * Setup checkout step tracking
+     */
+    setupCheckoutStepTracking: function () {
+      var self = this;
+      var cartData = this.config.cartData;
+
+      if (!cartData) return;
+
+      // Track shipping info
+      $("form.checkout").on(
+        "change",
+        '#shipping_method input[type="radio"], #shipping_method input[type="hidden"]',
+        function () {
+          var shippingMethod = $(this).val();
+          var shippingCost = 0;
+
+          // Try to get shipping cost from the selected option
+          var shippingLabel = $(
+            'label[for="' + $(this).attr("id") + '"]'
+          ).text();
+          var costMatch = shippingLabel.match(/[\d.,]+/);
+          if (costMatch) {
+            shippingCost = parseFloat(costMatch[0].replace(",", "."));
+          }
+
+          self.trackEvent("add_shipping_info", {
+            currency: cartData.currency,
+            value: cartData.value + shippingCost,
+            coupon: cartData.coupon || undefined,
+            shipping_tier: shippingMethod,
+            items: cartData.items,
+          });
+        }
+      );
+
+      // Track payment info
+      $("form.checkout").on(
+        "change",
+        'input[name="payment_method"]',
+        function () {
+          var paymentMethod = $(this).val();
+
+          self.trackEvent("add_payment_info", {
+            currency: cartData.currency,
+            value: cartData.value,
+            coupon: cartData.coupon || undefined,
+            payment_type: paymentMethod,
+            items: cartData.items,
+          });
+        }
+      );
+
+      // Track when user starts filling billing info
+      var billingTracked = false;
+      $("form.checkout").on(
+        "input change",
+        "#billing_first_name, #billing_last_name, #billing_email",
+        function () {
+          if (!billingTracked) {
+            billingTracked = true;
+
             self.trackEvent("begin_checkout", {
               currency: cartData.currency,
               value: cartData.value,
               coupon: cartData.coupon || undefined,
               items: cartData.items,
-            });
-
-            // Track shipping info
-            $("form.checkout").on(
-              "change",
-              '#shipping_method input[type="radio"], #shipping_method input[type="hidden"]',
-              function () {
-                var shippingMethod = $(this).val();
-                var shippingCost = 0;
-
-                // Try to get shipping cost from the selected option
-                var shippingLabel = $(
-                  'label[for="' + $(this).attr("id") + '"]'
-                ).text();
-                var costMatch = shippingLabel.match(/[\d.,]+/);
-                if (costMatch) {
-                  shippingCost = parseFloat(costMatch[0].replace(",", "."));
-                }
-
-                self.trackEvent("add_shipping_info", {
-                  currency: cartData.currency,
-                  value: cartData.value + shippingCost, // Add shipping to total value
-                  coupon: cartData.coupon || undefined,
-                  shipping_tier: shippingMethod,
-                  items: cartData.items,
-                });
-              }
-            );
-
-            // Track payment info
-            $("form.checkout").on(
-              "change",
-              'input[name="payment_method"]',
-              function () {
-                var paymentMethod = $(this).val();
-
-                self.trackEvent("add_payment_info", {
-                  currency: cartData.currency,
-                  value: cartData.value,
-                  coupon: cartData.coupon || undefined,
-                  payment_type: paymentMethod,
-                  items: cartData.items,
-                });
-              }
-            );
-
-            // Optional: Track when user starts filling billing/shipping info
-            var billingTracked = false;
-            $("form.checkout").on(
-              "input change",
-              "#billing_first_name, #billing_last_name, #billing_email",
-              function () {
-                if (!billingTracked) {
-                  billingTracked = true;
-
-                  self.trackEvent("begin_checkout", {
-                    currency: cartData.currency,
-                    value: cartData.value,
-                    coupon: cartData.coupon || undefined,
-                    items: cartData.items,
-                    checkout_step: 2,
-                    checkout_option: "billing_info_started",
-                  });
-                }
-              }
-            );
-          } else {
-            self.log("No cart data available for checkout tracking");
-
-            // Fallback: Track basic begin_checkout without items
-            self.trackEvent("begin_checkout", {
-              currency: self.config.currency || "EUR",
-              value: 0,
+              checkout_step: 2,
+              checkout_option: "billing_info_started",
             });
           }
         }
-      }
+      );
+    },
 
-      // Track purchase event on order received page
-      if (self.isOrderConfirmationPage()) {
+    /**
+     * Setup purchase tracking
+     */
+    setupPurchaseTracking: function () {
+      var self = this;
+
+      // Track purchase event on order received page using safe tracking
+      if (
+        GA4Utils.page.isOrderConfirmationPageWithTracking(this.config, "ga4")
+      ) {
         // Check if we have order data from the server
-        if (
-          typeof self.config.orderData !== "undefined" &&
-          self.config.orderData
-        ) {
-          // Add attribution data to order data
-          var orderData = self.config.orderData;
-
+        if (this.config.orderData) {
           self.log(
-            "Order data found, tracking purchase event with attribution",
-            orderData
+            "Order data found, attempting safe purchase tracking",
+            this.config.orderData
           );
-          self.trackEvent("purchase", orderData);
+
+          // Use safe tracking to prevent duplicates
+          var wasTracked = GA4Utils.page.trackPurchaseSafely(
+            function (orderData) {
+              self.trackEvent("purchase", orderData);
+            },
+            "ga4",
+            this.config.orderData,
+            {
+              source: "server_side_tracking",
+              data_source: "server_config",
+              timestamp_tracked: Date.now(),
+            }
+          );
+
+          if (wasTracked) {
+            self.log("Purchase event tracked successfully");
+          } else {
+            self.log(
+              "Purchase event skipped - already tracked or invalid data"
+            );
+          }
         } else {
           // Try to extract order data from the page
-          self.log("Attempting to extract order data from the page");
-
-          var orderId = "";
-          var orderTotal = 0;
-
-          // Try to get order ID from URL
-          var orderIdMatch = window.location.pathname.match(
-            /order-received\/(\d+)/
+          self.log(
+            "No server order data found, attempting to extract from page"
           );
-          if (orderIdMatch && orderIdMatch[1]) {
-            orderId = orderIdMatch[1];
-          }
+          var orderData = this.extractOrderDataFromPage();
 
-          // If we have at least an order ID, send a minimal purchase event
-          if (orderId) {
-            self.trackEvent("purchase", {
-              transaction_id: orderId,
-              affiliation: self.config.siteName || "Website",
-              value: orderTotal,
-              currency: self.config.currency || "EUR",
-            });
+          if (orderData.transaction_id) {
+            // Use safe tracking with extracted data
+            var wasTracked = GA4Utils.page.trackPurchaseSafely(
+              function (extractedOrderData) {
+                self.trackEvent("purchase", extractedOrderData);
+              },
+              "ga4",
+              orderData,
+              {
+                source: "server_side_tracking",
+                data_source: "page_extraction",
+                timestamp_tracked: Date.now(),
+              }
+            );
+
+            if (wasTracked) {
+              self.log("Purchase event tracked from extracted data");
+            } else {
+              self.log(
+                "Purchase event skipped - already tracked or invalid extracted data"
+              );
+            }
           } else {
-            self.log("Could not extract order data from the page");
+            self.log("Could not extract valid order data from the page");
+          }
+        }
+      } else {
+        // Check if we're on an order page but tracking was skipped
+        if (GA4Utils.page.isOrderConfirmationPage(this.config, "ga4")) {
+          var orderId = GA4Utils.page.extractOrderId();
+          if (orderId) {
+            self.log(
+              "Order confirmation page detected but purchase already tracked for order: " +
+                orderId
+            );
+          } else {
+            self.log("Order confirmation page detected but no order ID found");
           }
         }
       }
-      if ($("#gform_3")) {
-        $("#gform_3").on("submit", function (event) {
-          self.log("request a quote form fired");
-          // Check if we have order data from the server
-          if (
-            typeof self.config.quoteData !== "undefined" &&
-            self.config.quoteData
-          ) {
-            // Add attribution data to quote data
-            var quoteData = self.config.quoteData;
+    },
 
+    /**
+     * Extract order data from page
+     */
+    extractOrderDataFromPage: function () {
+      var orderId = "";
+      var orderTotal = 0;
+
+      // Try to get order ID from URL
+      var orderIdMatch = window.location.pathname.match(
+        /order-received\/(\d+)/
+      );
+      if (orderIdMatch && orderIdMatch[1]) {
+        orderId = orderIdMatch[1];
+      }
+
+      return {
+        transaction_id: orderId,
+        affiliation: this.config.siteName || "Website",
+        value: orderTotal,
+        currency: this.config.currency || "EUR",
+      };
+    },
+
+    /**
+     * Setup quote tracking
+     */
+    setupQuoteTracking: function () {
+      var self = this;
+
+      if (self.config.yithRaqFormId) {
+        $(`#gform_${self.config.yithRaqFormId}`).on("submit", function (event) {
+          self.log("request a quote form fired");
+
+          // Check if we have quote data from the server
+          if (self.config.quoteData) {
             self.log(
               "Quote data found, tracking purchase event with attribution",
-              quoteData
+              self.config.quoteData
             );
-            self.trackEvent("purchase", quoteData);
+            self.trackEvent("quote_request", self.config.quoteData);
           } else {
-            // Try to extract order data from the page
-            self.log("Attempting to extract order data from the page");
-
-            var orderId = "";
-            var orderTotal = 0;
-
-            // Try to get order ID from URL
-            var orderIdMatch = window.location.pathname.match(
-              /order-received\/(\d+)/
-            );
-            if (orderIdMatch && orderIdMatch[1]) {
-              orderId = orderIdMatch[1];
-            }
-
-            // If we have at least an order ID, send a minimal purchase event
-            if (orderId) {
-              self.trackEvent("purchase", {
-                transaction_id: orderId,
-                value: orderTotal,
-                currency: self.config.currency || "EUR",
-              });
+            // Fallback order data
+            var orderData = self.extractOrderDataFromPage();
+            if (orderData.transaction_id) {
+              self.trackEvent("quote_request", orderData);
             } else {
               self.log("Could not extract order data from the page");
             }
           }
         });
       }
-      // Track product list views
-      if (
-        $(".woocommerce .products").length &&
-        !$(".woocommerce-product-gallery").length
-      ) {
-        var listName = "Product List";
-        var listId = "";
-
-        // Try to determine the list type
-        if ($(".woocommerce-products-header__title").length) {
-          listName = $(".woocommerce-products-header__title").text().trim();
-        } else if ($(".page-title").length) {
-          listName = $(".page-title").text().trim();
-        }
-
-        // Get products in the list
-        var items = [];
-        $(".products .product").each(function (index) {
-          var $product = $(this);
-          var productId =
-            $product.find(".add_to_cart_button").data("product_id") || "";
-          var productName = $product
-            .find(".woocommerce-loop-product__title")
-            .text()
-            .trim();
-          var productPrice = $product
-            .find(".price .amount")
-            .text()
-            .replace(/[^0-9,.]/g, "");
-
-          if (productId && productName) {
-            items.push({
-              item_id: productId,
-              item_name: productName,
-              price: parseFloat(productPrice),
-              index: index + 1,
-              item_list_name: listName,
-              item_list_id: listId,
-            });
-          }
-        });
-
-        if (items.length > 0) {
-          if (self.config.useServerSide != true) {
-            self.trackEvent("view_item_list", {
-              item_list_name: listName,
-              item_list_id: listId,
-              items: items,
-            });
-
-            // Track product clicks for select_item events
-            $(".products .product a").on("click", function () {
-              var $product = $(this).closest(".product");
-              var index = $product.index() + 1;
-              var productId =
-                $product.find(".add_to_cart_button").data("product_id") || "";
-              var productName = $product
-                .find(".woocommerce-loop-product__title")
-                .text()
-                .trim();
-
-              if (productId && productName) {
-                self.trackEvent("select_item", {
-                  item_list_name: listName,
-                  item_list_id: listId,
-                  items: [
-                    {
-                      item_id: productId,
-                      item_name: productName,
-                      index: index,
-                      item_list_name: listName,
-                      item_list_id: listId,
-                    },
-                  ],
-                });
-              }
-            });
-          }
-        }
-      }
-    },
-    // Add this helper function to your JavaScript
-    getPageLocationWithoutParams: function (url) {
-      try {
-        // Parse the URL
-        const parsedUrl = new URL(url);
-
-        // Get the base URL without parameters (protocol + hostname + pathname)
-        let cleanUrl =
-          parsedUrl.protocol + "//" + parsedUrl.hostname + parsedUrl.pathname;
-
-        // Trim to 100 characters if needed
-        if (cleanUrl.length > 100) {
-          cleanUrl = cleanUrl.substring(0, 100);
-        }
-
-        return cleanUrl;
-      } catch (e) {
-        // In case of invalid URL, return a trimmed version of the original
-        return url.split("?")[0].substring(0, 100);
-      }
-    },
-
-    // Get UTM parameters from URL
-    getUtmSource: function () {
-      return this.getParameterByName("utm_source");
-    },
-
-    getUtmMedium: function () {
-      return this.getParameterByName("utm_medium");
-    },
-
-    getUtmCampaign: function () {
-      return this.getParameterByName("utm_campaign");
-    },
-
-    getUtmContent: function () {
-      return this.getParameterByName("utm_content");
-    },
-
-    getUtmTerm: function () {
-      return this.getParameterByName("utm_term");
-    },
-    getGclid: function () {
-      return this.getParameterByName("gclid");
-    },
-
-    // Helper function to get URL parameters (if you don't already have this)
-    getParameterByName: function (name, url) {
-      if (!url) url = window.location.href;
-      name = name.replace(/[\[\]]/g, "\\$&");
-      var regex = new RegExp("[?&]" + name + "(=([^&#]*)|&|#|$)"),
-        results = regex.exec(url);
-      if (!results) return null;
-      if (!results[2]) return "";
-      return decodeURIComponent(results[2].replace(/\+/g, " "));
-    },
-    // Method to get user location (IP-based only to avoid permission prompts)
-    getUserLocation: function () {
-      return new Promise((resolve, reject) => {
-        // First check if we have cached location data to avoid multiple requests
-        const cachedLocation = sessionStorage.getItem("user_location_data");
-        if (cachedLocation) {
-          try {
-            resolve(JSON.parse(cachedLocation));
-            return;
-          } catch (e) {
-            this.log("Error parsing cached location data");
-            // Continue to fetch fresh data if cache parsing fails
-          }
-        }
-
-        // Use IP-based geolocation exclusively (no permission prompt)
-        this.getIPBasedLocation()
-          .then((ipLocationData) => {
-            // Cache the location data for future use (1 hour)
-            sessionStorage.setItem(
-              "user_location_data",
-              JSON.stringify(ipLocationData)
-            );
-            resolve(ipLocationData);
-          })
-          .catch((err) => {
-            this.log("IP location error:", err);
-            // Return empty location data rather than rejecting
-            resolve({});
-          });
-      });
-    },
-    // Method to get location based on IP address
-    getIPBasedLocation: function () {
-      return new Promise((resolve, reject) => {
-        // Try multiple IP geolocation services for redundancy
-        // Starting with ipapi.co
-        fetch("https://ipapi.co/json/")
-          .then((response) => {
-            if (!response.ok) throw new Error("ipapi.co lookup failed");
-            return response.json();
-          })
-          .then((data) => {
-            const locationData = {
-              latitude: parseFloat(data.latitude),
-              longitude: parseFloat(data.longitude),
-              city: data.city || "",
-              region: data.region || "",
-              country: data.country_name || "",
-            };
-            this.log("Location obtained from ipapi.co", locationData);
-            resolve(locationData);
-          })
-          .catch((error) => {
-            // If first service fails, try ipinfo.io as fallback
-            this.log(
-              "First IP location service failed, trying fallback",
-              error
-            );
-
-            // Note: In production, you would need an API token for ipinfo.io
-            fetch("https://ipinfo.io/json")
-              .then((response) => {
-                if (!response.ok) throw new Error("ipinfo.io lookup failed");
-                return response.json();
-              })
-              .then((data) => {
-                // ipinfo returns location as "lat,lng" string, so we need to parse it
-                let coords = [0, 0];
-                if (data.loc && data.loc.includes(",")) {
-                  coords = data.loc.split(",");
-                }
-
-                const locationData = {
-                  latitude: parseFloat(coords[0]),
-                  longitude: parseFloat(coords[1]),
-                  city: data.city || "",
-                  region: data.region || "",
-                  country: data.country || "",
-                };
-
-                this.log(
-                  "Location obtained from fallback service",
-                  locationData
-                );
-                resolve(locationData);
-              })
-              .catch((secondError) => {
-                // If both services fail, try one more option - geoiplookup.io
-                this.log(
-                  "Second IP location service failed, trying final fallback",
-                  secondError
-                );
-
-                fetch("https://json.geoiplookup.io/")
-                  .then((response) => {
-                    if (!response.ok) throw new Error("geoiplookup.io failed");
-                    return response.json();
-                  })
-                  .then((data) => {
-                    const locationData = {
-                      latitude: parseFloat(data.latitude),
-                      longitude: parseFloat(data.longitude),
-                      city: data.city || "",
-                      region: data.region || "",
-                      country: data.country_name || "",
-                    };
-
-                    this.log(
-                      "Location obtained from final fallback service",
-                      locationData
-                    );
-                    resolve(locationData);
-                  })
-                  .catch((finalError) => {
-                    this.log("All IP location services failed", finalError);
-                    // If all services fail, return an empty object instead of rejecting
-                    resolve({});
-                  });
-              });
-          });
-      });
-    },
-
-    // Method to get screen resolution
-    getScreenResolution: function () {
-      if (typeof window !== "undefined" && window.screen) {
-        return window.screen.width + "x" + window.screen.height;
-      }
-      return "unknown";
-    },
-
-    parseUserAgent: function () {
-      var userAgent = navigator.userAgent;
-      var clientHints = this.getClientHints();
-
-      // Initialize the result object
-      var parsedUA = {
-        browser_name: "",
-        device_type: "",
-        user_agent: userAgent,
-        is_mobile: false,
-        is_tablet: false,
-        is_desktop: false,
-      };
-
-      // Use Client Hints API if available (more reliable than user agent parsing)
-      if (clientHints) {
-        parsedUA.browser_name = clientHints.brands?.[0]?.brand || "";
-        parsedUA.is_mobile = clientHints.mobile || false;
-      }
-
-      // Parse browser information from user agent
-      if (!parsedUA.browser_name) {
-        // Chrome/Chromium (including Edge, Opera, Brave, etc.)
-        if (userAgent.indexOf("Chrome") > -1) {
-          if (userAgent.indexOf("Edg") > -1) {
-            parsedUA.browser_name = "Microsoft Edge";
-          } else if (
-            userAgent.indexOf("OPR") > -1 ||
-            userAgent.indexOf("Opera") > -1
-          ) {
-            parsedUA.browser_name = "Opera";
-          } else if (userAgent.indexOf("YaBrowser") > -1) {
-            parsedUA.browser_name = "Yandex Browser";
-          } else if (userAgent.indexOf("Brave") > -1) {
-            parsedUA.browser_name = "Brave";
-          } else {
-            parsedUA.browser_name = "Chrome";
-          }
-        }
-        // Firefox
-        else if (userAgent.indexOf("Firefox") > -1) {
-          parsedUA.browser_name = "Firefox";
-        }
-        // Safari (not Chrome-based)
-        else if (
-          userAgent.indexOf("Safari") > -1 &&
-          userAgent.indexOf("Chrome") === -1
-        ) {
-          parsedUA.browser_name = "Safari";
-        }
-        // Internet Explorer
-        else if (
-          userAgent.indexOf("Trident") > -1 ||
-          userAgent.indexOf("MSIE") > -1
-        ) {
-          parsedUA.browser_name = "Internet Explorer";
-        }
-        // Samsung Internet
-        else if (userAgent.indexOf("SamsungBrowser") > -1) {
-          parsedUA.browser_name = "Samsung Internet";
-        }
-        // UC Browser
-        else if (userAgent.indexOf("UCBrowser") > -1) {
-          parsedUA.browser_name = "UC Browser";
-        }
-        // Generic fallback
-        else {
-          parsedUA.browser_name = "Unknown";
-        }
-      }
-
-      // Determine device type based on user agent
-      if (
-        userAgent.indexOf("iPhone") > -1 ||
-        (userAgent.indexOf("Android") > -1 &&
-          userAgent.indexOf("Mobile") > -1) ||
-        userAgent.indexOf("Windows Phone") > -1 ||
-        userAgent.indexOf("BlackBerry") > -1
-      ) {
-        parsedUA.device_type = "mobile";
-        parsedUA.is_mobile = true;
-      } else if (
-        userAgent.indexOf("iPad") > -1 ||
-        (userAgent.indexOf("Android") > -1 &&
-          userAgent.indexOf("Mobile") === -1) ||
-        userAgent.indexOf("Tablet") > -1
-      ) {
-        parsedUA.device_type = "tablet";
-        parsedUA.is_tablet = true;
-      } else {
-        parsedUA.device_type = "desktop";
-        parsedUA.is_desktop = true;
-      }
-
-      // Override with client hints if available
-      if (clientHints && clientHints.mobile) {
-        // Client hints indicate this is a mobile device
-        if (
-          userAgent.indexOf("iPad") > -1 ||
-          userAgent.indexOf("Tablet") > -1 ||
-          (userAgent.indexOf("Android") > -1 &&
-            userAgent.indexOf("Mobile") === -1)
-        ) {
-          parsedUA.device_type = "tablet";
-          parsedUA.is_tablet = true;
-          parsedUA.is_mobile = false;
-        } else {
-          parsedUA.device_type = "mobile";
-          parsedUA.is_mobile = true;
-          parsedUA.is_tablet = false;
-        }
-        parsedUA.is_desktop = false;
-      } else if (clientHints && !clientHints.mobile) {
-        parsedUA.device_type = "desktop";
-        parsedUA.is_desktop = true;
-        parsedUA.is_mobile = false;
-        parsedUA.is_tablet = false;
-      }
-
-      return parsedUA;
-    },
-
-    // Method to get User Agent Client Hints (modern approach)
-    getClientHints: function () {
-      // Check if User Agent Client Hints API is available
-      if (navigator.userAgentData) {
-        try {
-          return {
-            brands: navigator.userAgentData.brands,
-            mobile: navigator.userAgentData.mobile,
-            platform: navigator.userAgentData.platform,
-          };
-        } catch (e) {
-          this.log("Error accessing User Agent Client Hints:", e);
-          return null;
-        }
-      }
-      return null;
-    },
-    // Method to determine traffic type based on source and medium
-    determineTrafficType: function (source, medium) {
-      // Direct traffic
-      if (source === "(direct)" && medium === "none") {
-        return "direct";
-      }
-
-      // Organic search
-      if (medium === "organic") {
-        return "organic";
-      }
-
-      // Paid search
-      if (medium === "cpc" || medium === "ppc" || medium === "paidsearch") {
-        return "paid_search";
-      }
-
-      // Social media
-      if (
-        medium === "social" ||
-        medium === "sm" ||
-        source === "facebook" ||
-        source === "instagram" ||
-        source === "twitter" ||
-        source === "linkedin" ||
-        source === "pinterest" ||
-        source === "youtube"
-      ) {
-        return "social";
-      }
-
-      // Email marketing
-      if (medium === "email") {
-        return "email";
-      }
-
-      // Affiliates
-      if (medium === "affiliate") {
-        return "affiliate";
-      }
-
-      // Regular referral traffic (links from other sites)
-      if (medium === "referral") {
-        return "referral";
-      }
-
-      // Display or banner ads
-      if (medium === "display" || medium === "banner" || medium === "cpm") {
-        return "display";
-      }
-
-      // Video ads
-      if (medium === "video") {
-        return "video";
-      }
-
-      // Default fallback
-      return "other";
-    },
-
-    // Method to get or create session information
-    getSession: function () {
-      var sessionId = localStorage.getItem("server_side_ga4_session_id");
-      var sessionStart = localStorage.getItem("server_side_ga4_session_start");
-      var firstVisit = localStorage.getItem("server_side_ga4_first_visit");
-      var sessionCount = parseInt(
-        localStorage.getItem("server_side_ga4_session_count") || "0"
-      );
-      var now = Date.now();
-      var isNew = false;
-      var isFirstVisit = false;
-
-      // Check if this is the first visit ever
-      if (!firstVisit) {
-        localStorage.setItem("server_side_ga4_first_visit", now);
-        isFirstVisit = true;
-      }
-
-      // If no session or session expired (30 min inactive)
-      if (
-        !sessionId ||
-        !sessionStart ||
-        now - parseInt(sessionStart) > 30 * 60 * 1000
-      ) {
-        // Clear expired session data
-        this.clearSessionData();
-
-        // Generate a more robust session ID using timestamp and random values
-        sessionId = this.generateUniqueId();
-        sessionStart = now;
-
-        // Store session data
-        localStorage.setItem("server_side_ga4_session_id", sessionId);
-        localStorage.setItem("server_side_ga4_session_start", sessionStart);
-
-        // Increment session count
-        sessionCount++;
-        localStorage.setItem("server_side_ga4_session_count", sessionCount);
-
-        isNew = true;
-      }
-      // Don't update session start time - keep the original start time
-      // Only update on new sessions, not on every activity
-
-      return {
-        id: sessionId,
-        start: parseInt(sessionStart),
-        isNew: isNew,
-        isFirstVisit: isFirstVisit,
-        sessionCount: sessionCount,
-        duration: now - parseInt(sessionStart),
-      };
-    },
-
-    // Helper function to clear expired session data
-    clearSessionData: function () {
-      // Clear session-specific data but keep user-level data
-      localStorage.removeItem("server_side_ga4_session_id");
-      localStorage.removeItem("server_side_ga4_session_start");
-
-      // Clear attribution data that's tied to sessions
-      localStorage.removeItem("server_side_ga4_last_source");
-      localStorage.removeItem("server_side_ga4_last_medium");
-      localStorage.removeItem("server_side_ga4_last_campaign");
-      localStorage.removeItem("server_side_ga4_last_content");
-      localStorage.removeItem("server_side_ga4_last_term");
-      localStorage.removeItem("server_side_ga4_last_gclid");
-
-      // Keep these items as they're user-level, not session-level:
-      // - server_side_ga4_first_visit (first visit timestamp)
-      // - server_side_ga4_session_count (total sessions count)
-      // - client_id (user identifier)
-    },
-    // Helper function to generate a unique ID
-    generateUniqueId: function () {
-      return Date.now().toString();
-    },
-
-    // Method to calculate engagement time
-    calculateEngagementTime: function () {
-      var session = this.getSession();
-      // Get stored page start time or use current time as fallback
-      var startTime = session.start || Date.now();
-      var currentTime = Date.now();
-      var engagementTime = currentTime - startTime;
-
-      // Ensure minimum engagement time of 1000ms for GA4 compatibility
-      // and maximum of 30 minutes (1800000ms) to prevent unrealistic values
-      return Math.max(1000, Math.min(engagementTime, 1800000));
-    },
-
-    // Track an event
-    trackEvent: function (eventName, eventParams = {}) {
-      // Log the event
-      this.log("Tracking event: " + eventName, eventParams);
-
-      // Add debug_mode to event params if not already present and ensure it's a boolean
-      if (!eventParams.hasOwnProperty("debug_mode")) {
-        if (Boolean(this.config.debugMode) === true) {
-          eventParams.debug_mode = Boolean(this.config.debugMode);
-        }
-      }
-
-      if (!eventParams.hasOwnProperty("event_timestamp")) {
-        // Add timestamp to event params
-        eventParams.event_timestamp = Math.floor(Date.now() / 1000);
-      }
-
-      // Send server-side event if enabled
-      if (this.config.useServerSide) {
-        this.sendServerSideEvent(eventName, eventParams);
-      } else if (typeof gtag === "function") {
-        gtag("event", eventName, eventParams);
-        this.log("Sent to gtag: " + eventName);
-      }
-    },
-
-    // Send server-side event
-    sendServerSideEvent: async function (eventName, eventParams) {
-      // Create a copy of the event params to avoid modifying the original
-      var params = JSON.parse(JSON.stringify(eventParams));
-      var session = this.getSession();
-
-      if (!params.hasOwnProperty("user_id")) {
-        if (this.config.user_id) {
-          params.user_id = this.config.user_id;
-        }
-      }
-      // Add session_id to event params if not already present
-      if (!params.hasOwnProperty("session_id")) {
-        params.session_id = session.id;
-      }
-      // Add session_count to event params if not already present
-      if (!params.hasOwnProperty("session_count")) {
-        params.session_count = session.sessionCount;
-      }
-
-      if (!params.hasOwnProperty("engagement_time_msec")) {
-        params.engagement_time_msec = this.calculateEngagementTime();
-      }
-
-      // Check if IP anonymization is enabled
-      if (this.config.anonymizeIp == true) {
-        // Skip location tracking if anonymizeIp is enabled
-        this.log(
-          "IP anonymization is enabled - skipping IP-based location tracking"
-        );
-
-        // Use timezone-based general region information instead of precise location
-        try {
-          const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-          if (timezone) {
-            const timezoneRegions = timezone.split("/");
-            if (timezoneRegions.length > 0) {
-              // Add only general region information - no precise coordinates
-              params.continent = timezoneRegions[0] || "";
-            }
-          }
-        } catch (e) {
-          this.log("Error getting timezone info:", e);
-        }
-
-        // Proceed directly to page view tracking without precise location data
-      } else {
-        try {
-          // Normal flow - try to get user location information
-          const locationData = await this.getUserLocation();
-
-          // Add location data to session parameters
-          if (locationData) {
-            params.geo_latitude = locationData.latitude;
-            params.geo_longitude = locationData.longitude;
-
-            // Add any additional location information if available
-            if (locationData.city) params.geo_city = locationData.city;
-            if (locationData.country) params.geo_country = locationData.country;
-            if (locationData.region) params.geo_region = locationData.region;
-          }
-        } catch (error) {
-          // Continue with tracking even if location fetching fails
-          this.log("Location tracking error:", error);
-        }
-      }
-
-      // Get client ID from cookie if available
-      var clientId = this.getClientId();
-      if (clientId) {
-        params.client_id = clientId;
-        this.log("Using client ID from cookie: " + clientId);
-      } else if (typeof ga === "function" && ga.getAll && ga.getAll()[0]) {
-        params.client_id = ga.getAll()[0].get("clientId");
-        this.log("Using client ID from GA: " + params.client_id);
-      } else {
-        // Generate a random client ID if none exists
-        params.client_id = this.generateClientId();
-        this.log("Generated random client ID: " + params.client_id);
-      }
-
-      // Determine endpoint
-      var endpoint = this.config.cloudflareWorkerUrl || this.config.apiEndpoint;
-
-      if (!endpoint) {
-        this.log("No server-side endpoint configured");
-        return;
-      }
-
-      this.log("Sending to endpoint: " + endpoint);
-
-      // Format data based on endpoint type
-      var data;
-      if (endpoint === this.config.cloudflareWorkerUrl) {
-        // Direct format for Cloudflare Worker
-        data = {
-          name: eventName,
-          params: params,
-        };
-        this.log("Using Cloudflare Worker format", data);
-      } else {
-        // Legacy format for WordPress REST API
-        data = {
-          event_name: eventName,
-          event_data: params,
-        };
-        this.log("Using WordPress REST API format", data);
-      }
-
-      this.sendAjaxPayload(endpoint, data);
-    },
-    sendAjaxPayload: function (endpoint, payload) {
-      var self = this;
-
-      // Send the request
-      $.ajax({
-        url: endpoint,
-        type: "POST",
-        data: JSON.stringify(payload),
-        contentType: "application/json",
-        beforeSend: function (xhr) {
-          // Add nonce for WordPress REST API
-          if (endpoint === self.config.apiEndpoint) {
-            xhr.setRequestHeader("X-WP-Nonce", self.config.nonce);
-          }
-          self.log("Sending AJAX request to: " + endpoint);
-        },
-        success: function (response) {
-          self.log("Server-side event sent successfully", response);
-        },
-        error: function (xhr, status, error) {
-          self.log("Error sending server-side event: " + error, xhr);
-          console.error("[GA4 Server-Side Tagging] Error sending event:", {
-            status: status,
-            error: error,
-            response: xhr.responseText,
-          });
-        },
-      });
-    },
-    // Option 2: Add more detailed logging within the function
-    isOrderConfirmationPage: function () {
-      // Check config value
-      if (this.config && this.config.isThankYouPage == true) {
-        this.log("Order page detected via config setting");
-        return true;
-      }
-
-      // Check URL patterns
-      const isUrlMatch =
-        window.location.href.indexOf("/checkout/order-received/") > -1 ||
-        window.location.href.indexOf("/inschrijven/order-received/") > -1 ||
-        window.location.href.indexOf("/order-pay/") > -1 ||
-        window.location.href.indexOf("/thank-you/") > -1;
-      if (isUrlMatch) {
-        this.log("Order page detected via URL pattern");
-        return true;
-      }
-
-      // Check for WooCommerce body class
-      const hasWooClass =
-        document.body.classList.contains("woocommerce-order-received") ||
-        (document.body.classList.contains("woocommerce-checkout") &&
-          document.querySelector(".woocommerce-order-overview") !== null);
-      if (hasWooClass) {
-        this.log("Order page detected via WooCommerce classes");
-        return true;
-      }
-
-      // Check for order ID in URL parameters
-      const urlParams = new URLSearchParams(window.location.search);
-      const hasOrderParam = urlParams.has("order") || urlParams.has("order_id");
-      if (hasOrderParam) {
-        this.log("Order page detected via URL parameters");
-        return true;
-      }
-
-      // Check for thank you page elements
-      const hasThankYouElements =
-        document.querySelector(".woocommerce-thankyou-order-details") !==
-          null ||
-        document.querySelector(".woocommerce-order-received") !== null ||
-        document.querySelector(".woocommerce-notice--success") !== null;
-      if (hasThankYouElements) {
-        this.log("Order page detected via thank you page elements");
-        return true;
-      }
-
-      this.log("Not an order page");
-      return false;
     },
 
     // Check if we're on a product list page
     isProductListPage: function () {
-      return (
-        $(".woocommerce .products").length &&
-        !$(".woocommerce-product-gallery").length
-      );
+      return GA4Utils.page.isProductListPage();
     },
 
     // Check if we're on a single product page
     isProductPage: function () {
-      return this.config.productData ? true : false;
+      return GA4Utils.page.isProductPage(this.config);
     },
 
     // Get product list items
@@ -1728,6 +1279,8 @@
 
     // Setup click tracking for products in a list
     setupProductClickTracking: function (listName, listId, sessionParams) {
+      var self = this;
+
       $(".products .product a").on("click", function () {
         var $product = $(this).closest(".product");
         var index = $product.index() + 1;
@@ -1754,56 +1307,310 @@
             ],
           };
 
-          this.trackEvent("select_item", selectItemData);
+          self.trackEvent("select_item", selectItemData);
         }
       });
     },
 
-    // Get client ID from cookie
-    getClientId: function () {
-      // Try to get client ID from _ga cookie
-      // var gaCookie = this.getCookie("_ga");
-      // if (gaCookie) {
-      //   var parts = gaCookie.split(".");
-      //   if (parts.length >= 4) {
-      //     return parts[2] + "." + parts[3];
-      //   }
-      // }
+    /**
+     * Get user location (IP-based only)
+     */
+    getUserLocation: function () {
+      return new Promise((resolve, reject) => {
+        // First check if we have cached location data
+        const cachedLocation = localStorage.getItem("user_location_data");
+        if (cachedLocation) {
+          try {
+            const locationData = JSON.parse(cachedLocation);
+            const now = Date.now();
+            const oneHour = 60 * 60 * 1000; // 1 hour in milliseconds
 
-      // Try to get from localStorage if available
-      if (window.localStorage) {
-        var storedClientId = localStorage.getItem("server_side_ga4_client_id");
-        if (storedClientId) {
-          return storedClientId;
+            // Check if cached data is still valid (1 hour expiry)
+            if (
+              locationData.timestamp &&
+              now - locationData.timestamp < oneHour
+            ) {
+              resolve(locationData);
+              return;
+            } else {
+              // Expired, remove it
+              localStorage.removeItem("user_location_data");
+              this.log("Cached location data expired, fetching fresh data");
+            }
+          } catch (e) {
+            this.log("Error parsing cached location data");
+            localStorage.removeItem("user_location_data");
+          }
         }
-      }
-      return this.generateClientId();
+
+        // Use IP-based geolocation
+        this.getIPBasedLocation()
+          .then((ipLocationData) => {
+            // Add timestamp to the location data
+            ipLocationData.timestamp = Date.now();
+            localStorage.setItem(
+              "user_location_data",
+              JSON.stringify(ipLocationData)
+            );
+            resolve(ipLocationData);
+          })
+          .catch((err) => {
+            this.log("IP location error:", err);
+            resolve({});
+          });
+      });
     },
 
-    // Generate a random client ID and store it
-    generateClientId: function () {
-      var clientId =
-        Math.round(2147483647 * Math.random()) +
-        "." +
-        Math.round(Date.now() / 1000);
+    /**
+     * Get location based on IP address with fallback services
+     */
+    getIPBasedLocation: function () {
+      return new Promise((resolve, reject) => {
+        // Try ipapi.co first
+        fetch("https://ipapi.co/json/")
+          .then((response) => {
+            if (!response.ok) throw new Error("ipapi.co lookup failed");
+            return response.json();
+          })
+          .then((data) => {
+            const locationData = {
+              latitude: parseFloat(data.latitude),
+              longitude: parseFloat(data.longitude),
+              city: data.city || "",
+              region: data.region || "",
+              country: data.country_name || "",
+            };
+            this.log("Location obtained from ipapi.co", locationData);
+            resolve(locationData);
+          })
+          .catch((error) => {
+            this.log(
+              "First IP location service failed, trying fallback",
+              error
+            );
 
-      // Store in localStorage if available
-      if (window.localStorage) {
-        localStorage.setItem("server_side_ga4_client_id", clientId);
+            // Fallback to ipinfo.io
+            fetch("https://ipinfo.io/json")
+              .then((response) => {
+                if (!response.ok) throw new Error("ipinfo.io lookup failed");
+                return response.json();
+              })
+              .then((data) => {
+                let coords = [0, 0];
+                if (data.loc && data.loc.includes(",")) {
+                  coords = data.loc.split(",");
+                }
+
+                const locationData = {
+                  latitude: parseFloat(coords[0]),
+                  longitude: parseFloat(coords[1]),
+                  city: data.city || "",
+                  region: data.region || "",
+                  country: data.country || "",
+                };
+
+                this.log(
+                  "Location obtained from fallback service",
+                  locationData
+                );
+                resolve(locationData);
+              })
+              .catch((secondError) => {
+                this.log(
+                  "Second IP location service failed, trying final fallback",
+                  secondError
+                );
+
+                // Final fallback to geoiplookup.io
+                fetch("https://json.geoiplookup.io/")
+                  .then((response) => {
+                    if (!response.ok) throw new Error("geoiplookup.io failed");
+                    return response.json();
+                  })
+                  .then((data) => {
+                    const locationData = {
+                      latitude: parseFloat(data.latitude),
+                      longitude: parseFloat(data.longitude),
+                      city: data.city || "",
+                      region: data.region || "",
+                      country: data.country_name || "",
+                    };
+
+                    this.log(
+                      "Location obtained from final fallback service",
+                      locationData
+                    );
+                    resolve(locationData);
+                  })
+                  .catch((finalError) => {
+                    this.log("All IP location services failed", finalError);
+                    resolve({});
+                  });
+              });
+          });
+      });
+    },
+
+    // Track an event
+    trackEvent: function (eventName, eventParams = {}) {
+      // Log the event
+      this.log("Tracking event: " + eventName, eventParams);
+
+      // Add debug_mode to event params if not already present
+      if (!eventParams.hasOwnProperty("debug_mode")) {
+        if (Boolean(this.config.debugMode) === true) {
+          eventParams.debug_mode = Boolean(this.config.debugMode);
+        }
       }
 
-      return clientId;
+      if (!eventParams.hasOwnProperty("event_timestamp")) {
+        eventParams.event_timestamp = Math.floor(Date.now() / 1000);
+      }
+
+      // Send server-side event if enabled
+      if (this.config.useServerSide) {
+        this.sendServerSideEvent(eventName, eventParams);
+      } else if (typeof gtag === "function") {
+        gtag("event", eventName, eventParams);
+        this.log("Sent to gtag: " + eventName);
+      }
+    },
+
+    // Send server-side event
+    sendServerSideEvent: async function (eventName, eventParams) {
+      // Create a copy of the event params
+      var params = JSON.parse(JSON.stringify(eventParams));
+      var session = GA4Utils.session.get();
+
+      // Add user ID if available
+      if (!params.hasOwnProperty("user_id") && this.config.user_id) {
+        params.user_id = this.config.user_id;
+      }
+
+      // Add session information
+      if (!params.hasOwnProperty("session_id")) {
+        params.session_id = session.id;
+      }
+      if (!params.hasOwnProperty("session_count")) {
+        params.session_count = session.sessionCount;
+      }
+      if (!params.hasOwnProperty("engagement_time_msec")) {
+        params.engagement_time_msec = GA4Utils.time.calculateEngagementTime(
+          session.start
+        );
+      }
+
+      // Handle location data based on IP anonymization setting
+      await this.addLocationData(params);
+
+      // Get client ID
+      var clientId = GA4Utils.clientId.get();
+      if (clientId) {
+        params.client_id = clientId;
+        this.log("Using client ID: " + clientId);
+      }
+
+      // Determine endpoint
+      var endpoint = this.config.cloudflareWorkerUrl || this.config.apiEndpoint;
+
+      if (!endpoint) {
+        this.log("No server-side endpoint configured");
+        return;
+      }
+
+      this.log("Sending to endpoint: " + endpoint);
+
+      // Format data based on endpoint type
+      var data = this.formatEventData(eventName, params, endpoint);
+      this.sendAjaxPayload(endpoint, data);
+    },
+
+    /**
+     * Add location data to event parameters
+     */
+    addLocationData: async function (params) {
+      // Check if IP anonymization is enabled
+      if (this.config.anonymizeIp == true) {
+        this.log(
+          "IP anonymization is enabled - skipping IP-based location tracking"
+        );
+
+        // Use timezone-based general region information instead
+        try {
+          const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+          if (timezone) {
+            const timezoneRegions = timezone.split("/");
+            if (timezoneRegions.length > 0) {
+              params.continent = timezoneRegions[0] || "";
+            }
+          }
+        } catch (e) {
+          this.log("Error getting timezone info:", e);
+        }
+      } else {
+        try {
+          // Get user location information
+          const locationData = await this.getUserLocation();
+
+          // Add location data to parameters
+          if (locationData) {
+            if (locationData.latitude)
+              params.geo_latitude = locationData.latitude;
+            if (locationData.longitude)
+              params.geo_longitude = locationData.longitude;
+            if (locationData.city) params.geo_city = locationData.city;
+            if (locationData.country) params.geo_country = locationData.country;
+            if (locationData.region) params.geo_region = locationData.region;
+          }
+        } catch (error) {
+          this.log("Location tracking error:", error);
+        }
+      }
+    },
+
+    /**
+     * Format event data based on endpoint type
+     */
+    formatEventData: function (eventName, params, endpoint) {
+      if (endpoint === this.config.cloudflareWorkerUrl) {
+        // Direct format for Cloudflare Worker
+        var data = {
+          name: eventName,
+          params: params,
+        };
+        this.log("Using Cloudflare Worker format", data);
+        return data;
+      } else {
+        // Legacy format for WordPress REST API
+        var data = {
+          event_name: eventName,
+          event_data: params,
+        };
+        this.log("Using WordPress REST API format", data);
+        return data;
+      }
+    },
+
+    /**
+     * Send AJAX payload to endpoint
+     */
+    sendAjaxPayload: function (endpoint, payload) {
+      GA4Utils.ajax.sendPayload(
+        endpoint,
+        payload,
+        this.config,
+        "[GA4 Server-Side Tagging]"
+      );
     },
 
     // Log messages if debug mode is enabled
     log: function (message, data) {
-      if (this.config.debugMode && window.console) {
-        if (data) {
-          console.log("[GA4 Server-Side Tagging] " + message, data);
-        } else {
-          console.log("[GA4 Server-Side Tagging] " + message);
-        }
-      }
+      GA4Utils.helpers.log(
+        message,
+        data,
+        this.config,
+        "[GA4 Server-Side Tagging]"
+      );
     },
   };
 
