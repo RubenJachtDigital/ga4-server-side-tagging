@@ -82,7 +82,7 @@ function detectBot(request, payload) {
     score: positiveChecks.length,
     reasons: positiveChecks.map(check => check.reason),
     details: {
-      userAgent: userAgent.substring(0, 100),
+      userAgent: userAgent,
       country: country,
       city: city,
       region: region,
@@ -539,7 +539,7 @@ async function handleRequest(request) {
         eventName: payload.name,
         country: String(request.cf && request.cf.country || 'unknown'),
         city: String(request.cf && request.cf.city || 'unknown'),
-        userAgent: (request.headers.get('User-Agent') || '').substring(0, 100),
+        userAgent: (request.headers.get('User-Agent') || ''),
         bot_score: botDetection.score,
 
       });

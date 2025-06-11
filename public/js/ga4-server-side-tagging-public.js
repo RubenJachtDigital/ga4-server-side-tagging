@@ -34,7 +34,7 @@
 
       // Log initialization
       this.log(
-        "%c GA4 Server-Side Tagging initialized v3 ",
+        "%c GA4 Server-Side Tagging initialized v1 ",
         "background: #4CAF50; color: white; font-size: 16px; font-weight: bold; padding: 8px 12px; border-radius: 4px;"
       );
     },
@@ -370,9 +370,7 @@
 
         // Page information
         page_title: document.title,
-        page_location: GA4Utils.url.getLocationWithoutParams(
-          window.location.href
-        ),
+        page_location: window.location.href,
         page_referrer: referrer,
 
         // Shortened user agent

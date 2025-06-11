@@ -335,32 +335,6 @@
         if (!results[2]) return "";
         return decodeURIComponent(results[2].replace(/\+/g, " "));
       },
-
-      /**
-       * Get page location without parameters (trimmed to 100 chars)
-       * @param {string} url URL to process
-       * @returns {string}
-       */
-      getLocationWithoutParams: function (url) {
-        try {
-          // Parse the URL
-          const parsedUrl = new URL(url);
-
-          // Get the base URL without parameters (protocol + hostname + pathname)
-          let cleanUrl =
-            parsedUrl.protocol + "//" + parsedUrl.hostname + parsedUrl.pathname;
-
-          // Trim to 100 characters if needed
-          if (cleanUrl.length > 100) {
-            cleanUrl = cleanUrl.substring(0, 100);
-          }
-
-          return cleanUrl;
-        } catch (e) {
-          // In case of invalid URL, return a trimmed version of the original
-          return url.split("?")[0].substring(0, 100);
-        }
-      },
     },
 
     /**
@@ -379,7 +353,7 @@
         var parsedUA = {
           browser_name: "",
           device_type: "",
-          user_agent: userAgent.substring(0, 100), // Limit to 100 chars
+          user_agent: userAgent,
           is_mobile: false,
           is_tablet: false,
           is_desktop: false,
