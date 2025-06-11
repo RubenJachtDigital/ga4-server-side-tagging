@@ -347,7 +347,7 @@ class GA4_Server_Side_Tagging_Public
                 $order_data['items'][] = array(
                     'item_id' => (string) $product->get_id(),
                     'item_name' => $item->get_name(),
-                    'item_category' => $this->get_product_category($product),
+                    'item_category' => '',
                     'quantity' => $item->get_quantity(),
                     'price' => floatval($item->get_total() / $item->get_quantity())
                 );

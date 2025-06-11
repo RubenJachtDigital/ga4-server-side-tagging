@@ -535,14 +535,14 @@ async function handleRequest(request) {
 
     // Log legitimate traffic (optional, for monitoring)
     if (DEBUG_MODE) {
-      console.log("Legitimate traffic detected:", {
+      console.log("Legitimate traffic detected:", JSON.stringify({
         eventName: payload.name,
         country: String(request.cf && request.cf.country || 'unknown'),
         city: String(request.cf && request.cf.city || 'unknown'),
         userAgent: (request.headers.get('User-Agent') || ''),
         bot_score: botDetection.score,
 
-      });
+      }));
     }
 
     // Continue with normal processing for legitimate traffic
