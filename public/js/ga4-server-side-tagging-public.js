@@ -34,11 +34,13 @@
 
       // Log initialization
       this.log(
-        "%c GA4 Server-Side Tagging initialized v6 ",
+        "%c GA4 Server-Side Tagging initialized v3 ",
         "background: #4CAF50; color: white; font-size: 16px; font-weight: bold; padding: 8px 12px; border-radius: 4px;"
       );
     },
-
+    /**
+     * REPLACE the existing trackPageView function with this enhanced version
+     */
     trackPageView: function () {
       // Get current session information using utils
       var session = GA4Utils.session.get();
@@ -47,7 +49,7 @@
 
       // Get user agent and device information using utils
       var userAgentInfo = GA4Utils.device.parseUserAgent();
-
+   
       // Get referrer information
       var referrer = document.referrer || "";
       var referrerURL = null;
@@ -109,6 +111,7 @@
         referrer,
         ignore_referrer
       );
+
       if (isNewSession) {
         this.trackEvent("custom_session_start", sessionParams);
       }
@@ -793,8 +796,6 @@
         return;
       }
 
-      var self = this;
-
       // Track add to cart events
       this.setupAddToCartTracking();
 
@@ -1063,13 +1064,13 @@
     // Helper function to convert currency symbols to codes
     getCurrencyFromSymbol: function (symbol) {
       var currencyMap = {
-      "€": "EUR",
-      "$": "USD",
-      "£": "GBP",
-      "¥": "JPY",
-      "kr": "SEK",
-      "zł": "PLN",
-      "₹": "INR",
+        "€": "EUR",
+        $: "USD",
+        "£": "GBP",
+        "¥": "JPY",
+        kr: "SEK",
+        zł: "PLN",
+        "₹": "INR",
       };
 
       return currencyMap[symbol.trim()] || "EUR";
@@ -1203,8 +1204,6 @@
      * Setup checkout tracking
      */
     setupCheckoutTracking: function () {
-      var self = this;
-
       if ($(".woocommerce-checkout").length) {
         if (!GA4Utils.page.isOrderConfirmationPage(this.config)) {
           this.trackBeginCheckout();
@@ -1713,7 +1712,10 @@
       }
     },
 
-    // Send server-side event
+    /**
+     * ENHANCED sendServerSideEvent function for WordPress Plugin
+     * Passes bot detection data to Cloudflare Worker
+     */
     sendServerSideEvent: async function (eventName, eventParams) {
       // Create a copy of the event params
       var params = JSON.parse(JSON.stringify(eventParams));
@@ -1746,6 +1748,72 @@
         params.client_id = clientId;
         this.log("Using client ID: " + clientId);
       }
+
+      // Get user agent and client behavior data
+      var userAgentInfo = GA4Utils.device.parseUserAgent();
+      var clientBehavior = GA4Utils.botDetection.getClientBehaviorData();
+
+      // Perform bot detection
+      var botDetectionResult = GA4Utils.botDetection.isBot(
+        userAgentInfo,
+        params,
+        clientBehavior
+      );
+
+      // If it's a bot, don't send to Cloudflare at all
+      if (botDetectionResult) {
+        this.log("Bot detected in sendServerSideEvent - aborting send", {
+          eventName: eventName,
+          userAgent: userAgentInfo.user_agent,
+          geoLocation: `${params.geo_city}, ${params.geo_country}`,
+          botScore: GA4Utils.botDetection.calculateBotScore(
+            userAgentInfo,
+            clientBehavior
+          ),
+        });
+        // return; // Don't send bot traffic
+      } else {
+        this.log("No bot detected in sendServerSideEvent - allowing send", {
+          eventName: eventName,
+          userAgent: userAgentInfo.user_agent,
+          geoLocation: `${params.geo_city}, ${params.geo_country}`,
+          botScore: GA4Utils.botDetection.calculateBotScore(
+            userAgentInfo,
+            clientBehavior
+          ),
+        });
+      }
+
+      // Add bot detection data for Cloudflare Worker analysis
+      params.botData = {
+        // User agent info
+        user_agent_full: userAgentInfo.user_agent,
+        browser_name: userAgentInfo.browser_name,
+        device_type: userAgentInfo.device_type,
+        is_mobile: userAgentInfo.is_mobile,
+
+        // Client behavior data
+        has_javascript: clientBehavior.hasJavaScript,
+        screen_available_width: clientBehavior.screenAvailWidth,
+        screen_available_height: clientBehavior.screenAvailHeight,
+        color_depth: clientBehavior.colorDepth,
+        pixel_depth: clientBehavior.pixelDepth,
+        timezone: clientBehavior.timezone,
+        platform: clientBehavior.platform,
+        cookie_enabled: clientBehavior.cookieEnabled,
+        hardware_concurrency: clientBehavior.hardwareConcurrency,
+        max_touch_points: clientBehavior.maxTouchPoints,
+        webdriver_detected: clientBehavior.webdriver,
+        has_automation_indicators: clientBehavior.hasAutomationIndicators,
+        page_load_time: clientBehavior.pageLoadTime,
+        user_interaction_detected: clientBehavior.hasInteracted,
+
+        // Bot scoring
+        bot_score: GA4Utils.botDetection.calculateBotScore(
+          userAgentInfo,
+          clientBehavior
+        ),
+      };
 
       // Determine endpoint
       var endpoint = this.config.cloudflareWorkerUrl || this.config.apiEndpoint;

@@ -876,6 +876,301 @@
         return this.fetch();
       },
     },
+    /**
+     * MODIFICATIONS FOR GA4 SERVER-SIDE TAGGING FILES
+     * These functions should be added/modified in your existing files
+     */
+
+    // ============================================================================
+    // 1. ADD TO GA4Utils (paste-2.txt) - Add to the GA4Utils object
+    // ============================================================================
+
+    /**
+     * Bot Detection Utilities - Add this to your GA4Utils object
+     */
+    botDetection: {
+      /**
+       * Comprehensive bot detection - returns true if traffic should be filtered
+       */
+      isBot: function (userAgentInfo, sessionParams, clientBehavior = {}) {
+        const checks = [
+          this.checkUserAgent(userAgentInfo.user_agent),
+          this.checkSuspiciousGeoLocation(sessionParams),
+          this.checkBehaviorPatterns(clientBehavior, sessionParams),
+          this.checkWebDriver(userAgentInfo),
+          this.checkHeadlessBrowser(userAgentInfo),
+          this.checkKnownBotIPs(sessionParams.client_ip),
+          this.checkSuspiciousReferrers(sessionParams.page_referrer),
+        ];
+
+        return checks.some((check) => check === true);
+      },
+
+      /**
+       * User Agent based bot detection
+       */
+      checkUserAgent: function (userAgent) {
+        if (!userAgent) return true;
+
+        const botPatterns = [
+          /bot/i,
+          /crawl/i,
+          /spider/i,
+          /scraper/i,
+          /googlebot/i,
+          /bingbot/i,
+          /yahoo/i,
+          /duckduckbot/i,
+          /baiduspider/i,
+          /yandexbot/i,
+          /sogou/i,
+          /facebookexternalhit/i,
+          /twitterbot/i,
+          /linkedinbot/i,
+          /whatsapp/i,
+          /telegrambot/i,
+          /semrushbot/i,
+          /ahrefsbot/i,
+          /mj12bot/i,
+          /dotbot/i,
+          /screaming frog/i,
+          /seobility/i,
+          /headlesschrome/i,
+          /phantomjs/i,
+          /slimerjs/i,
+          /htmlunit/i,
+          /selenium/i,
+          /pingdom/i,
+          /uptimerobot/i,
+          /statuscake/i,
+          /site24x7/i,
+          /newrelic/i,
+          /python/i,
+          /requests/i,
+          /curl/i,
+          /wget/i,
+          /apache-httpclient/i,
+          /java/i,
+          /okhttp/i,
+          /^mozilla\/5\.0$/i,
+          /compatible;?\s*$/i,
+          /chrome-lighthouse/i,
+          /pagespeed/i,
+        ];
+
+        return botPatterns.some((pattern) => pattern.test(userAgent));
+      },
+
+      /**
+       * Geographic location based detection
+       */
+      checkSuspiciousGeoLocation: function (sessionParams) {
+        const suspiciousLocations = [
+          { city: "mountain view", country: "us" },
+          { city: "charlotte", country: "us" },
+          { city: "ashburn", country: "us" },
+          { city: "santa clara", country: "us" },
+          { city: "palo alto", country: "us" },
+          { city: "menlo park", country: "us" },
+          { city: "fremont", country: "us" },
+          { city: "sunnyvale", country: "us" },
+          { city: "dublin", country: "ie" },
+          { city: "oregon", country: "us" },
+          { city: "virginia", country: "us" },
+          { city: "seoul", country: "kr" },
+          { city: "singapore", country: "sg" },
+          { city: "mumbai", country: "in" },
+          { city: "frankfurt", country: "de" },
+          { city: "london", country: "gb" },
+        ];
+
+        const userCity = (sessionParams.geo_city || "").toLowerCase();
+        const userCountry = (sessionParams.geo_country || "").toLowerCase();
+
+        if (!userCity || !userCountry) return false;
+
+        return suspiciousLocations.some(
+          (loc) => loc.city === userCity && loc.country === userCountry
+        );
+      },
+
+      /**
+       * Behavior pattern detection
+       */
+      checkBehaviorPatterns: function (clientBehavior, sessionParams) {
+        const suspiciousPatterns = [];
+
+        if (sessionParams.engagement_time_msec < 1000) {
+          suspiciousPatterns.push("short_engagement");
+        }
+
+        if (clientBehavior.hasJavaScript === false) {
+          suspiciousPatterns.push("no_javascript");
+        }
+
+        const resolution = sessionParams.screen_resolution || "";
+        const botResolutions = ["1024x768", "1366x768", "1920x1080", "800x600"];
+        if (botResolutions.includes(resolution)) {
+          suspiciousPatterns.push("bot_resolution");
+        }
+
+        const timestamp = sessionParams.event_timestamp;
+        if (timestamp && timestamp % 10 === 0) {
+          suspiciousPatterns.push("round_timestamp");
+        }
+
+        return suspiciousPatterns.length >= 2;
+      },
+
+      /**
+       * WebDriver detection
+       */
+      checkWebDriver: function (userAgentInfo) {
+        return (
+          /webdriver/i.test(userAgentInfo.user_agent) ||
+          /automation/i.test(userAgentInfo.user_agent)
+        );
+      },
+
+      /**
+       * Headless browser detection
+       */
+      checkHeadlessBrowser: function (userAgentInfo) {
+        const headlessPatterns = [
+          /headless/i,
+          /phantomjs/i,
+          /slimerjs/i,
+          /htmlunit/i,
+        ];
+
+        return headlessPatterns.some((pattern) =>
+          pattern.test(userAgentInfo.user_agent)
+        );
+      },
+
+      /**
+       * Known bot IP ranges
+       */
+      checkKnownBotIPs: function (clientIP) {
+        if (!clientIP) return false;
+
+        const botIPRanges = [
+          "66.249.",
+          "64.233.",
+          "72.14.",
+          "74.125.",
+          "209.85.",
+          "216.239.",
+          "40.77.",
+          "207.46.",
+          "65.52.",
+          "54.",
+          "3.",
+          "18.",
+          "52.",
+        ];
+
+        return botIPRanges.some((range) => clientIP.startsWith(range));
+      },
+
+      /**
+       * Suspicious referrer detection
+       */
+      checkSuspiciousReferrers: function (referrer) {
+        if (!referrer) return false;
+
+        const suspiciousReferrers = [
+          /semalt\.com/i,
+          /darodar\.com/i,
+          /savetubevideo\.com/i,
+          /kambasoft\.com/i,
+          /gobongo\.info/i,
+          /googlebot\.com/i,
+          /crawl-66-249/i,
+          /uptimerobot\.com/i,
+          /pingdom\.com/i,
+        ];
+
+        return suspiciousReferrers.some((pattern) => pattern.test(referrer));
+      },
+
+      /**
+       * Get client behavior data for bot detection
+       */
+      getClientBehaviorData: function () {
+        const behaviorData = {
+          hasJavaScript: true,
+          screenAvailWidth: screen.availWidth,
+          screenAvailHeight: screen.availHeight,
+          colorDepth: screen.colorDepth,
+          pixelDepth: screen.pixelDepth,
+          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+          language: navigator.language,
+          languages: navigator.languages ? navigator.languages.join(",") : "",
+          platform: navigator.platform,
+          cookieEnabled: navigator.cookieEnabled,
+          doNotTrack: navigator.doNotTrack,
+          hardwareConcurrency: navigator.hardwareConcurrency,
+          maxTouchPoints: navigator.maxTouchPoints || 0,
+          webdriver: navigator.webdriver || false,
+          hasAutomationIndicators:
+            window.navigator.webdriver ||
+            window.callPhantom ||
+            window._phantom ||
+            window.__nightmare ||
+            window.Buffer ||
+            window.emit ||
+            window.spawn ||
+            false,
+          pageLoadTime: performance.timing
+            ? performance.timing.loadEventEnd -
+              performance.timing.navigationStart
+            : 0,
+          hasInteracted: this.getUserInteractionState(),
+        };
+
+        return behaviorData;
+      },
+
+      /**
+       * Track user interaction state
+       */
+      getUserInteractionState: function () {
+        if (!window._userHasInteracted) {
+          window._userHasInteracted = false;
+
+          ["click", "keydown", "scroll", "touchstart"].forEach((event) => {
+            document.addEventListener(
+              event,
+              function () {
+                window._userHasInteracted = true;
+              },
+              { once: true, passive: true }
+            );
+          });
+        }
+
+        return window._userHasInteracted;
+      },
+
+      /**
+       * Calculate bot probability score (0-100)
+       */
+      calculateBotScore: function (userAgentInfo, clientBehavior) {
+        let score = 0;
+
+        if (this.checkUserAgent(userAgentInfo.user_agent)) score += 40;
+        if (this.checkWebDriver(userAgentInfo)) score += 30;
+        if (this.checkHeadlessBrowser(userAgentInfo)) score += 35;
+        if (!clientBehavior.hasJavaScript) score += 25;
+        if (clientBehavior.hasAutomationIndicators) score += 30;
+        if (!clientBehavior.cookieEnabled) score += 15;
+        if (clientBehavior.pageLoadTime < 100) score += 20;
+        if (!clientBehavior.hasInteracted) score += 10;
+
+        return Math.min(score, 100);
+      },
+    },
 
     /**
      * Traffic Type Determination
