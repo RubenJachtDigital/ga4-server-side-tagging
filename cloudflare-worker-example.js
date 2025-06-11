@@ -461,7 +461,7 @@ function checkThreatScore(cfData) {
 function logBotDetection(detection, request, payload) {
   if (!BOT_LOG_ENABLED) return;
 
-  console.log('Bot Detection Result:', {
+  console.log('Bot Detection Result:', JSON.stringify({
     isBot: detection.isBot,
     score: detection.score,
     reasons: detection.reasons,
@@ -469,7 +469,7 @@ function logBotDetection(detection, request, payload) {
     eventName: payload.name,
     timestamp: new Date().toISOString(),
     url: request.url
-  });
+  }));
 }
 
 /**
@@ -877,7 +877,7 @@ async function sendEnhancedConversionViaGCLID(conversionData, request) {
 
       const result = await response.json();
       if (DEBUG_MODE) {
-        console.log("Google Ads API response:", result);
+        console.log("Google Ads API response:",json.stringify(result));
       }
 
       return true;
@@ -959,12 +959,12 @@ async function sendEnhancedConversionViaUserData(conversionData, request) {
 
       const result = await response.json();
       if (DEBUG_MODE) {
-        console.log("Google Ads API user data response:", result);
+        console.log("Google Ads API user data response:", json.stringify(result));
       }
 
       return true;
     } catch (error) {
-      console.error("Google Ads API user data method failed:", error);
+      console.error("Google Ads API user data method failed:", json.stringify(error));
       return false;
     }
   }
