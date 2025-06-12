@@ -1791,17 +1791,13 @@
       /**
        * Reset purchase tracking for testing purposes
        * @param {string} orderId Order ID to reset
-       * @param {string} trackingType Optional tracking type to reset ('ga4', 'google_ads', or 'both')
+       * @param {string} trackingType Optional tracking type to reset ('ga4', or 'all')
        */
       resetPurchaseTracking: function (orderId, trackingType) {
-        trackingType = trackingType || "both";
+        trackingType = trackingType || "all";
 
-        if (trackingType === "both" || trackingType === "ga4") {
+        if (trackingType === "all" || trackingType === "ga4") {
           localStorage.removeItem("purchase_tracked_ga4_" + orderId);
-        }
-
-        if (trackingType === "both" || trackingType === "google_ads") {
-          localStorage.removeItem("purchase_tracked_google_ads_" + orderId);
         }
 
         GA4Utils.helpers.log(

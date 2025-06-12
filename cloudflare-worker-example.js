@@ -1,9 +1,8 @@
 /**
- * Enhanced GA4 Server-Side Tagging + Google Ads Conversion Cloudflare Worker
+ * Enhanced GA4 Server-Side Tagging
  * WITH COMPREHENSIVE BOT DETECTION
  *
  * This worker receives events from the WordPress plugin and forwards them to GA4
- * and Google Ads conversions using multiple methods, while filtering out bot traffic.
  *
  * @version 2.1.1 - Fixed
  */
@@ -13,15 +12,6 @@ var DEBUG_MODE = true; // Set to true to enable debug logging
 const GA4_ENDPOINT = "https://www.google-analytics.com/mp/collect";
 const GA4_MEASUREMENT_ID = "G-xx"; // Your GA4 Measurement ID
 const GA4_API_SECRET = "xx"; // Your GA4 API Secret
-
-// Google Ads Configuration
-const GOOGLE_ADS_ENDPOINT = "https://googleads.googleapis.com/v17/customers";
-const GOOGLE_ADS_DEVELOPER_TOKEN = ""; // Your Google Ads Developer Token
-const GOOGLE_ADS_CUSTOMER_ID = ""; // Your Google Ads Customer ID (without dashes)
-const GOOGLE_ADS_ACCESS_TOKEN = ""; // OAuth2 Access Token (needs refresh mechanism)
-
-// Enhanced Conversions Endpoint (Alternative method)
-const ENHANCED_CONVERSIONS_ENDPOINT = "https://googleads.googleapis.com/v17/customers";
 
 // Bot Detection Configuration
 const BOT_DETECTION_ENABLED = true; // Set to false to disable bot filtering
@@ -44,7 +34,8 @@ function detectBot(request, payload) {
     return { isBot: false, reason: "detection_disabled" };
   }
 
-  const userAgent = request.headers.get('User-Agent') || '';
+  // Get user agent from the right place - prioritize botData, fallback to params, then request headers
+  const userAgent = getUserAgent(payload, request);
   const cfData = request.cf || {};
   const country = (cfData.country) || '';
   const city = (String(cfData.city) || '').toLowerCase();
@@ -62,13 +53,13 @@ function detectBot(request, payload) {
   ];
 
   // Check WordPress bot data if available
-  if (params.bot_data) {
-    checks.push(checkWordPressBotData(params.bot_data));
+  if (params.botData) {
+    checks.push(checkWordPressBotData(params.botData));
   }
 
   // Check behavior patterns if available
-  if (params.bot_data || params.event_timestamp) {
-    checks.push(checkBehaviorPatterns(params.bot_data || {}, params));
+  if (params.botData || params.event_timestamp) {
+    checks.push(checkBehaviorPatterns(params.botData || {}, params));
   }
 
   // Check request patterns
@@ -93,7 +84,35 @@ function detectBot(request, payload) {
 }
 
 /**
- * Check user agent patterns for bot indicators
+ * Get the actual user agent from the best available source
+ * @param {Object} payload - The event payload
+ * @param {Request} request - The incoming request
+ * @returns {string} The user agent string
+ */
+function getUserAgent(payload, request) {
+  const params = payload.params || {};
+  
+  // Priority 1: botData.user_agent_full (most reliable from WordPress)
+  if (params.botData && params.botData.user_agent_full) {
+    return params.botData.user_agent_full;
+  }
+  
+  // Priority 2: user_agent in params
+  if (params.user_agent) {
+    return params.user_agent;
+  }
+  
+  // Priority 3: botData.user_agent (fallback)
+  if (params.botData && params.botData.user_agent) {
+    return params.botData.user_agent;
+  }
+  
+  // Priority 4: Request header (least reliable for WordPress requests)
+  return request.headers.get('User-Agent') || '';
+}
+
+/**
+ * Check user agent patterns for bot indicators - ENHANCED
  */
 function checkUserAgentPatterns(userAgent) {
   if (!userAgent || userAgent.length < 10) {
@@ -104,42 +123,65 @@ function checkUserAgentPatterns(userAgent) {
     // Common bots
     /bot/i, /crawl/i, /spider/i, /scraper/i,
     
-    // Search engine bots
+    // Search engine bots - ENHANCED
     /googlebot/i, /bingbot/i, /yahoo/i, /duckduckbot/i,
     /baiduspider/i, /yandexbot/i, /sogou/i,
+    /applebot/i, // Added - Apple's web crawler
     
     // Social media bots
     /facebookexternalhit/i, /twitterbot/i, /linkedinbot/i,
-    /whatsapp/i, /telegrambot/i,
+    /whatsapp/i, /telegrambot/i, /discordbot/i,
     
     // SEO/monitoring tools
     /semrushbot/i, /ahrefsbot/i, /mj12bot/i, /dotbot/i,
-    /screaming frog/i, /seobility/i,
+    /screaming frog/i, /seobility/i, /serpstatbot/i,
+    /ubersuggest/i, /sistrix/i,
     
-    // Headless browsers
+    // Headless browsers and automation
     /headlesschrome/i, /phantomjs/i, /slimerjs/i,
     /htmlunit/i, /selenium/i, /webdriver/i,
+    /puppeteer/i, /playwright/i, /cypress/i,
     
     // Monitoring services
     /pingdom/i, /uptimerobot/i, /statuscake/i,
     /site24x7/i, /newrelic/i, /gtmetrix/i,
+    /pagespeed/i, /lighthouse/i,
     
-    // Generic automation
+    // Generic automation and tools
     /python/i, /requests/i, /curl/i, /wget/i,
     /apache-httpclient/i, /java/i, /okhttp/i,
-    /node\.js/i, /go-http-client/i,
+    /node\.js/i, /go-http-client/i, /http_request/i,
+    
+    // AI/ML crawlers
+    /gptbot/i, /chatgpt/i, /claudebot/i, /anthropic/i,
+    /openai/i, /perplexity/i, /cohere/i,
+    
+    // Academic and research bots
+    /researchbot/i, /academicbot/i, /university/i,
     
     // Suspicious patterns
     /^mozilla\/5\.0$/i, // Just "Mozilla/5.0"
     /compatible;?\s*$/i, // Ends with just "compatible"
+    /^\s*$/i, // Empty or whitespace only
     
-    // Known problematic
-    /chrome-lighthouse/i, /pagespeed/i, /lighthouse/i
+    // Specific problem bots found in logs
+    /chrome-lighthouse/i, /pagespeed/i, /lighthouse/i,
+    /wp-super-cache/i, /wp-rocket/i, // WordPress caching plugins
   ];
 
   const matchedPattern = botPatterns.find(pattern => pattern.test(userAgent));
   if (matchedPattern) {
     return { isBot: true, reason: `user_agent_pattern: ${matchedPattern.source.substring(0, 50)}` };
+  }
+
+  // Additional checks for suspicious user agent characteristics
+  if (userAgent.split(' ').length < 3) {
+    return { isBot: true, reason: "suspiciously_simple_user_agent" };
+  }
+
+  // Check for missing common browser indicators
+  if (!/mozilla|chrome|safari|firefox|edge|opera/i.test(userAgent)) {
+    return { isBot: true, reason: "missing_browser_indicators" };
   }
 
   return { isBot: false, reason: "user_agent_ok" };
@@ -152,13 +194,13 @@ function checkSuspiciousGeography(country, city, region) {
   const suspiciousPatterns = [];
 
   // Check for suspicious countries (commonly used by bots)
-  const suspiciousCountries = ['XX', 'T1']; // Add more as needed
+  const suspiciousCountries = ['XX', 'T1', 'ZZ']; // Add more as needed
   if (suspiciousCountries.includes(country)) {
     suspiciousPatterns.push('suspicious_country');
   }
 
   // Check for generic city names often used by bots
-  const suspiciousCities = ['unknown', 'localhost', 'test', ''];
+  const suspiciousCities = ['unknown', 'localhost', 'test', '', 'null', 'undefined'];
   if (suspiciousCities.includes(city.toLowerCase())) {
     suspiciousPatterns.push('suspicious_city');
   }
@@ -171,13 +213,13 @@ function checkSuspiciousGeography(country, city, region) {
 }
 
 /**
- * Check WordPress bot data for comprehensive analysis
+ * Check WordPress bot data for comprehensive analysis - ENHANCED
  */
 function checkWordPressBotData(botData) {
   var suspiciousPatterns = [];
 
-  // Check bot score passed from WordPress
-  if (botData.bot_score && parseInt(botData.bot_score) > 70) {
+  // Check bot score passed from WordPress - LOWERED THRESHOLD
+  if (botData.bot_score && parseInt(botData.bot_score) > 35) {
     return { isBot: true, reason: 'high_bot_score: ' + botData.bot_score };
   }
 
@@ -186,47 +228,59 @@ function checkWordPressBotData(botData) {
     suspiciousPatterns.push('automation_detected');
   }
 
-  // Check JavaScript availability
+  // Check JavaScript availability - be more lenient
   if (botData.has_javascript === false) {
     suspiciousPatterns.push('no_javascript');
   }
 
-  // Check user interaction
+  // Check user interaction - ENHANCED
   if (botData.user_interaction_detected === false) {
     suspiciousPatterns.push('no_user_interaction');
   }
 
-  // Check suspicious timing patterns
-  if (botData.page_load_time && parseInt(botData.page_load_time) < 100) {
+  // Check suspicious timing patterns - ADJUSTED
+  if (botData.page_load_time && parseInt(botData.page_load_time) < 50) {
     suspiciousPatterns.push('suspiciously_fast_load');
   }
 
-  // Check engagement time
-  if (botData.engagement_calculated && parseInt(botData.engagement_calculated) < 1000) {
+  // Check engagement time - ADJUSTED
+  if (botData.engagement_calculated && parseInt(botData.engagement_calculated) < 500) {
     suspiciousPatterns.push('very_short_engagement');
   }
 
-  // Check screen dimensions (common bot patterns)
-  var screenWidth = botData.screen_available_width;
-  var screenHeight = botData.screen_available_height;
+  // Enhanced screen dimension checks
+  var screenWidth = parseInt(botData.screen_available_width);
+  var screenHeight = parseInt(botData.screen_available_height);
   if (screenWidth && screenHeight) {
+    // Check for exact common bot resolutions
     var commonBotResolutions = [
       { w: 1024, h: 768 }, { w: 1366, h: 768 }, { w: 1920, h: 1080 },
-      { w: 800, h: 600 }, { w: 1280, h: 720 }, { w: 1440, h: 900 }
+      { w: 800, h: 600 }, { w: 1280, h: 720 }, { w: 1440, h: 900 },
+      { w: 1280, h: 1024 }, { w: 1600, h: 900 }, { w: 1920, h: 1200 }
     ];
     
     var isCommonBotRes = commonBotResolutions.some(function(res) {
       return res.w === screenWidth && res.h === screenHeight;
     });
     
-    if (isCommonBotRes) {
-      suspiciousPatterns.push('common_bot_resolution');
+    // Also check for suspiciously perfect dimensions
+    if (isCommonBotRes || (screenWidth % 100 === 0 && screenHeight % 100 === 0)) {
+      suspiciousPatterns.push('suspicious_screen_resolution');
+    }
+    
+    // Check for impossible dimensions
+    if (screenWidth < 320 || screenHeight < 240 || screenWidth > 7680 || screenHeight > 4320) {
+      suspiciousPatterns.push('impossible_screen_dimensions');
     }
   }
 
-  // Check hardware indicators
-  if (botData.hardware_concurrency === 0 || botData.max_touch_points === 0) {
-    suspiciousPatterns.push('suspicious_hardware');
+  // Enhanced hardware checks
+  if (botData.hardware_concurrency === 0) {
+    suspiciousPatterns.push('no_hardware_concurrency');
+  }
+  
+  if (botData.max_touch_points === undefined || botData.max_touch_points < 0) {
+    suspiciousPatterns.push('suspicious_touch_points');
   }
 
   // Check for missing or suspicious browser features
@@ -238,6 +292,19 @@ function checkWordPressBotData(botData) {
     suspiciousPatterns.push('unusual_color_depth');
   }
 
+  // Check timezone consistency
+  if (botData.timezone === 'UTC' || botData.timezone === 'GMT') {
+    suspiciousPatterns.push('suspicious_timezone');
+  }
+
+  // Platform consistency check
+  if (botData.platform && botData.device_type) {
+    if (botData.platform.includes('Linux') && !botData.platform.includes('Android') && botData.device_type === 'mobile') {
+      suspiciousPatterns.push('platform_device_mismatch');
+    }
+  }
+
+  // Require fewer patterns for bot detection
   if (suspiciousPatterns.length >= 2) {
     return { isBot: true, reason: 'wordpress_bot_data: ' + suspiciousPatterns.join(', ') };
   }
@@ -246,7 +313,7 @@ function checkWordPressBotData(botData) {
 }
 
 /**
- * Check behavior patterns using WordPress-passed data
+ * Check behavior patterns using WordPress-passed data - ENHANCED
  */
 function checkBehaviorPatterns(botData, params) {
   var suspiciousPatterns = [];
@@ -254,30 +321,57 @@ function checkBehaviorPatterns(botData, params) {
   // Timing analysis
   if (botData.event_creation_time && botData.session_start_time) {
     var sessionDuration = botData.event_creation_time - botData.session_start_time;
-    if (sessionDuration < 2000) { // Less than 2 seconds
+    if (sessionDuration < 1000) { // Less than 1 second - more aggressive
       suspiciousPatterns.push('very_short_session');
     }
   }
 
   // Perfect timing patterns (bots often have regular intervals)
-  if (params.event_timestamp && params.event_timestamp % 10 === 0) {
-    suspiciousPatterns.push('round_timestamp');
+  if (params.event_timestamp) {
+    var timestamp = parseInt(params.event_timestamp);
+    if (timestamp % 10 === 0 || timestamp % 60 === 0) {
+      suspiciousPatterns.push('round_timestamp');
+    }
+  }
+
+  // Enhanced engagement time analysis
+  if (params.engagement_time_msec) {
+    var engagementTime = parseInt(params.engagement_time_msec);
+    
+    // Check for suspiciously perfect engagement times
+    if (engagementTime % 1000 === 0 && engagementTime < 10000) {
+      suspiciousPatterns.push('perfect_engagement_time');
+    }
+    
+    // Check for impossible fast engagement
+    if (engagementTime < 100) {
+      suspiciousPatterns.push('impossible_fast_engagement');
+    }
+  }
+
+  // Check scroll percentage patterns (for scroll events)
+  if (params.percent_scrolled) {
+    var scrollPercent = parseInt(params.percent_scrolled);
+    // Bots often have perfect scroll percentages
+    if ([25, 50, 75, 90, 100].includes(scrollPercent)) {
+      suspiciousPatterns.push('perfect_scroll_percentage');
+    }
   }
 
   // Check timezone consistency
   if (botData.timezone) {
-    // Basic timezone validation - bots often have inconsistent or default timezones
-    var suspiciousTimezones = ['UTC', 'GMT', 'America/New_York'];
+    // Bots often use UTC or common default timezones
+    var suspiciousTimezones = ['UTC', 'GMT', 'America/New_York', 'Europe/London'];
     if (suspiciousTimezones.indexOf(botData.timezone) !== -1) {
       suspiciousPatterns.push('suspicious_timezone');
     }
   }
 
-  // Platform inconsistencies
-  if (botData.platform && botData.device_type) {
-    // Check for platform/device mismatches
-    if (botData.platform.toLowerCase().indexOf('win') !== -1 && botData.device_type === 'mobile') {
-      suspiciousPatterns.push('platform_device_mismatch');
+  // Session patterns
+  if (params.session_count && parseInt(params.session_count) === 1) {
+    // First session - check if behavior is too perfect
+    if (suspiciousPatterns.length >= 1) {
+      suspiciousPatterns.push('suspicious_first_session');
     }
   }
 
@@ -307,7 +401,7 @@ function checkRequestPatterns(request) {
 
   // Check for automation tools making direct requests
   var userAgent = headers['user-agent'] || '';
-  if (/curl|wget|python|node|automation|postman/i.test(userAgent)) {
+  if (/curl|wget|python|node|automation|postman|insomnia/i.test(userAgent)) {
     suspiciousPatterns.push('automation_user_agent');
   }
 
@@ -320,6 +414,12 @@ function checkRequestPatterns(request) {
   var origin = headers['origin'] || '';
   if (origin && !/^https?:\/\/[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/.test(origin)) {
     suspiciousPatterns.push('suspicious_origin');
+  }
+
+  // Check for rate limiting indicators
+  var referer = headers['referer'] || '';
+  if (!referer && !origin) {
+    suspiciousPatterns.push('no_referer_or_origin');
   }
 
   if (suspiciousPatterns.length >= 2) {
@@ -388,7 +488,7 @@ function checkRequestHeaders(request) {
 }
 
 /**
- * Check event data for bot patterns
+ * Check event data for bot patterns - ENHANCED
  */
 function checkEventData(payload) {
   const params = payload.params || {};
@@ -397,13 +497,16 @@ function checkEventData(payload) {
   const suspiciousPatterns = [];
 
   // Extremely short engagement time
-  if (params.engagement_time_msec && params.engagement_time_msec < 500) {
+  if (params.engagement_time_msec && params.engagement_time_msec < 200) {
     suspiciousPatterns.push('very_short_engagement');
   }
 
   // Perfect timestamp patterns (bots often have regular timing)
-  if (params.event_timestamp && params.event_timestamp % 10 === 0) {
-    suspiciousPatterns.push('round_timestamp');
+  if (params.event_timestamp) {
+    var timestamp = parseInt(params.event_timestamp);
+    if (timestamp % 10 === 0) {
+      suspiciousPatterns.push('round_timestamp');
+    }
   }
 
   // Suspicious screen resolutions common to headless browsers
@@ -417,12 +520,13 @@ function checkEventData(payload) {
     suspiciousPatterns.push('no_javascript');
   }
 
-  // WebDriver indicators
-  if (params.user_agent && /webdriver|automation/i.test(params.user_agent)) {
-    suspiciousPatterns.push('webdriver_detected');
+  // Check for user agent in params and validate it
+  var userAgent = getUserAgent(payload, { headers: { get: () => '' } });
+  if (/webdriver|automation|applebot|bot|crawl|spider/i.test(userAgent)) {
+    suspiciousPatterns.push('bot_user_agent_in_params');
   }
 
-  if (suspiciousPatterns.length >= 2) {
+  if (suspiciousPatterns.length >= 1) { // Lowered threshold
     return { isBot: true, reason: `event_patterns: ${suspiciousPatterns.join(', ')}` };
   }
 
@@ -468,9 +572,11 @@ function logBotDetection(detection, request, payload) {
     details: detection.details,
     eventName: payload.name,
     timestamp: new Date().toISOString(),
-    url: request.url
+    url: request.url,
+    userAgent: getUserAgent(payload, request) // Log the actual UA being checked
   }));
 }
+
 
 /**
  * =============================================================================
@@ -545,13 +651,9 @@ async function handleRequest(request) {
       }));
     }
 
-    // Continue with normal processing for legitimate traffic
-    // Check if this is a Google Ads conversion event
-    if (isGoogleAdsConversion(payload.name)) {
-      return await handleGoogleAdsConversion(payload, request);
-    } else {
+ 
       return await handleGA4Event(payload, request);
-    }
+    
   } catch (error) {
     // Log the error
     console.error("Error processing request:", error);
@@ -573,118 +675,6 @@ async function handleRequest(request) {
   }
 }
 
-/**
- * =============================================================================
- * GOOGLE ADS & GA4 EVENT HANDLING
- * =============================================================================
- */
-
-/**
- * Check if this is a Google Ads conversion event
- * @param {string} eventName
- * @returns {boolean}
- */
-function isGoogleAdsConversion(eventName) {
-  return (
-    eventName &&
-    (eventName.startsWith("google_ads_") ||
-      eventName === "google_ads_purchase" ||
-      eventName === "google_ads_lead" ||
-      eventName === "google_ads_phone_call" ||
-      eventName === "google_ads_email_click")
-  );
-}
-
-/**
- * Handle Google Ads conversion tracking
- * @param {Object} payload
- * @param {Request} request
- */
-async function handleGoogleAdsConversion(payload, request) {
-  if (DEBUG_MODE) {
-    console.log("Processing Google Ads conversion:", JSON.stringify(payload));
-  }
-
-  // Extract conversion data from params
-  const conversionData = payload.params;
-
-  // Validate required conversion data
-  if (!conversionData.conversion_id || !conversionData.conversion_label) {
-    return new Response(
-      JSON.stringify({
-        "error":
-          "Missing required Google Ads conversion data (conversion_id or conversion_label)",
-      }),
-      {
-        status: 400,
-        headers: {
-          "Content-Type": "application/json",
-          ...getCORSHeaders(request),
-        },
-      }
-    );
-  }
-
-  try {
-    // Try multiple methods for Google Ads conversion tracking
-    const results = await Promise.allSettled([
-      // Method 1: Enhanced Conversions via Google Click ID
-      sendEnhancedConversionViaGCLID(conversionData, request),
-
-      // Method 2: Enhanced Conversions via User Data
-      sendEnhancedConversionViaUserData(conversionData, request),
-
-      // Method 3: Backup via GA4 (for importing to Google Ads)
-      sendToGA4AsCustomEvent(conversionData, request),
-    ]);
-
-    // Check if at least one method succeeded
-    const successfulMethods = results.filter(
-      (result) => result.status === "fulfilled" && result.value
-    );
-
-    if (successfulMethods.length > 0) {
-      return new Response(
-        JSON.stringify({
-          "success": true,
-          "event": payload.name,
-          "conversion_id": conversionData.conversion_id,
-          "conversion_label": conversionData.conversion_label,
-          "methods_used": results.map((result, index) => ({
-            "method": ["gclid", "user_data", "ga4_backup"][index],
-            "success": result.status === "fulfilled" && result.value,
-            "error": result.status === "rejected" ? result.reason?.message : null,
-          })),
-          "debug": DEBUG_MODE ? conversionData : undefined,
-        }),
-        {
-          headers: {
-            "Content-Type": "application/json",
-            ...getCORSHeaders(request),
-          },
-        }
-      );
-    } else {
-      throw new Error("All Google Ads conversion methods failed");
-    }
-  } catch (error) {
-    console.error("Google Ads conversion error:", error);
-
-    return new Response(
-      JSON.stringify({
-        "success": false,
-        "error": "Failed to process Google Ads conversion: " + error.message,
-      }),
-      {
-        status: 500,
-        headers: {
-          "Content-Type": "application/json",
-          ...getCORSHeaders(request),
-        },
-      }
-    );
-  }
-}
 
 /**
  * Handle regular GA4 events
@@ -808,215 +798,6 @@ async function handleGA4Event(payload, request) {
 
 /**
  * =============================================================================
- * GOOGLE ADS CONVERSION METHODS
- * =============================================================================
- */
-
-/**
- * Send Enhanced Conversion via GCLID (Method 1)
- */
-async function sendEnhancedConversionViaGCLID(conversionData, request) {
-  if (!conversionData.gclid) {
-    if (DEBUG_MODE) {
-      console.log("No GCLID available for enhanced conversion");
-    }
-    return false;
-  }
-
-  const conversionPayload = {
-    "conversions": [
-      {
-        "conversion_action": `customers/${GOOGLE_ADS_CUSTOMER_ID}/conversionActions/${conversionData.conversion_label}`,
-        "conversion_date_time": new Date(
-          conversionData.timestamp * 1000
-        ).toISOString(),
-        "conversion_value": parseFloat(conversionData.value) || 0,
-        "currency_code": conversionData.currency || "EUR",
-        "gclid": conversionData.gclid,
-        "order_id": conversionData.transaction_id || conversionData.lead_id,
-        "user_identifiers": await buildUserIdentifiers(conversionData),
-        "cart_data": conversionData.items
-          ? {
-              "items": conversionData.items.map((item) => ({
-                "product_id": item.item_id,
-                "quantity": parseInt(item.quantity) || 1,
-                "unit_price": parseFloat(item.price) || 0,
-              })),
-            }
-          : undefined,
-      },
-    ],
-    "validate_only": false,
-  };
-
-  if (DEBUG_MODE) {
-    console.log("GCLID conversion payload:", JSON.stringify(conversionPayload));
-  }
-
-  if (GOOGLE_ADS_ACCESS_TOKEN && GOOGLE_ADS_DEVELOPER_TOKEN) {
-    try {
-      const response = await fetch(
-        `${GOOGLE_ADS_ENDPOINT}/${GOOGLE_ADS_CUSTOMER_ID}/conversionUploads:uploadConversions`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${GOOGLE_ADS_ACCESS_TOKEN}`,
-            "developer-token": GOOGLE_ADS_DEVELOPER_TOKEN,
-          },
-          body: JSON.stringify(conversionPayload),
-        }
-      );
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(
-          `Google Ads API error: ${response.status} ${errorText}`
-        );
-      }
-
-      const result = await response.json();
-      if (DEBUG_MODE) {
-        console.log("Google Ads API response:",json.stringify(result));
-      }
-
-      return true;
-    } catch (error) {
-      console.error("Google Ads API GCLID method failed:", error);
-      return false;
-    }
-  }
-
-  return false;
-}
-
-/**
- * Send Enhanced Conversion via User Data (Method 2)
- */
-async function sendEnhancedConversionViaUserData(conversionData, request) {
-  const userIdentifiers = await buildUserIdentifiers(conversionData);
-
-  if (userIdentifiers.length === 0) {
-    if (DEBUG_MODE) {
-      console.log("No user identifiers available for enhanced conversion");
-    }
-    return false;
-  }
-
-  const conversionPayload = {
-    "conversions": [
-      {
-        "conversion_action": `customers/${GOOGLE_ADS_CUSTOMER_ID}/conversionActions/${conversionData.conversion_label}`,
-        "conversion_date_time": new Date(
-          conversionData.timestamp * 1000
-        ).toISOString(),
-        "conversion_value": parseFloat(conversionData.value) || 0,
-        "currency_code": conversionData.currency || "EUR",
-        "order_id": conversionData.transaction_id || conversionData.lead_id,
-        "user_identifiers": userIdentifiers,
-        "cart_data": conversionData.items
-          ? {
-              "items": conversionData.items.map((item) => ({
-                "product_id": item.item_id,
-                "quantity": parseInt(item.quantity) || 1,
-                "unit_price": parseFloat(item.price) || 0,
-              })),
-            }
-          : undefined,
-      },
-    ],
-    "validate_only": false,
-  };
-
-  if (DEBUG_MODE) {
-    console.log(
-      "User data conversion payload:",
-      JSON.stringify(conversionPayload)
-    );
-  }
-
-  if (GOOGLE_ADS_ACCESS_TOKEN && GOOGLE_ADS_DEVELOPER_TOKEN) {
-    try {
-      const response = await fetch(
-        `${GOOGLE_ADS_ENDPOINT}/${GOOGLE_ADS_CUSTOMER_ID}/conversionUploads:uploadConversions`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${GOOGLE_ADS_ACCESS_TOKEN}`,
-            "developer-token": GOOGLE_ADS_DEVELOPER_TOKEN,
-          },
-          body: JSON.stringify(conversionPayload),
-        }
-      );
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(
-          `Google Ads API error: ${response.status} ${errorText}`
-        );
-      }
-
-      const result = await response.json();
-      if (DEBUG_MODE) {
-        console.log("Google Ads API user data response:", json.stringify(result));
-      }
-
-      return true;
-    } catch (error) {
-      console.error("Google Ads API user data method failed:", json.stringify(error));
-      return false;
-    }
-  }
-
-  return false;
-}
-
-/**
- * Send to GA4 as custom event for importing to Google Ads (Method 3)
- */
-async function sendToGA4AsCustomEvent(conversionData, request) {
-  try {
-    const ga4ConversionEvent = {
-      "name": "ads_conversion",
-      "params": {
-        "conversion_id": conversionData.conversion_id,
-        "conversion_label": conversionData.conversion_label,
-        "conversion_type": conversionData.conversion_type,
-        "transaction_id": conversionData.transaction_id || conversionData.lead_id,
-        "value": parseFloat(conversionData.value) || 0,
-        "currency": conversionData.currency || "EUR",
-        "gclid": conversionData.gclid || "",
-        "utm_source": conversionData.utm_source || "",
-        "utm_medium": conversionData.utm_medium || "",
-        "utm_campaign": conversionData.utm_campaign || "",
-        "utm_content": conversionData.utm_content || "",
-        "utm_term": conversionData.utm_term || "",
-        "client_id": conversionData.client_id,
-        "session_id": conversionData.session_id,
-        "conversion_timestamp": conversionData.timestamp,
-        "page_location": conversionData.page_location,
-        "page_referrer": conversionData.page_referrer,
-        "user_agent": conversionData.user_agent,
-        "items": conversionData.items || [],
-      },
-    };
-
-    await sendEventToGA4(ga4ConversionEvent, conversionData.client_id);
-
-    if (DEBUG_MODE) {
-      console.log("GA4 conversion event sent successfully");
-    }
-
-    return true;
-  } catch (error) {
-    console.error("GA4 backup method failed:", error);
-    return false;
-  }
-}
-
-/**
- * =============================================================================
  * UTILITY FUNCTIONS
  * =============================================================================
  */
@@ -1130,26 +911,6 @@ async function hashString(str) {
   return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-/**
- * Normalize phone number for Google Ads
- */
-function normalizePhoneNumber(phone) {
-  if (!phone) return "";
-
-  let normalized = phone.replace(/\D/g, "");
-
-  if (normalized.length === 10) {
-    normalized = "1" + normalized;
-  } else if (normalized.length === 11 && normalized.startsWith("1")) {
-    // Already has US country code
-  } else if (normalized.length > 7) {
-    // Assume it already has a country code
-  } else {
-    return "";
-  }
-
-  return normalized;
-}
 
 /**
  * Generate a client ID
