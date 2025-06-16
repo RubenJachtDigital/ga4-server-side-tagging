@@ -757,7 +757,9 @@ async function handleGA4Event(payload, request) {
     );
   }
   if(DEBUG_MODE){
+    if(processedData.name == 'page_view' || processedData.name == 'custom_session_start' || processedData.name == 'custom_first_visit'){
       console.log("Traffic Type:" + processedData.params.traffic_type);
+    }
   }
   
   if (DEBUG_MODE) {
