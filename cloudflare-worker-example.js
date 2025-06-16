@@ -685,9 +685,9 @@ async function handleGA4Event(payload, request) {
   // Process the event data
   const processedData = processEventData(payload, request);
 
-  if (processedData.params.debug_mode) {
-    DEBUG_MODE = true;
-  }
+  // if (processedData.params.debug_mode) {
+  //   DEBUG_MODE = true;
+  // }
 
   // Log the incoming event data
   if (DEBUG_MODE) {
@@ -756,11 +756,14 @@ async function handleGA4Event(payload, request) {
       }
     );
   }
+  if(DEBUG_MODE){
+      console.log("Traffic Type:" + processedData.params.traffic_type);
+  }
   
   if (DEBUG_MODE) {
     console.log("Finished payload:" + JSON.stringify(ga4Payload));
   }
-  
+    
   // Send the event to GA4
   const ga4Response = await fetch(
     `${GA4_ENDPOINT}?measurement_id=${GA4_MEASUREMENT_ID}&api_secret=${GA4_API_SECRET}`,
@@ -779,12 +782,22 @@ async function handleGA4Event(payload, request) {
     throw new Error(`GA4 API error: ${ga4Response.status} ${errorText}`);
   }
 
+  // Get the response body from GA4 API
+  const ga4ResponseBody = await ga4Response.text();
+
+  // Log the GA4 API response
+  if (DEBUG_MODE) {
+    console.log("GA4 API Response Status:", ga4Response.status);
+    console.log("GA4 API Response Body:", ga4ResponseBody);
+  }
+
   // Return success response
   return new Response(
     JSON.stringify({
       "success": true,
       "event": processedData.name,
       "ga4_status": ga4Response.status,
+      "ga4_response": DEBUG_MODE ? ga4ResponseBody : undefined,
       "debug": DEBUG_MODE ? ga4Payload : undefined,
     }),
     {
@@ -802,124 +815,8 @@ async function handleGA4Event(payload, request) {
  * =============================================================================
  */
 
-/**
- * Build user identifiers for enhanced conversions
- */
-async function buildUserIdentifiers(conversionData) {
-  const userIdentifiers = [];
-
-  // Email identifier
-  if (conversionData.email) {
-    userIdentifiers.push({
-      "hashed_email": await hashString(conversionData.email.toLowerCase().trim()),
-    });
-  }
-
-  // Phone identifier
-  if (conversionData.phone) {
-    const normalizedPhone = normalizePhoneNumber(conversionData.phone);
-    if (normalizedPhone) {
-      userIdentifiers.push({
-        "hashed_phone_number": await hashString(normalizedPhone),
-      });
-    }
-  }
-
-  // Address information
-  if (
-    conversionData.first_name ||
-    conversionData.last_name ||
-    conversionData.street_address
-  ) {
-    const addressInfo = {};
-
-    if (conversionData.first_name) {
-      addressInfo.hashed_first_name = await hashString(
-        conversionData.first_name.toLowerCase().trim()
-      );
-    }
-    if (conversionData.last_name) {
-      addressInfo.hashed_last_name = await hashString(
-        conversionData.last_name.toLowerCase().trim()
-      );
-    }
-    if (conversionData.street_address) {
-      addressInfo.hashed_street_address = await hashString(
-        conversionData.street_address.toLowerCase().trim()
-      );
-    }
-    if (conversionData.city) {
-      addressInfo.city = conversionData.city;
-    }
-    if (conversionData.region) {
-      addressInfo.state = conversionData.region;
-    }
-    if (conversionData.postal_code) {
-      addressInfo.postal_code = conversionData.postal_code;
-    }
-    if (conversionData.country) {
-      addressInfo.country_code = conversionData.country;
-    }
-
-    if (Object.keys(addressInfo).length > 0) {
-      userIdentifiers.push({
-        "address_info": addressInfo,
-      });
-    }
-  }
-
-  return userIdentifiers;
-}
-
-/**
- * Send event to GA4
- */
-async function sendEventToGA4(eventData, clientId) {
-  const ga4Payload = {
-    "client_id": clientId || generateClientId(),
-    "events": [eventData],
-  };
-
-  const response = await fetch(
-    `${GA4_ENDPOINT}?measurement_id=${GA4_MEASUREMENT_ID}&api_secret=${GA4_API_SECRET}`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(ga4Payload),
-    }
-  );
-
-  if (!response.ok) {
-    throw new Error(`GA4 API error: ${response.status}`);
-  }
-
-  return true;
-}
-
-/**
- * Hash a string using SHA-256
- */
-async function hashString(str) {
-  if (!str) return "";
-
-  const encoder = new TextEncoder();
-  const data = encoder.encode(str);
-  const hashBuffer = await crypto.subtle.digest("SHA-256", data);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
-}
 
 
-/**
- * Generate a client ID
- */
-function generateClientId() {
-  return (
-    Math.round(2147483647 * Math.random()) + "." + Math.round(Date.now() / 1000)
-  );
-}
 
 /**
  * Get continent and subcontinent info based on country code
