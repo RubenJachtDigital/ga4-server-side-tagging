@@ -233,15 +233,6 @@ function checkWordPressBotData(botData) {
     suspiciousPatterns.push('no_javascript');
   }
 
-  // Check user interaction - ENHANCED
-  if (botData.user_interaction_detected === false) {
-    suspiciousPatterns.push('no_user_interaction');
-  }
-
-  // Check suspicious timing patterns - ADJUSTED
-  if (botData.page_load_time && parseInt(botData.page_load_time) < 50) {
-    suspiciousPatterns.push('suspiciously_fast_load');
-  }
 
   // Check engagement time - ADJUSTED
   if (botData.engagement_calculated && parseInt(botData.engagement_calculated) < 500) {
@@ -252,22 +243,7 @@ function checkWordPressBotData(botData) {
   var screenWidth = parseInt(botData.screen_available_width);
   var screenHeight = parseInt(botData.screen_available_height);
   if (screenWidth && screenHeight) {
-    // Check for exact common bot resolutions
-    var commonBotResolutions = [
-      { w: 1024, h: 768 }, { w: 1366, h: 768 }, { w: 1920, h: 1080 },
-      { w: 800, h: 600 }, { w: 1280, h: 720 }, { w: 1440, h: 900 },
-      { w: 1280, h: 1024 }, { w: 1600, h: 900 }, { w: 1920, h: 1200 }
-    ];
-    
-    var isCommonBotRes = commonBotResolutions.some(function(res) {
-      return res.w === screenWidth && res.h === screenHeight;
-    });
-    
-    // Also check for suspiciously perfect dimensions
-    if (isCommonBotRes || (screenWidth % 100 === 0 && screenHeight % 100 === 0)) {
-      suspiciousPatterns.push('suspicious_screen_resolution');
-    }
-    
+  
     // Check for impossible dimensions
     if (screenWidth < 320 || screenHeight < 240 || screenWidth > 7680 || screenHeight > 4320) {
       suspiciousPatterns.push('impossible_screen_dimensions');
@@ -297,12 +273,6 @@ function checkWordPressBotData(botData) {
     suspiciousPatterns.push('suspicious_timezone');
   }
 
-  // Platform consistency check
-  if (botData.platform && botData.device_type) {
-    if (botData.platform.includes('Linux') && !botData.platform.includes('Android') && botData.device_type === 'mobile') {
-      suspiciousPatterns.push('platform_device_mismatch');
-    }
-  }
 
   // Require fewer patterns for bot detection
   if (suspiciousPatterns.length >= 2) {
@@ -338,11 +308,6 @@ function checkBehaviorPatterns(botData, params) {
   if (params.engagement_time_msec) {
     var engagementTime = parseInt(params.engagement_time_msec);
     
-    // Check for suspiciously perfect engagement times
-    if (engagementTime % 1000 === 0 && engagementTime < 10000) {
-      suspiciousPatterns.push('perfect_engagement_time');
-    }
-    
     // Check for impossible fast engagement
     if (engagementTime < 100) {
       suspiciousPatterns.push('impossible_fast_engagement');
@@ -367,13 +332,6 @@ function checkBehaviorPatterns(botData, params) {
     }
   }
 
-  // Session patterns
-  if (params.session_count && parseInt(params.session_count) === 1) {
-    // First session - check if behavior is too perfect
-    if (suspiciousPatterns.length >= 1) {
-      suspiciousPatterns.push('suspicious_first_session');
-    }
-  }
 
   if (suspiciousPatterns.length >= 2) {
     return { isBot: true, reason: 'behavior_patterns: ' + suspiciousPatterns.join(', ') };
@@ -501,13 +459,6 @@ function checkEventData(payload) {
     suspiciousPatterns.push('very_short_engagement');
   }
 
-  // Perfect timestamp patterns (bots often have regular timing)
-  if (params.event_timestamp) {
-    var timestamp = parseInt(params.event_timestamp);
-    if (timestamp % 10 === 0) {
-      suspiciousPatterns.push('round_timestamp');
-    }
-  }
 
   // Suspicious screen resolutions common to headless browsers
   const botResolutions = ['1024x768', '1366x768', '1920x1080', '800x600', '1280x720'];
