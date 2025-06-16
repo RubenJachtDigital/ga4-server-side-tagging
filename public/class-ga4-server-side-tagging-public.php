@@ -143,14 +143,15 @@ class GA4_Server_Side_Tagging_Public
         } else {
             $script_data['isThankYouPage'] = false;
         }
+        if (method_exists('\CompuactEudonetAPI\Functions\CustomFunctions', 'get_raq_cart_data')) {
 
-        if (!empty($this->get_raq_cart_data())) {
-            $quote_data = $this->get_order_quote_data_for_tracking();
-            $this->logger->info('Quote data:' . json_encode($quote_data));
-            $script_data['quoteData'] = $quote_data;
-            $this->logger->info('Added quote data for request a quote event tracking. Order ID: ' . $quote_data['transaction_id']);
+            if (!empty(\CompuactEudonetAPI\Functions\CustomFunctions::get_raq_cart_data())) {
+                $quote_data = $this->get_order_quote_data_for_tracking();
+                $this->logger->info('Quote data:' . json_encode($quote_data));
+                $script_data['quoteData'] = $quote_data;
+                $this->logger->info('Added quote data for request a quote event tracking. Order ID: ' . $quote_data['transaction_id']);
+            }
         }
-
         // Pass data to the script
         wp_localize_script(
             'ga4-server-side-tagging-public',
@@ -471,43 +472,6 @@ class GA4_Server_Side_Tagging_Public
         return $order_data;
     }
 
-    public function get_transient_user_id()
-    {
-        // Get the user's IP address
-        $user_ip = $_SERVER['REMOTE_ADDR'];
-
-        // Optionally, you can add the User-Agent string to make the key more unique
-        $user_agent = $_SERVER['HTTP_USER_AGENT'];
-
-        // Combine IP and User-Agent to create a more unique key
-        $unique_key = md5($user_ip . $user_agent);
-
-        // Generate a unique transient key for the user based on IP/User-Agent
-        $transient_key = 'custom_raq_compuact_cart_' . $unique_key;
-        return $transient_key;
-    }
-
-    public function get_raq_cart_data()
-    {
-        $transient_key = $this->get_transient_user_id();
-        // Retrieve the stored product clicks for the specific user/session
-        $product_clicks = get_transient($transient_key);
-
-        if ($product_clicks !== false && is_array($product_clicks)) {
-            $results = [];
-            foreach ($product_clicks as $variation_id) {
-                // Get the parent product ID for the variation
-                $parent_id = wp_get_post_parent_id($variation_id);
-                $results[] = [
-                    'variation_id' => $variation_id,
-                    'parent_id' => $parent_id ? $parent_id : $variation_id,
-                ];
-            }
-            return $results;
-        }
-        return [];
-    }
-
     private function get_order_quote_data_for_tracking()
     {
         $total = 0;
@@ -515,8 +479,11 @@ class GA4_Server_Side_Tagging_Public
         $order_number = date('ym') . sprintf('%08d', mt_rand(10000000, 99999999));
 
         $this->logger->info('Preparing quote data for request a quote event. Order #' . $order_number);
-
-        $cart_items = $this->get_raq_cart_data();
+        if (!class_exists('\CompuactEudonetAPI\Functions\CustomFunctions')) {
+            $this->logger->info('\CompuactEudonetAPI\Functions\CustomFunctions\ Doesnt exist');
+            return;
+        }
+        $cart_items = \CompuactEudonetAPI\Functions\CustomFunctions::get_raq_cart_data();
 
         // Log cart items for debugging
         $this->logger->info('Quote cart items retrieved', [
@@ -704,7 +671,7 @@ class GA4_Server_Side_Tagging_Public
         if (!empty($product_tags)) {
             $product_data['item_tags'] = implode(', ', array_slice($product_tags, 0, 5)); // Limit to 5 tags
         }
- 
+
         // Remove empty values to keep the data clean
         $product_data = array_filter($product_data, function ($value) {
             return $value !== '' && $value !== null && $value !== 0;
