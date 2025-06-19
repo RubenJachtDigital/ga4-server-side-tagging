@@ -799,7 +799,7 @@ async function handleRequest(request) {
 async function handleGA4Event(payload, request) {
   // Process the event data
   const processedData = processEventData(payload, request);
-
+  var analytics_storage_temp;
   // Log the incoming event data
   if (DEBUG_MODE) {
     console.log("Received GA4 event:", JSON.stringify(payload));
@@ -865,8 +865,9 @@ async function handleGA4Event(payload, request) {
     // Remove from params to avoid duplication
     delete processedData.params.user_id;
   }
-  
+
   if(ga4Payload.consent.analytics_storage){
+    analytics_storage_temp = ga4Payload.consent.analytics_storage;
     delete ga4Payload.consent.analytics_storage;
   }
 
@@ -893,7 +894,7 @@ async function handleGA4Event(payload, request) {
     }
     
     // Log consent mode for tracking
-    const consentMode = ga4Payload.consent?.analytics_storage || 'unknown';
+    const consentMode = ga4Payload.consent?.analytics_storage_temp || 'unknown';
     console.log("Sending event with consent mode:", consentMode);
   }
   
@@ -937,7 +938,7 @@ async function handleGA4Event(payload, request) {
       "ga4_response": DEBUG_MODE ? ga4ResponseBody : undefined,
       "debug": DEBUG_MODE ? ga4Payload : undefined,
       "consent_applied": ga4Payload.consent ? true : false,
-      "consent_mode": ga4Payload.consent?.analytics_storage || 'unknown'
+      "consent_mode": ga4Payload.consent?.analytics_storage_temp || 'unknown'
     }),
     {
       headers: {
