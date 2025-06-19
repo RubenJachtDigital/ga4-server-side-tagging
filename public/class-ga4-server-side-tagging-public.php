@@ -109,7 +109,6 @@ class GA4_Server_Side_Tagging_Public
             'measurementId' => $measurement_id,
             'useServerSide' => get_option('ga4_use_server_side', true),
             'debugMode' => get_option('ga4_server_side_tagging_debug_mode', false),
-            'anonymizeIp' => get_option('ga4_anonymize_ip', true),
             'ga4TrackLoggedInUsers' => get_option('ga4_track_logged_in_users', true),
             'apiEndpoint' => rest_url('ga4-server-side-tagging/v1/collect'),
             'nonce' => wp_create_nonce('wp_rest'),
@@ -204,7 +203,6 @@ class GA4_Server_Side_Tagging_Public
 
         // Get settings
         $use_server_side = get_option('ga4_use_server_side', true);
-        $anonymize_ip = get_option('ga4_anonymize_ip', true);
         $debug_mode = get_option('ga4_server_side_tagging_debug_mode', false);
         $cloudflare_worker_url = get_option('ga4_cloudflare_worker_url', '');
 
@@ -237,9 +235,7 @@ class GA4_Server_Side_Tagging_Public
                 dataLayer.push(arguments);
             }
             gtag('js', new Date());
-            <?php if ($anonymize_ip): ?>
-                gtag('set', 'anonymize_ip', true);
-            <?php endif; ?>
+         
 
             <?php if ($debug_mode): ?>
                 gtag('config', '<?php echo esc_js($measurement_id); ?>', {

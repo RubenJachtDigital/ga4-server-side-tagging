@@ -1790,7 +1790,7 @@
 
       // Add user ID if available and consent allows
       if (!params.hasOwnProperty("user_id") && this.config.user_id) {
-        if (consentData.analytics_storage === "granted") {
+        if (consentData.analytics_storage === "GRANTED") {
           params.user_id = this.config.user_id;
         }
       }
@@ -1888,7 +1888,7 @@
 
       this.log("Sending to endpoint: " + endpoint, {
         consent: consentData,
-        anonymized: consentData.analytics_storage !== "granted",
+        anonymized: consentData.analytics_storage !== "GRANTED",
         eventName: eventName
       });
 
@@ -1907,7 +1907,7 @@
     }
     
     // Fallback implementation
-    if (consentData.analytics_storage === "granted") {
+    if (consentData.analytics_storage === "GRANTED") {
       return GA4Utils.clientId.get();
     } else {
       var sessionId = GA4Utils.session.get().id;
@@ -1919,9 +1919,7 @@
    * Add location data considering consent
    */
   addLocationDataWithConsent: async function(params, consentData) {
-    if (consentData.analytics_storage === "granted") {
-      // Full consent - use IP-based location if IP anonymization is disabled
-      if (this.config.anonymizeIp !== true) {
+    if (consentData.analytics_storage === "GRANTED") {
         try {
           const locationData = await this.getUserLocation();
           if (locationData) {
@@ -1934,20 +1932,7 @@
         } catch (error) {
           this.log("Location tracking error:", error);
         }
-      } else {
-        // IP anonymization enabled - only timezone info
-        try {
-          const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-          if (timezone) {
-            const timezoneRegions = timezone.split("/");
-            if (timezoneRegions.length > 0) {
-              params.geo_continent = timezoneRegions[0] || "";
-            }
-          }
-        } catch (e) {
-          this.log("Error getting timezone info:", e);
-        }
-      }
+      
     } else {
       // No analytics consent - only continent-level location via timezone
       try {
@@ -1971,7 +1956,7 @@
   applyGDPRAnonymization: function(params, consentData) {
     var anonymizedParams = JSON.parse(JSON.stringify(params));
 
-    if (consentData.analytics_storage === "denied") {
+    if (consentData.analytics_storage === "DENIED") {
       // Remove/anonymize personal data
       delete anonymizedParams.user_id;
       
@@ -1988,7 +1973,7 @@
       delete anonymizedParams.geo_country;
     }
 
-    if (consentData.ad_storage === "denied") {
+    if (consentData.ad_storage === "DENIED") {
       // Remove advertising/attribution data
       delete anonymizedParams.gclid;
       delete anonymizedParams.content;
@@ -2047,25 +2032,6 @@
      * Add location data to event parameters
      */
     addLocationData: async function (params) {
-      // Check if IP anonymization is enabled
-      if (this.config.anonymizeIp == true) {
-        this.log(
-          "IP anonymization is enabled - skipping IP-based location tracking"
-        );
-
-        // Use timezone-based general region information instead
-        try {
-          const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-          if (timezone) {
-            const timezoneRegions = timezone.split("/");
-            if (timezoneRegions.length > 0) {
-              params.continent = timezoneRegions[0] || "";
-            }
-          }
-        } catch (e) {
-          this.log("Error getting timezone info:", e);
-        }
-      } else {
         try {
           // Get user location information
           const locationData = await this.getUserLocation();
@@ -2083,7 +2049,6 @@
         } catch (error) {
           this.log("Location tracking error:", error);
         }
-      }
     },
 
 

@@ -171,18 +171,6 @@ class GA4_Server_Side_Tagging_Admin
 
         register_setting(
             'ga4_server_side_tagging_settings',
-            'ga4_anonymize_ip',
-            array(
-                'type' => 'boolean',
-                'description' => 'Anonymize IP addresses',
-                'sanitize_callback' => array($this, 'sanitize_checkbox'),
-                'show_in_rest' => false,
-                'default' => true,
-            )
-        );
-
-        register_setting(
-            'ga4_server_side_tagging_settings',
             'ga4_ecommerce_tracking',
             array(
                 'type' => 'boolean',
@@ -332,7 +320,6 @@ class GA4_Server_Side_Tagging_Admin
         $use_server_side = get_option('ga4_use_server_side', true);
         $debug_mode = get_option('ga4_server_side_tagging_debug_mode', false);
         $track_logged_in_users = get_option('ga4_track_logged_in_users', true);
-        $anonymize_ip = get_option('ga4_anonymize_ip', true);
         $ecommerce_tracking = get_option('ga4_ecommerce_tracking', true);
         $cloudflare_worker_url = get_option('ga4_cloudflare_worker_url', '');
         $yith_raq_form_id = get_option('ga4_yith_raq_form_id', '');
@@ -410,7 +397,6 @@ class GA4_Server_Side_Tagging_Admin
         update_option('ga4_use_server_side', isset($_POST['ga4_use_server_side']));
         update_option('ga4_server_side_tagging_debug_mode', isset($_POST['ga4_server_side_tagging_debug_mode']));
         update_option('ga4_track_logged_in_users', isset($_POST['ga4_track_logged_in_users']));
-        update_option('ga4_anonymize_ip', isset($_POST['ga4_anonymize_ip']));
         update_option('ga4_ecommerce_tracking', isset($_POST['ga4_ecommerce_tracking']));
 
         // GDPR Consent settings

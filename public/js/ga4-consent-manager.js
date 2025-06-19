@@ -263,13 +263,13 @@
       this.clearConsentTimeout();
       
       var consent = {
-        analytics_storage: 'granted',
-        ad_storage: 'granted',
-        ad_user_data: 'granted',
-        ad_personalization: 'granted',
-        functionality_storage: 'granted',
-        personalization_storage: 'granted',
-        security_storage: 'granted',
+        analytics_storage: 'GRANTED',
+        ad_storage: 'GRANTED',
+        ad_user_data: 'GRANTED',
+        ad_personalization: 'GRANTED',
+        functionality_storage: 'GRANTED',
+        personalization_storage: 'GRANTED',
+        security_storage: 'GRANTED',
         timestamp: Date.now()
       };
 
@@ -296,13 +296,13 @@
       this.clearConsentTimeout();
       
       var consent = {
-        analytics_storage: 'denied',
-        ad_storage: 'denied',
-        ad_user_data: 'denied',
-        ad_personalization: 'denied',
-        functionality_storage: 'denied',
-        personalization_storage: 'denied',
-        security_storage: 'granted',
+        analytics_storage: 'DENIED',
+        ad_storage: 'DENIED',
+        ad_user_data: 'DENIED',
+        ad_personalization: 'DENIED',
+        functionality_storage: 'DENIED',
+        personalization_storage: 'DENIED',
+        security_storage: 'GRANTED',
         timestamp: Date.now()
       };
 
@@ -352,13 +352,13 @@
     initializeConsentMode: function () {
       if (typeof gtag === 'function') {
         gtag('consent', 'default', {
-          analytics_storage: 'denied',
-          ad_storage: 'denied',
-          ad_user_data: 'denied',
-          ad_personalization: 'denied',
-          functionality_storage: 'denied',
-          personalization_storage: 'denied',
-          security_storage: 'granted',
+          analytics_storage: 'DENIED',
+          ad_storage: 'DENIED',
+          ad_user_data: 'DENIED',
+          ad_personalization: 'DENIED',
+          functionality_storage: 'DENIED',
+          personalization_storage: 'DENIED',
+          security_storage: 'GRANTED',
           wait_for_update: 30000 // Wait 30 seconds for consent update
         });
 
@@ -421,26 +421,26 @@
 
       if (!consent) {
         return {
-          analytics_storage: "denied",
-          ad_storage: "denied",
-          ad_user_data: "denied",
-          ad_personalization: "denied",
-          functionality_storage: "denied",
-          personalization_storage: "denied",
-          security_storage: "granted",
-          consent_mode: "denied",
+          analytics_storage: "DENIED",
+          ad_storage: "DENIED",
+          ad_user_data: "DENIED",
+          ad_personalization: "DENIED",
+          functionality_storage: "DENIED",
+          personalization_storage: "DENIED",
+          security_storage: "GRANTED",
+          consent_mode: "DENIED",
           consent_timestamp: null,
         };
       }
 
       return {
-        analytics_storage: consent.analytics_storage || "denied",
-        ad_storage: consent.ad_storage || "denied",
-        ad_user_data: consent.ad_user_data || "denied",
-        ad_personalization: consent.ad_personalization || "denied",
-        functionality_storage: consent.functionality_storage || "denied",
-        personalization_storage: consent.personalization_storage || "denied",
-        security_storage: consent.security_storage || "granted",
+        analytics_storage: consent.analytics_storage || "DENIED",
+        ad_storage: consent.ad_storage || "DENIED",
+        ad_user_data: consent.ad_user_data || "DENIED",
+        ad_personalization: consent.ad_personalization || "DENIED",
+        functionality_storage: consent.functionality_storage || "DENIED",
+        personalization_storage: consent.personalization_storage || "DENIED",
+        security_storage: consent.security_storage || "GRANTED",
         consent_mode: this.getConsentMode(),
         consent_timestamp: consent.timestamp,
       };
@@ -451,7 +451,7 @@
      */
     isAnalyticsAllowed: function () {
       var consent = this.getStoredConsent();
-      return consent && consent.analytics_storage === 'granted';
+      return consent && consent.analytics_storage === 'GRANTED';
     },
 
     /**
@@ -459,7 +459,7 @@
      */
     isAdvertisingAllowed: function () {
       var consent = this.getStoredConsent();
-      return consent && consent.ad_storage === 'granted';
+      return consent && consent.ad_storage === 'GRANTED';
     },
 
     /**
@@ -472,10 +472,10 @@
         return 'unknown';
       }
       
-      if (consent.analytics_storage === 'granted' && consent.ad_storage === 'granted') {
-        return 'granted';
-      } else if (consent.analytics_storage === 'denied' && consent.ad_storage === 'denied') {
-        return 'denied';
+      if (consent.analytics_storage === 'GRANTED' && consent.ad_storage === 'GRANTED') {
+        return 'GRANTED';
+      } else if (consent.analytics_storage === 'DENIED' && consent.ad_storage === 'DENIED') {
+        return 'DENIED';
       } else {
         return 'partial';
       }
@@ -487,7 +487,7 @@
     getConsentAwareClientId: function() {
       var consent = this.getConsentForServerSide();
       
-      if (consent.analytics_storage === "granted") {
+      if (consent.analytics_storage === "GRANTED") {
         return GA4Utils.clientId.get();
       } else {
         // Use session-based client ID for denied consent
@@ -503,7 +503,7 @@
       var consent = this.getConsentForServerSide();
       var anonymizedParams = JSON.parse(JSON.stringify(params));
 
-      if (consent.analytics_storage === "denied") {
+      if (consent.analytics_storage === "DENIED") {
         // Remove/anonymize personal data
         delete anonymizedParams.user_id;
         
@@ -520,7 +520,7 @@
         delete anonymizedParams.geo_country;
       }
 
-      if (consent.ad_storage === "denied") {
+      if (consent.ad_storage === "DENIED") {
         // Remove advertising/attribution data
         delete anonymizedParams.gclid;
         delete anonymizedParams.content;

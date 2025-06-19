@@ -38,21 +38,21 @@ function processGDPRConsent(payload) {
   }
 
   // Apply consent-based data filtering
-  if (consent.analytics_storage === "denied") {
+  if (consent.analytics_storage === "DENIED") {
     payload = applyAnalyticsConsentDenied(payload);
   }
 
-  if (consent.ad_storage === "denied") {
+  if (consent.ad_storage === "DENIED") {
     payload = applyAdvertisingConsentDenied(payload);
   }
 
   // Add consent signals to the GA4 payload at the top level
   if (Object.keys(consent).length > 0) {
     payload.consent = {
-      analytics_storage: consent.analytics_storage || "denied",
-      ad_storage: consent.ad_storage || "denied",
-      ad_user_data: consent.ad_user_data || "denied",
-      ad_personalization: consent.ad_personalization || "denied"
+      analytics_storage: consent.analytics_storage || "DENIED",
+      ad_storage: consent.ad_storage || "DENIED",
+      ad_user_data: consent.ad_user_data || "DENIED",
+      ad_personalization: consent.ad_personalization || "DENIED"
     };
   }
 
@@ -865,7 +865,24 @@ async function handleGA4Event(payload, request) {
     // Remove from params to avoid duplication
     delete processedData.params.user_id;
   }
-
+  if(ga4Payload.consent.ad_storage){
+    delete ga4Payload.consent.ad_storage;
+  }
+  if(ga4Payload.consent.functionality_storage){
+    delete ga4Payload.consent.functionality_storage;
+  }
+  if(ga4Payload.consent.personalization_storage){
+    delete ga4Payload.consent.personalization_storage;
+  }
+  if(ga4Payload.consent.security_storage){
+    delete ga4Payload.consent.security_storage;
+  }
+    if(ga4Payload.consent.consent_mode){
+    delete ga4Payload.consent.consent_mode;
+  }
+  if(ga4Payload.consent.consent_timestamp){
+    delete ga4Payload.consent.consent_timestamp;
+  }
   if(ga4Payload.consent.analytics_storage){
     analytics_storage_temp = ga4Payload.consent.analytics_storage;
     delete ga4Payload.consent.analytics_storage;

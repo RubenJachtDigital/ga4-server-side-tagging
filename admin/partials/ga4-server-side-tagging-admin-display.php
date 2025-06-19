@@ -137,17 +137,6 @@ if (!defined('WPINC')) {
                             </td>
                         </tr>
                         <tr>
-                            <th scope="row">IP Anonymization</th>
-                            <td>
-                                <label for="ga4_anonymize_ip">
-                                    <input type="checkbox" id="ga4_anonymize_ip" name="ga4_anonymize_ip" <?php checked($anonymize_ip); ?> />
-                                    Anonymize IP addresses
-                                </label>
-                                <p class="description">Anonymize user IP addresses for GDPR compliance.(Only tracks
-                                    continent when enabled)</p>
-                            </td>
-                        </tr>
-                        <tr>
                             <th scope="row">Debug Mode</th>
                             <td>
                                 <label for="ga4_server_side_tagging_debug_mode">
