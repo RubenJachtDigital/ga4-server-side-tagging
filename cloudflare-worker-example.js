@@ -49,6 +49,7 @@ function processGDPRConsent(payload) {
   // Add consent signals to the GA4 payload at the top level
   if (Object.keys(consent).length > 0) {
     payload.consent = {
+      analytics_storage: consent.analytics_storage || "denied",
       ad_storage: consent.ad_storage || "denied",
       ad_user_data: consent.ad_user_data || "denied",
       ad_personalization: consent.ad_personalization || "denied"
@@ -427,8 +428,32 @@ function checkBehaviorPatterns(botData, params) {
     }
   }
 
+  // Perfect timing patterns (bots often have regular intervals)
+  if (params.event_timestamp) {
+    var timestamp = parseInt(params.event_timestamp);
+    if (timestamp % 10 === 0 || timestamp % 60 === 0) {
+      suspiciousPatterns.push('round_timestamp');
+    }
+  }
 
+  // Enhanced engagement time analysis
+  if (params.engagement_time_msec) {
+    var engagementTime = parseInt(params.engagement_time_msec);
+    
+    // Check for impossible fast engagement
+    if (engagementTime < 100) {
+      suspiciousPatterns.push('impossible_fast_engagement');
+    }
+  }
 
+  // Check scroll percentage patterns (for scroll events)
+  if (params.percent_scrolled) {
+    var scrollPercent = parseInt(params.percent_scrolled);
+    // Bots often have perfect scroll percentages
+    if ([25, 50, 75, 90, 100].includes(scrollPercent)) {
+      suspiciousPatterns.push('perfect_scroll_percentage');
+    }
+  }
 
   // Check timezone consistency
   if (botData.timezone) {
@@ -648,6 +673,7 @@ addEventListener("fetch", (event) => {
  * Handle the incoming request (ENHANCED WITH GDPR COMPLIANCE)
  * @param {Request} request
  */
+
 async function handleRequest(request) {
   // Handle CORS preflight requests
   if (request.method === "OPTIONS") {
@@ -668,6 +694,34 @@ async function handleRequest(request) {
 
     if (DEBUG_MODE) {
       console.log("Received payload:", JSON.stringify(payload));
+    }
+
+    // CONSENT VALIDATION - Check if consent data exists
+    const consentData = payload.params?.consent;
+    
+    if (!consentData || (!consentData.analytics_storage && !consentData.ad_storage)) {
+      if (DEBUG_MODE) {
+        console.log("No consent data found - rejecting event");
+      }
+      
+      return new Response(
+        JSON.stringify({
+          success: false,
+          error: "No consent data provided",
+          gdpr_processed: false
+        }),
+        {
+          status: 400,
+          headers: {
+            "Content-Type": "application/json",
+            ...getCORSHeaders(request),
+          },
+        }
+      );
+    }
+
+    if (DEBUG_MODE) {
+      console.log("Consent validation passed:", JSON.stringify(consentData));
     }
 
     // GDPR CONSENT PROCESSING - Apply before bot detection
@@ -811,10 +865,7 @@ async function handleGA4Event(payload, request) {
     // Remove from params to avoid duplication
     delete processedData.params.user_id;
   }
-  
-  if(ga4Payload.consent.analytics_storage){
-    delete ga4Payload.consent.analytics_storage;
-  }
+
   // Check if params exceeds 25
   const payloadParamsCount = Object.keys(processedData.params).length;
   if (payloadParamsCount > 25) {

@@ -13,37 +13,71 @@
     // Configuration
     config: window.ga4ServerSideTagging || {},
     pageStartTime: Date.now(),
+    consentReady: false,
 
-  init: function () {
-    // Check if we have the required configuration
-    if (!this.config.measurementId) {
-      this.log("Measurement ID not configured");
-      return;
-    }
-    if (this.config.ga4TrackLoggedInUsers != true) {
-      this.log("Not tracking logged in users");
-      return;
-    }
+    init: function () {
+      // Check if we have the required configuration
+      if (!this.config.measurementId) {
+        this.log("Measurement ID not configured");
+        return;
+      }
+      if (this.config.ga4TrackLoggedInUsers != true) {
+        this.log("Not tracking logged in users");
+        return;
+      }
 
-    // Initialize GDPR Consent Manager
+      // Initialize GDPR Consent System FIRST
+      this.initializeConsentSystem();
+
+      // Set up event listeners (these will queue events until consent is ready)
+      this.setupEventListeners();
+
+      // Log initialization
+      this.log(
+        "%c GA4 Server-Side Tagging initialized v5 ",
+        "background: #4CAF50; color: white; font-size: 16px; font-weight: bold; padding: 8px 12px; border-radius: 4px;"
+      );
+  },
+
+  /**
+   * Initialize consent system
+   */
+  initializeConsentSystem: function() {
+    var self = this;
+    
     if (this.config.consentSettings && this.config.consentSettings.consentModeEnabled) {
-      GA4ConsentManager.init(this.config.consentSettings);
-      this.log("GDPR Consent Manager initialized", this.config.consentSettings);
+      // Initialize consent manager with reference to this tracking instance
+      if (window.GA4ConsentManager && typeof window.GA4ConsentManager.init === 'function') {
+        window.GA4ConsentManager.init(this.config.consentSettings, this);
+        
+        // Listen for consent updates
+        $(document).on('ga4ConsentUpdated', function(event, consent) {
+          self.log("Consent updated", consent);
+        });
+      } else {
+        this.log("GA4ConsentManager not available");
+        // If consent manager is not available, assume consent and start tracking
+        this.onConsentReady();
+      }
+    } else {
+      this.log("Consent mode disabled - starting tracking immediately");
+      // If consent mode is disabled, start tracking immediately
+      this.onConsentReady();
     }
+  },
 
+  /**
+   * Called when consent is ready (either given/denied or not required)
+   */
+  onConsentReady: function() {
+    this.consentReady = true;
+    this.log("Consent ready - starting tracking");
+    
     if (this.config.useServerSide == true) {
       this.trackPageView();
     }
-
-    // Set up event listeners
-    this.setupEventListeners();
-
-    // Log initialization
-    this.log(
-      "%c GA4 Server-Side Tagging initialized v3 ",
-      "background: #4CAF50; color: white; font-size: 16px; font-weight: bold; padding: 8px 12px; border-radius: 4px;"
-    );
   },
+  
     /**
      * REPLACE the existing trackPageView function with this enhanced version
      */
@@ -1691,12 +1725,10 @@
       });
     },
 
-    // Track an event
     trackEvent: function (eventName, eventParams = {}) {
-      // Log the event
       this.log("Tracking event: " + eventName, eventParams);
 
-      // Add debug_mode to event params if not already present
+      // Add debug_mode and timestamp if not present
       if (!eventParams.hasOwnProperty("debug_mode")) {
         if (Boolean(this.config.debugMode) === true) {
           eventParams.debug_mode = Boolean(this.config.debugMode);
@@ -1707,6 +1739,27 @@
         eventParams.event_timestamp = Math.floor(Date.now() / 1000);
       }
 
+      // Check consent status via consent manager
+      if (window.GA4ConsentManager && typeof window.GA4ConsentManager.shouldSendEvent === 'function') {
+        var shouldSend = window.GA4ConsentManager.shouldSendEvent(eventName, eventParams);
+        
+        if (!shouldSend) {
+          this.log("Event queued by consent manager: " + eventName);
+          return; // Event was queued, don't send now
+        }
+      } else if (!this.consentReady) {
+        this.log("Consent not ready, skipping event: " + eventName);
+        return;
+      }
+
+      // Send the event
+      this.trackEventInternal(eventName, eventParams);
+    },
+
+    /**
+     * Internal tracking method (bypasses consent check)
+     */
+    trackEventInternal: function(eventName, eventParams) {
       // Send server-side event if enabled
       if (this.config.useServerSide) {
         this.sendServerSideEvent(eventName, eventParams);
@@ -1716,136 +1769,155 @@
       }
     },
 
-    /**
-      * ENHANCED sendServerSideEvent function for WordPress Plugin
-      * Passes bot detection data to Cloudflare Worker
-    */
+  /**
+     * Enhanced sendServerSideEvent with consent handling
+     */
     sendServerSideEvent: async function (eventName, eventParams) {
-    // Create a copy of the event params
-    var params = JSON.parse(JSON.stringify(eventParams));
-    var session = GA4Utils.session.get();
+      // Create a copy of the event params
+      var params = JSON.parse(JSON.stringify(eventParams));
+      var session = GA4Utils.session.get();
 
-    // Get consent data FIRST (before any data processing)
-    var consentData = GA4Utils.consent.getForServerSide();
-    this.log("Current consent status", consentData);
-
-    // Add user ID if available and consent allows
-    if (!params.hasOwnProperty("user_id") && this.config.user_id) {
-      if (consentData.analytics_storage === "granted") {
-        params.user_id = this.config.user_id;
+      // Get consent data from consent manager
+      var consentData = null;
+      if (window.GA4ConsentManager && typeof window.GA4ConsentManager.getConsentForServerSide === 'function') {
+        consentData = window.GA4ConsentManager.getConsentForServerSide();
+      } else {
+        // Fallback to GA4Utils
+        consentData = GA4Utils.consent.getForServerSide();
       }
-      // If consent denied, we skip user_id (it will be handled in anonymization)
-    }
 
-    // Add session information
-    if (!params.hasOwnProperty("session_id")) {
-      params.session_id = session.id;
-    }
-    if (!params.hasOwnProperty("session_count")) {
-      params.session_count = session.sessionCount;
-    }
-    if (!params.hasOwnProperty("engagement_time_msec")) {
-      params.engagement_time_msec = GA4Utils.time.calculateEngagementTime(
-        session.start
+      this.log("Current consent status for server-side event", consentData);
+
+      // Add user ID if available and consent allows
+      if (!params.hasOwnProperty("user_id") && this.config.user_id) {
+        if (consentData.analytics_storage === "granted") {
+          params.user_id = this.config.user_id;
+        }
+      }
+
+      // Add session information
+      if (!params.hasOwnProperty("session_id")) {
+        params.session_id = session.id;
+      }
+      if (!params.hasOwnProperty("session_count")) {
+        params.session_count = session.sessionCount;
+      }
+      if (!params.hasOwnProperty("engagement_time_msec")) {
+        params.engagement_time_msec = GA4Utils.time.calculateEngagementTime(
+          session.start
+        );
+      }
+
+      // Handle location data based on consent
+      await this.addLocationDataWithConsent(params, consentData);
+
+      // Get client ID (handle consent-based anonymization)
+      var clientId = this.getConsentAwareClientId(consentData);
+      if (clientId) {
+        params.client_id = clientId;
+        this.log("Using client ID: " + clientId);
+      }
+
+      // Get user agent and client behavior data
+      var userAgentInfo = GA4Utils.device.parseUserAgent();
+      var clientBehavior = GA4Utils.botDetection.getClientBehaviorData();
+
+      // Perform bot detection
+      var botDetectionResult = GA4Utils.botDetection.isBot(
+        userAgentInfo,
+        params,
+        clientBehavior
       );
-    }
 
-    // Handle location data based on consent
-    await this.addLocationDataWithConsent(params, consentData);
+      if (botDetectionResult) {
+        this.log("Bot detected in sendServerSideEvent - aborting send", {
+          eventName: eventName,
+          userAgent: userAgentInfo.user_agent,
+          geoLocation: `${params.geo_city}, ${params.geo_country}`,
+          botScore: GA4Utils.botDetection.calculateBotScore(
+            userAgentInfo,
+            clientBehavior
+          ),
+        });
+        return; // Don't send bot traffic
+      }
 
-    // Get client ID (handle consent-based anonymization)
-    var clientId = this.getConsentAwareClientId(consentData);
-    if (clientId) {
-      params.client_id = clientId;
-      this.log("Using client ID: " + clientId);
-    }
-
-    // Get user agent and client behavior data
-    var userAgentInfo = GA4Utils.device.parseUserAgent();
-    var clientBehavior = GA4Utils.botDetection.getClientBehaviorData();
-
-    // Perform bot detection
-    var botDetectionResult = GA4Utils.botDetection.isBot(
-      userAgentInfo,
-      params,
-      clientBehavior
-    );
-
-    if (botDetectionResult) {
-      this.log("Bot detected in sendServerSideEvent - aborting send", {
-        eventName: eventName,
-        userAgent: userAgentInfo.user_agent,
-        geoLocation: `${params.geo_city}, ${params.geo_country}`,
-        botScore: GA4Utils.botDetection.calculateBotScore(
+      // Add bot detection data for Cloudflare Worker analysis
+      params.botData = {
+        user_agent_full: userAgentInfo.user_agent,
+        browser_name: userAgentInfo.browser_name,
+        device_type: userAgentInfo.device_type,
+        is_mobile: userAgentInfo.is_mobile,
+        has_javascript: clientBehavior.hasJavaScript,
+        screen_available_width: clientBehavior.screenAvailWidth,
+        screen_available_height: clientBehavior.screenAvailHeight,
+        color_depth: clientBehavior.colorDepth,
+        pixel_depth: clientBehavior.pixelDepth,
+        timezone: clientBehavior.timezone,
+        platform: clientBehavior.platform,
+        cookie_enabled: clientBehavior.cookieEnabled,
+        hardware_concurrency: clientBehavior.hardwareConcurrency,
+        max_touch_points: clientBehavior.maxTouchPoints,
+        webdriver_detected: clientBehavior.webdriver,
+        has_automation_indicators: clientBehavior.hasAutomationIndicators,
+        page_load_time: clientBehavior.pageLoadTime,
+        user_interaction_detected: clientBehavior.hasInteracted,
+        bot_score: GA4Utils.botDetection.calculateBotScore(
           userAgentInfo,
           clientBehavior
         ),
+      };
+
+      // Apply GDPR anonymization based on consent
+      if (window.GA4ConsentManager && typeof window.GA4ConsentManager.applyGDPRAnonymization === 'function') {
+        params = window.GA4ConsentManager.applyGDPRAnonymization(params);
+      } else {
+        params = this.applyGDPRAnonymization(params, consentData);
+      }
+
+      // Add consent data to the payload
+      params.consent = consentData;
+
+      // Determine endpoint
+      var endpoint = this.config.cloudflareWorkerUrl || this.config.apiEndpoint;
+
+      if (!endpoint) {
+        this.log("No server-side endpoint configured");
+        return;
+      }
+
+      this.log("Sending to endpoint: " + endpoint, {
+        consent: consentData,
+        anonymized: consentData.analytics_storage !== "granted",
+        eventName: eventName
       });
-      return; // Don't send bot traffic
-    }
 
-    // Add bot detection data for Cloudflare Worker analysis
-    params.botData = {
-      user_agent_full: userAgentInfo.user_agent,
-      browser_name: userAgentInfo.browser_name,
-      device_type: userAgentInfo.device_type,
-      is_mobile: userAgentInfo.is_mobile,
-      has_javascript: clientBehavior.hasJavaScript,
-      screen_available_width: clientBehavior.screenAvailWidth,
-      screen_available_height: clientBehavior.screenAvailHeight,
-      color_depth: clientBehavior.colorDepth,
-      pixel_depth: clientBehavior.pixelDepth,
-      timezone: clientBehavior.timezone,
-      platform: clientBehavior.platform,
-      cookie_enabled: clientBehavior.cookieEnabled,
-      hardware_concurrency: clientBehavior.hardwareConcurrency,
-      max_touch_points: clientBehavior.maxTouchPoints,
-      webdriver_detected: clientBehavior.webdriver,
-      has_automation_indicators: clientBehavior.hasAutomationIndicators,
-      page_load_time: clientBehavior.pageLoadTime,
-      user_interaction_detected: clientBehavior.hasInteracted,
-      bot_score: GA4Utils.botDetection.calculateBotScore(
-        userAgentInfo,
-        clientBehavior
-      ),
-    };
+      // Format data based on endpoint type
+      var data = this.formatEventData(eventName, params, endpoint);
+      this.sendAjaxPayload(endpoint, data);
+    },
 
-    // Apply GDPR anonymization based on consent
-    params = this.applyGDPRAnonymization(params, consentData);
 
-    // Add consent data to the payload
-    params.consent = consentData;
-
-    // Determine endpoint
-    var endpoint = this.config.cloudflareWorkerUrl || this.config.apiEndpoint;
-
-    if (!endpoint) {
-      this.log("No server-side endpoint configured");
-      return;
-    }
-
-    this.log("Sending to endpoint: " + endpoint, {
-      consent: consentData,
-      anonymized: consentData.analytics_storage !== "granted"
-    });
-
-    // Format data based on endpoint type
-    var data = this.formatEventData(eventName, params, endpoint);
-    this.sendAjaxPayload(endpoint, data);
-  },
-  // NEW METHOD: Get consent-aware client ID
+  /**
+   * Get consent-aware client ID
+   */
   getConsentAwareClientId: function(consentData) {
+    if (window.GA4ConsentManager && typeof window.GA4ConsentManager.getConsentAwareClientId === 'function') {
+      return window.GA4ConsentManager.getConsentAwareClientId();
+    }
+    
+    // Fallback implementation
     if (consentData.analytics_storage === "granted") {
-      // Full consent - use persistent client ID
       return GA4Utils.clientId.get();
     } else {
-      // No consent - use session-based client ID
       var sessionId = GA4Utils.session.get().id;
       return "session_" + sessionId;
     }
   },
 
-  // NEW METHOD: Add location data considering consent
+  /**
+   * Add location data considering consent
+   */
   addLocationDataWithConsent: async function(params, consentData) {
     if (consentData.analytics_storage === "granted") {
       // Full consent - use IP-based location if IP anonymization is disabled
@@ -1893,7 +1965,9 @@
     }
   },
 
-  // NEW METHOD: Apply GDPR anonymization
+  /**
+   * Fallback GDPR anonymization (if consent manager doesn't handle it)
+   */
   applyGDPRAnonymization: function(params, consentData) {
     var anonymizedParams = JSON.parse(JSON.stringify(params));
 
@@ -1906,14 +1980,12 @@
         anonymizedParams.user_agent = this.anonymizeUserAgent(anonymizedParams.user_agent);
       }
       
-      // Remove precise location data (keep only continent if available)
+      // Remove precise location data
       delete anonymizedParams.geo_latitude;
       delete anonymizedParams.geo_longitude;
       delete anonymizedParams.geo_city;
       delete anonymizedParams.geo_region;
       delete anonymizedParams.geo_country;
-      
-      // Use session-based client ID (already handled in getConsentAwareClientId)
     }
 
     if (consentData.ad_storage === "denied") {
@@ -1939,13 +2011,37 @@
     return anonymizedParams;
   },
 
-  // NEW METHOD: Anonymize user agent
+  /**
+   * Anonymize user agent string
+   */
   anonymizeUserAgent: function(userAgent) {
-    // Remove version numbers and specific browser details
+    if (!userAgent) return "";
+    
     return userAgent
       .replace(/\d+\.\d+[\.\d]*/g, "x.x") // Replace version numbers
       .replace(/\([^)]*\)/g, "(anonymous)") // Replace system info in parentheses
       .substring(0, 100); // Truncate to 100 characters
+  },
+
+
+  formatEventData: function (eventName, params, endpoint) {
+    if (endpoint === this.config.cloudflareWorkerUrl) {
+      // Direct format for Cloudflare Worker
+      var data = {
+        name: eventName,
+        params: params,
+      };
+      this.log("Using Cloudflare Worker format", data);
+      return data;
+    } else {
+      // Legacy format for WordPress REST API
+      var data = {
+        event_name: eventName,
+        event_data: params,
+      };
+      this.log("Using WordPress REST API format", data);
+      return data;
+    }
   },
     /**
      * Add location data to event parameters
@@ -1990,28 +2086,6 @@
       }
     },
 
-    /**
-     * Format event data based on endpoint type
-     */
-    formatEventData: function (eventName, params, endpoint) {
-      if (endpoint === this.config.cloudflareWorkerUrl) {
-        // Direct format for Cloudflare Worker
-        var data = {
-          name: eventName,
-          params: params,
-        };
-        this.log("Using Cloudflare Worker format", data);
-        return data;
-      } else {
-        // Legacy format for WordPress REST API
-        var data = {
-          event_name: eventName,
-          event_data: params,
-        };
-        this.log("Using WordPress REST API format", data);
-        return data;
-      }
-    },
 
     /**
      * Send AJAX payload to endpoint

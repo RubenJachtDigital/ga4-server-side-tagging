@@ -1305,15 +1305,19 @@
     },
  // ADD these methods to the GA4Utils.consent namespace in ga4-utilities.js
 
+// UPDATE the GA4Utils.consent namespace in ga4-utilities.js to work with the consent manager:
+
 consent: {
   /**
    * Check if user has given analytics consent
    */
   hasAnalyticsConsent: function () {
-    var consent =
-      window.GA4ConsentStatus ||
-      (window.GA4ConsentManager &&
-        window.GA4ConsentManager.getStoredConsent());
+    if (window.GA4ConsentManager && typeof window.GA4ConsentManager.isAnalyticsAllowed === 'function') {
+      return window.GA4ConsentManager.isAnalyticsAllowed();
+    }
+    
+    // Fallback to checking global status
+    var consent = window.GA4ConsentStatus;
     return consent && consent.analytics_storage === "granted";
   },
 
@@ -1321,10 +1325,12 @@ consent: {
    * Check if user has given advertising consent
    */
   hasAdvertisingConsent: function () {
-    var consent =
-      window.GA4ConsentStatus ||
-      (window.GA4ConsentManager &&
-        window.GA4ConsentManager.getStoredConsent());
+    if (window.GA4ConsentManager && typeof window.GA4ConsentManager.isAdvertisingAllowed === 'function') {
+      return window.GA4ConsentManager.isAdvertisingAllowed();
+    }
+    
+    // Fallback to checking global status
+    var consent = window.GA4ConsentStatus;
     return consent && consent.ad_storage === "granted";
   },
 
@@ -1332,11 +1338,12 @@ consent: {
    * Get consent mode
    */
   getMode: function () {
-    var consent =
-      window.GA4ConsentStatus ||
-      (window.GA4ConsentManager &&
-        window.GA4ConsentManager.getStoredConsent());
-
+    if (window.GA4ConsentManager && typeof window.GA4ConsentManager.getConsentMode === 'function') {
+      return window.GA4ConsentManager.getConsentMode();
+    }
+    
+    // Fallback implementation
+    var consent = window.GA4ConsentStatus;
     if (!consent) {
       return "unknown";
     }
@@ -1357,52 +1364,15 @@ consent: {
   },
 
   /**
-   * Get anonymized parameters based on consent
-   */
-  getAnonymizedParams: function (originalParams) {
-    var consent =
-      window.GA4ConsentStatus ||
-      (window.GA4ConsentManager &&
-        window.GA4ConsentManager.getStoredConsent());
-    var params = JSON.parse(JSON.stringify(originalParams));
-
-    if (!consent || consent.analytics_storage === "denied") {
-      // Remove or anonymize personal data
-      delete params.user_id;
-      if (params.user_agent) {
-        params.user_agent = GA4Utils.device.anonymizeUserAgent(
-          params.user_agent
-        );
-      }
-      if (params.client_id && !params.client_id.startsWith("session_")) {
-        params.client_id = GA4Utils.clientId.getSessionBased();
-      }
-    }
-
-    if (!consent || consent.ad_storage === "denied") {
-      // Remove advertising data
-      delete params.gclid;
-      delete params.content;
-      delete params.term;
-      if (
-        params.campaign &&
-        !["(organic)", "(direct)", "(not set)"].includes(params.campaign)
-      ) {
-        params.campaign = "(not provided)";
-      }
-    }
-
-    return params;
-  },
-
-  /**
    * Get consent data for server-side events
    */
   getForServerSide: function () {
-    var consent =
-      window.GA4ConsentStatus ||
-      (window.GA4ConsentManager &&
-        window.GA4ConsentManager.getStoredConsent());
+    if (window.GA4ConsentManager && typeof window.GA4ConsentManager.getConsentForServerSide === 'function') {
+      return window.GA4ConsentManager.getConsentForServerSide();
+    }
+    
+    // Fallback implementation
+    var consent = window.GA4ConsentStatus;
 
     if (!consent) {
       return {
@@ -1429,21 +1399,6 @@ consent: {
       consent_mode: this.getMode(),
       consent_timestamp: consent.timestamp,
     };
-  },
-
-  /**
-   * Get consent-aware client ID
-   */
-  getConsentAwareClientId: function() {
-    var consent = this.getForServerSide();
-    
-    if (consent.analytics_storage === "granted") {
-      return GA4Utils.clientId.get();
-    } else {
-      // Use session-based client ID for denied consent
-      var sessionId = GA4Utils.session.get().id;
-      return "session_" + sessionId;
-    }
   },
 
   /**

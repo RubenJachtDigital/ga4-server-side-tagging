@@ -1,6 +1,6 @@
 /**
- * GDPR Consent Manager
- * Handles consent management for GA4 Server-Side Tagging
+ * GDPR Consent Manager with Event Queue
+ * Handles all consent management and controls event sending
  * 
  * @since 1.0.0
  */
@@ -15,35 +15,36 @@
     // Configuration
     config: null,
     consentTimeout: null,
+    eventQueue: [], // Queue for events waiting for consent
+    consentGiven: false,
+    consentStatus: null,
+    trackingInstance: null, // Reference to main tracking instance
 
     /**
      * Initialize the consent manager
      */
-    init: function (config) {
+    init: function (config, trackingInstance) {
       this.config = config || {};
+      this.trackingInstance = trackingInstance;
       
-      GA4Utils.helpers.log(
-        "Initializing GDPR Consent Manager",
-        this.config,
-        this.config,
-        "[Consent Manager]"
-      );
+      this.log("Initializing GDPR Consent Manager with event queue", this.config);
 
       // Check for existing consent
       var existingConsent = this.getStoredConsent();
       
       if (existingConsent) {
-        GA4Utils.helpers.log(
-          "Found existing consent",
-          existingConsent,
-          this.config,
-          "[Consent Manager]"
-        );
+        this.log("Found existing consent", existingConsent);
+        this.consentGiven = true;
+        this.consentStatus = existingConsent;
         this.applyConsent(existingConsent);
+        
+        // Allow tracking to start immediately
+        this.enableTracking();
         return;
       }
 
-      // Set up consent listeners
+      // No existing consent - set up listeners and wait
+      this.consentGiven = false;
       this.setupConsentListeners();
 
       // Set up default consent timeout if configured
@@ -51,10 +52,121 @@
         this.setupDefaultConsentTimeout();
       }
 
-      // Initialize consent mode
+      // Initialize consent mode with denied state
       if (this.config.consentModeEnabled) {
         this.initializeConsentMode();
       }
+
+      this.log("Waiting for user consent - events will be queued");
+    },
+
+    /**
+     * Check if consent has been given
+     */
+    hasConsent: function() {
+      return this.consentGiven;
+    },
+
+    /**
+     * Get current consent status
+     */
+    getCurrentConsent: function() {
+      return this.consentStatus;
+    },
+
+    /**
+     * Check if an event should be sent or queued
+     * @param {string} eventName - The event name
+     * @param {Object} eventParams - The event parameters
+     * @returns {boolean} - true if event should be sent now, false if queued
+     */
+    shouldSendEvent: function(eventName, eventParams) {
+      if (this.consentGiven) {
+        return true; // Send immediately
+      }
+
+      // Queue the event
+      this.queueEvent(eventName, eventParams);
+      return false; // Don't send now
+    },
+
+    /**
+     * Queue an event until consent is given
+     */
+    queueEvent: function(eventName, eventParams) {
+      this.eventQueue.push({
+        eventName: eventName,
+        eventParams: eventParams,
+        timestamp: Date.now()
+      });
+
+      this.log("Event queued waiting for consent", { 
+        eventName: eventName, 
+        queueLength: this.eventQueue.length 
+      });
+    },
+
+    /**
+     * Process all queued events
+     */
+    processQueuedEvents: function() {
+      if (this.eventQueue.length === 0) {
+        return;
+      }
+
+      this.log("Processing queued events", { count: this.eventQueue.length });
+
+      // Process events in order
+      var eventsToProcess = this.eventQueue.slice(); // Copy array
+      this.eventQueue = []; // Clear queue
+
+      // Send events via the main tracking system
+      eventsToProcess.forEach(function(queuedEvent) {
+        this.log("Sending queued event", { 
+          eventName: queuedEvent.eventName, 
+          age: Date.now() - queuedEvent.timestamp 
+        });
+
+        // Call the tracking function with bypass flag
+        this.sendEventWithBypass(queuedEvent.eventName, queuedEvent.eventParams);
+      }.bind(this));
+    },
+
+    /**
+     * Send event bypassing consent check (for queued events)
+     */
+    sendEventWithBypass: function(eventName, eventParams) {
+      if (this.trackingInstance && typeof this.trackingInstance.sendServerSideEvent === 'function') {
+        // Call server-side tracking directly
+        this.trackingInstance.sendServerSideEvent(eventName, eventParams);
+      } else if (this.trackingInstance && typeof this.trackingInstance.trackEventInternal === 'function') {
+        // Call internal tracking method
+        this.trackingInstance.trackEventInternal(eventName, eventParams);
+      } else {
+        // Fallback to gtag if available
+        if (typeof gtag === "function") {
+          gtag("event", eventName, eventParams);
+        }
+      }
+    },
+
+    /**
+     * Enable tracking by notifying main tracking instance
+     */
+    enableTracking: function() {
+      if (this.trackingInstance && typeof this.trackingInstance.onConsentReady === 'function') {
+        this.trackingInstance.onConsentReady();
+      }
+    },
+
+    /**
+     * Clear event queue
+     */
+    clearEventQueue: function() {
+      var queueLength = this.eventQueue.length;
+      this.eventQueue = [];
+      
+      this.log("Event queue cleared", { clearedEvents: queueLength });
     },
 
     /**
@@ -74,40 +186,24 @@
     setupIubendaListeners: function () {
       var self = this;
 
-      // Wait for Iubenda to be available
       var checkIubenda = function () {
         if (typeof _iub !== 'undefined' && _iub.csConfiguration) {
-          // Iubenda is loaded
           _iub.csConfiguration.callback = _iub.csConfiguration.callback || {};
           
-          // Listen for consent given
           _iub.csConfiguration.callback.onConsentGiven = function () {
-            GA4Utils.helpers.log(
-              "Iubenda consent given",
-              null,
-              self.config,
-              "[Consent Manager]"
-            );
+            self.log("Iubenda consent given");
             self.handleConsentGiven();
           };
 
-          // Listen for consent rejected
           _iub.csConfiguration.callback.onConsentRejected = function () {
-            GA4Utils.helpers.log(
-              "Iubenda consent rejected",
-              null,
-              self.config,
-              "[Consent Manager]"
-            );
+            self.log("Iubenda consent rejected");
             self.handleConsentDenied();
           };
 
-          // Check if consent was already given
           if (typeof _iub.csConfiguration.callback.onConsentFirstGiven === 'function') {
             _iub.csConfiguration.callback.onConsentFirstGiven();
           }
         } else {
-          // Retry after 100ms
           setTimeout(checkIubenda, 100);
         }
       };
@@ -121,28 +217,16 @@
     setupCustomConsentListeners: function () {
       var self = this;
 
-      // Accept consent listener
       if (this.config.acceptSelector) {
         $(document).on('click', this.config.acceptSelector, function (e) {
-          GA4Utils.helpers.log(
-            "Custom accept consent clicked",
-            { selector: self.config.acceptSelector },
-            self.config,
-            "[Consent Manager]"
-          );
+          self.log("Custom accept consent clicked", { selector: self.config.acceptSelector });
           self.handleConsentGiven();
         });
       }
 
-      // Deny consent listener
       if (this.config.denySelector) {
         $(document).on('click', this.config.denySelector, function (e) {
-          GA4Utils.helpers.log(
-            "Custom deny consent clicked",
-            { selector: self.config.denySelector },
-            self.config,
-            "[Consent Manager]"
-          );
+          self.log("Custom deny consent clicked", { selector: self.config.denySelector });
           self.handleConsentDenied();
         });
       }
@@ -154,20 +238,10 @@
     setupDefaultConsentTimeout: function () {
       var self = this;
       
-      GA4Utils.helpers.log(
-        "Setting up consent timeout",
-        { timeout: this.config.defaultTimeout },
-        this.config,
-        "[Consent Manager]"
-      );
+      this.log("Setting up consent timeout", { timeout: this.config.defaultTimeout });
 
       this.consentTimeout = setTimeout(function () {
-        GA4Utils.helpers.log(
-          "Consent timeout reached - applying default consent",
-          null,
-          self.config,
-          "[Consent Manager]"
-        );
+        self.log("Consent timeout reached - applying default consent");
         self.handleConsentGiven();
       }, this.config.defaultTimeout * 1000);
     },
@@ -199,15 +273,20 @@
         timestamp: Date.now()
       };
 
+      this.consentGiven = true;
+      this.consentStatus = consent;
+      
       this.storeConsent(consent);
       this.applyConsent(consent);
       
-      GA4Utils.helpers.log(
-        "Consent granted - full tracking enabled",
-        consent,
-        this.config,
-        "[Consent Manager]"
-      );
+      this.log("Consent granted - processing queued events", { 
+        consent: consent, 
+        queuedEvents: this.eventQueue.length 
+      });
+
+      // Enable tracking and process queued events
+      this.enableTracking();
+      this.processQueuedEvents();
     },
 
     /**
@@ -223,19 +302,24 @@
         ad_personalization: 'denied',
         functionality_storage: 'denied',
         personalization_storage: 'denied',
-        security_storage: 'granted', // Always granted for security
+        security_storage: 'granted',
         timestamp: Date.now()
       };
+
+      this.consentGiven = true; // Allow events to be sent (but anonymized)
+      this.consentStatus = consent;
 
       this.storeConsent(consent);
       this.applyConsent(consent);
       
-      GA4Utils.helpers.log(
-        "Consent denied - limited tracking enabled",
-        consent,
-        this.config,
-        "[Consent Manager]"
-      );
+      this.log("Consent denied - processing queued events with anonymization", { 
+        consent: consent, 
+        queuedEvents: this.eventQueue.length 
+      });
+
+      // Enable tracking and process queued events (they will be anonymized)
+      this.enableTracking();
+      this.processQueuedEvents();
     },
 
     /**
@@ -267,7 +351,6 @@
      */
     initializeConsentMode: function () {
       if (typeof gtag === 'function') {
-        // Set default consent state (denied by default for GDPR compliance)
         gtag('consent', 'default', {
           analytics_storage: 'denied',
           ad_storage: 'denied',
@@ -276,15 +359,10 @@
           functionality_storage: 'denied',
           personalization_storage: 'denied',
           security_storage: 'granted',
-          wait_for_update: 2000 // Wait 2 seconds for consent update
+          wait_for_update: 30000 // Wait 30 seconds for consent update
         });
 
-        GA4Utils.helpers.log(
-          "Google Consent Mode v2 initialized",
-          null,
-          this.config,
-          "[Consent Manager]"
-        );
+        this.log("Google Consent Mode v2 initialized with denied defaults");
       }
     },
 
@@ -294,19 +372,9 @@
     storeConsent: function (consent) {
       try {
         localStorage.setItem('ga4_consent_status', JSON.stringify(consent));
-        GA4Utils.helpers.log(
-          "Consent stored in localStorage",
-          consent,
-          this.config,
-          "[Consent Manager]"
-        );
+        this.log("Consent stored in localStorage", consent);
       } catch (e) {
-        GA4Utils.helpers.log(
-          "Failed to store consent in localStorage",
-          e,
-          this.config,
-          "[Consent Manager]"
-        );
+        this.log("Failed to store consent in localStorage", e);
       }
     },
 
@@ -324,17 +392,11 @@
           if (consent.timestamp && (Date.now() - consent.timestamp) < oneYear) {
             return consent;
           } else {
-            // Remove expired consent
             this.clearStoredConsent();
           }
         }
       } catch (e) {
-        GA4Utils.helpers.log(
-          "Failed to retrieve consent from localStorage",
-          e,
-          this.config,
-          "[Consent Manager]"
-        );
+        this.log("Failed to retrieve consent from localStorage", e);
       }
       return null;
     },
@@ -345,20 +407,43 @@
     clearStoredConsent: function () {
       try {
         localStorage.removeItem('ga4_consent_status');
-        GA4Utils.helpers.log(
-          "Cleared stored consent",
-          null,
-          this.config,
-          "[Consent Manager]"
-        );
+        this.log("Cleared stored consent");
       } catch (e) {
-        GA4Utils.helpers.log(
-          "Failed to clear stored consent",
-          e,
-          this.config,
-          "[Consent Manager]"
-        );
+        this.log("Failed to clear stored consent", e);
       }
+    },
+
+    /**
+     * Get consent data formatted for server-side events
+     */
+    getConsentForServerSide: function () {
+      var consent = this.consentStatus || this.getStoredConsent();
+
+      if (!consent) {
+        return {
+          analytics_storage: "denied",
+          ad_storage: "denied",
+          ad_user_data: "denied",
+          ad_personalization: "denied",
+          functionality_storage: "denied",
+          personalization_storage: "denied",
+          security_storage: "granted",
+          consent_mode: "denied",
+          consent_timestamp: null,
+        };
+      }
+
+      return {
+        analytics_storage: consent.analytics_storage || "denied",
+        ad_storage: consent.ad_storage || "denied",
+        ad_user_data: consent.ad_user_data || "denied",
+        ad_personalization: consent.ad_personalization || "denied",
+        functionality_storage: consent.functionality_storage || "denied",
+        personalization_storage: consent.personalization_storage || "denied",
+        security_storage: consent.security_storage || "granted",
+        consent_mode: this.getConsentMode(),
+        consent_timestamp: consent.timestamp,
+      };
     },
 
     /**
@@ -378,7 +463,7 @@
     },
 
     /**
-     * Get consent mode for server-side events
+     * Get consent mode
      */
     getConsentMode: function () {
       var consent = this.getStoredConsent();
@@ -397,134 +482,77 @@
     },
 
     /**
-     * Get location data based on consent
+     * Get consent-aware client ID
      */
-    getConsentBasedLocation: function () {
-      return new Promise((resolve, reject) => {
-        var consent = this.getStoredConsent();
-        
-        if (consent && consent.analytics_storage === 'granted') {
-          // Full location tracking allowed
-          GA4Utils.location.get()
-            .then(resolve)
-            .catch(reject);
-        } else {
-          // Only timezone-based location allowed
-          this.getTimezoneBasedLocation()
-            .then(resolve)
-            .catch(reject);
-        }
-      });
+    getConsentAwareClientId: function() {
+      var consent = this.getConsentForServerSide();
+      
+      if (consent.analytics_storage === "granted") {
+        return GA4Utils.clientId.get();
+      } else {
+        // Use session-based client ID for denied consent
+        var sessionId = GA4Utils.session.get().id;
+        return "session_" + sessionId;
+      }
     },
 
     /**
-     * Get timezone-based location (continent level only)
+     * Apply GDPR anonymization to event parameters
      */
-    getTimezoneBasedLocation: function () {
-      return new Promise((resolve) => {
-        try {
-          var timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-          
-          GA4Utils.helpers.log(
-            "Getting timezone-based location",
-            { timezone: timezone },
-            this.config,
-            "[Consent Manager]"
-          );
+    applyGDPRAnonymization: function(params) {
+      var consent = this.getConsentForServerSide();
+      var anonymizedParams = JSON.parse(JSON.stringify(params));
 
-          if (!timezone) {
-            resolve({});
-            return;
-          }
-
-          // Map common timezones to continents and countries
-          var timezoneMap = {
-            // Europe
-            'Europe/Amsterdam': { continent: 'Europe', country: 'NL', city: 'Amsterdam' },
-            'Europe/Berlin': { continent: 'Europe', country: 'DE', city: 'Berlin' },
-            'Europe/Brussels': { continent: 'Europe', country: 'BE', city: 'Brussels' },
-            'Europe/London': { continent: 'Europe', country: 'GB', city: 'London' },
-            'Europe/Paris': { continent: 'Europe', country: 'FR', city: 'Paris' },
-            'Europe/Rome': { continent: 'Europe', country: 'IT', city: 'Rome' },
-            'Europe/Madrid': { continent: 'Europe', country: 'ES', city: 'Madrid' },
-            'Europe/Stockholm': { continent: 'Europe', country: 'SE', city: 'Stockholm' },
-            'Europe/Warsaw': { continent: 'Europe', country: 'PL', city: 'Warsaw' },
-            'Europe/Vienna': { continent: 'Europe', country: 'AT', city: 'Vienna' },
-            
-            // North America
-            'America/New_York': { continent: 'North America', country: 'US', city: 'New York' },
-            'America/Los_Angeles': { continent: 'North America', country: 'US', city: 'Los Angeles' },
-            'America/Chicago': { continent: 'North America', country: 'US', city: 'Chicago' },
-            'America/Toronto': { continent: 'North America', country: 'CA', city: 'Toronto' },
-            'America/Vancouver': { continent: 'North America', country: 'CA', city: 'Vancouver' },
-            'America/Mexico_City': { continent: 'North America', country: 'MX', city: 'Mexico City' },
-            
-            // Asia
-            'Asia/Tokyo': { continent: 'Asia', country: 'JP', city: 'Tokyo' },
-            'Asia/Shanghai': { continent: 'Asia', country: 'CN', city: 'Shanghai' },
-            'Asia/Singapore': { continent: 'Asia', country: 'SG', city: 'Singapore' },
-            'Asia/Kolkata': { continent: 'Asia', country: 'IN', city: 'Kolkata' },
-            'Asia/Dubai': { continent: 'Asia', country: 'AE', city: 'Dubai' },
-            
-            // Australia & Oceania
-            'Australia/Sydney': { continent: 'Oceania', country: 'AU', city: 'Sydney' },
-            'Australia/Melbourne': { continent: 'Oceania', country: 'AU', city: 'Melbourne' },
-            'Pacific/Auckland': { continent: 'Oceania', country: 'NZ', city: 'Auckland' },
-            
-            // South America
-            'America/Sao_Paulo': { continent: 'South America', country: 'BR', city: 'Sao Paulo' },
-            'America/Buenos_Aires': { continent: 'South America', country: 'AR', city: 'Buenos Aires' },
-            'America/Lima': { continent: 'South America', country: 'PE', city: 'Lima' },
-            
-            // Africa
-            'Africa/Cairo': { continent: 'Africa', country: 'EG', city: 'Cairo' },
-            'Africa/Johannesburg': { continent: 'Africa', country: 'ZA', city: 'Johannesburg' },
-            'Africa/Lagos': { continent: 'Africa', country: 'NG', city: 'Lagos' }
-          };
-
-          var locationData = timezoneMap[timezone];
-          
-          if (!locationData) {
-            // Fallback: try to extract continent from timezone
-            var parts = timezone.split('/');
-            if (parts.length >= 2) {
-              var continent = parts[0];
-              var city = parts[1].replace(/_/g, ' ');
-              
-              locationData = {
-                continent: continent,
-                country: '',
-                city: city
-              };
-            } else {
-              locationData = { continent: 'Unknown', country: '', city: '' };
-            }
-          }
-
-          // For GDPR compliance, only return continent when consent is denied
-          var result = {
-            geo_continent: locationData.continent,
-            timezone: timezone
-          };
-
-          GA4Utils.helpers.log(
-            "Timezone-based location determined",
-            result,
-            this.config,
-            "[Consent Manager]"
-          );
-
-          resolve(result);
-        } catch (e) {
-          GA4Utils.helpers.log(
-            "Error getting timezone-based location",
-            e,
-            this.config,
-            "[Consent Manager]"
-          );
-          resolve({});
+      if (consent.analytics_storage === "denied") {
+        // Remove/anonymize personal data
+        delete anonymizedParams.user_id;
+        
+        // Anonymize user agent
+        if (anonymizedParams.user_agent) {
+          anonymizedParams.user_agent = this.anonymizeUserAgent(anonymizedParams.user_agent);
         }
-      });
+        
+        // Remove precise location data
+        delete anonymizedParams.geo_latitude;
+        delete anonymizedParams.geo_longitude;
+        delete anonymizedParams.geo_city;
+        delete anonymizedParams.geo_region;
+        delete anonymizedParams.geo_country;
+      }
+
+      if (consent.ad_storage === "denied") {
+        // Remove advertising/attribution data
+        delete anonymizedParams.gclid;
+        delete anonymizedParams.content;
+        delete anonymizedParams.term;
+        
+        // Anonymize campaign info for paid traffic
+        if (anonymizedParams.campaign && 
+            !["(organic)", "(direct)", "(not set)", "(referral)"].includes(anonymizedParams.campaign)) {
+          anonymizedParams.campaign = "(not provided)";
+        }
+        
+        // Remove detailed referrer info for paid traffic
+        if (anonymizedParams.medium && 
+            ["cpc", "ppc", "paidsearch", "display", "banner", "cpm"].includes(anonymizedParams.medium)) {
+          anonymizedParams.source = "(not provided)";
+          anonymizedParams.medium = "(not provided)";
+        }
+      }
+
+      return anonymizedParams;
+    },
+
+    /**
+     * Anonymize user agent string
+     */
+    anonymizeUserAgent: function(userAgent) {
+      if (!userAgent) return "";
+      
+      return userAgent
+        .replace(/\d+\.\d+[\.\d]*/g, "x.x") // Replace version numbers
+        .replace(/\([^)]*\)/g, "(anonymous)") // Replace system info in parentheses
+        .substring(0, 100); // Truncate to 100 characters
     },
 
     /**
@@ -541,18 +569,30 @@
     resetConsent: function () {
       this.clearStoredConsent();
       this.clearConsentTimeout();
+      this.clearEventQueue();
+      this.consentGiven = false;
+      this.consentStatus = null;
       
       // Reset consent mode if enabled
       if (this.config.consentModeEnabled) {
         this.initializeConsentMode();
       }
       
-      GA4Utils.helpers.log(
-        "Consent reset",
-        null,
-        this.config,
-        "[Consent Manager]"
-      );
+      this.log("Consent reset - events will be queued again");
+    },
+
+    /**
+     * Debug logging helper
+     */
+    log: function(message, data) {
+      if (this.config && this.config.debugMode && window.console) {
+        var prefix = "[GA4 Consent Manager]";
+        if (data) {
+          console.log(prefix + " " + message, data);
+        } else {
+          console.log(prefix + " " + message);
+        }
+      }
     }
   };
 
