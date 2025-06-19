@@ -83,6 +83,14 @@ class GA4_Server_Side_Tagging_Public
             GA4_SERVER_SIDE_TAGGING_VERSION,
             false
         );
+          // Enqueue the consent management script
+        wp_enqueue_script(
+            'ga4-server-side-tagging-consent-management',
+            GA4_SERVER_SIDE_TAGGING_PLUGIN_URL . 'public/js/ga4-consent-manager.js',
+            array('jquery'),
+            GA4_SERVER_SIDE_TAGGING_VERSION,
+            false
+        );
 
         // Enqueue the main tracking script
         wp_enqueue_script(
@@ -107,6 +115,15 @@ class GA4_Server_Side_Tagging_Public
             'conversionFormIds' => get_option('ga4_conversion_form_ids', ''),
             'currency' => function_exists('get_woocommerce_currency') ? get_woocommerce_currency() : 'EUR',
             'siteName' => get_bloginfo('name'),
+
+            // GDPR Consent settings
+            'consentSettings' => array(
+                'useIubenda' => get_option('ga4_use_iubenda', false),
+                'acceptSelector' => get_option('ga4_consent_accept_selector', '.accept-all'),
+                'denySelector' => get_option('ga4_consent_deny_selector', '.deny-all'),
+                'defaultTimeout' => get_option('ga4_consent_default_timeout', 30),
+                'consentModeEnabled' => get_option('ga4_consent_mode_enabled', true)
+            )
         );
 
         // Add product data if we're on a product page

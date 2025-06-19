@@ -204,6 +204,7 @@ class GA4_Server_Side_Tagging_Admin
                 'default' => '',
             )
         );
+
         register_setting(
             'ga4_server_side_tagging_settings',
             'ga4_yith_raq_form_id',
@@ -215,6 +216,7 @@ class GA4_Server_Side_Tagging_Admin
                 'default' => '',
             )
         );
+
         register_setting(
             'ga4_server_side_tagging_settings',
             'ga4_conversion_form_ids',
@@ -226,7 +228,67 @@ class GA4_Server_Side_Tagging_Admin
                 'default' => '',
             )
         );
-    
+
+        // GDPR Consent Settings
+        register_setting(
+            'ga4_server_side_tagging_settings',
+            'ga4_use_iubenda',
+            array(
+                'type' => 'boolean',
+                'description' => 'Use Iubenda for consent management',
+                'sanitize_callback' => array($this, 'sanitize_checkbox'),
+                'show_in_rest' => false,
+                'default' => false,
+            )
+        );
+
+        register_setting(
+            'ga4_server_side_tagging_settings',
+            'ga4_consent_accept_selector',
+            array(
+                'type' => 'string',
+                'description' => 'CSS selector for accept all consent button',
+                'sanitize_callback' => 'sanitize_text_field',
+                'show_in_rest' => false,
+                'default' => '.accept-all',
+            )
+        );
+
+        register_setting(
+            'ga4_server_side_tagging_settings',
+            'ga4_consent_deny_selector',
+            array(
+                'type' => 'string',
+                'description' => 'CSS selector for deny all consent button',
+                'sanitize_callback' => 'sanitize_text_field',
+                'show_in_rest' => false,
+                'default' => '.deny-all',
+            )
+        );
+
+        register_setting(
+            'ga4_server_side_tagging_settings',
+            'ga4_consent_default_timeout',
+            array(
+                'type' => 'integer',
+                'description' => 'Default consent timeout in seconds',
+                'sanitize_callback' => 'absint',
+                'show_in_rest' => false,
+                'default' => 30,
+            )
+        );
+
+        register_setting(
+            'ga4_server_side_tagging_settings',
+            'ga4_consent_mode_enabled',
+            array(
+                'type' => 'boolean',
+                'description' => 'Enable Google Consent Mode v2',
+                'sanitize_callback' => array($this, 'sanitize_checkbox'),
+                'show_in_rest' => false,
+                'default' => true,
+            )
+        );
     }
 
     /**
@@ -264,8 +326,6 @@ class GA4_Server_Side_Tagging_Admin
             $test_result = $this->test_ga4_connection();
         }
 
-      
-
         // Get current settings
         $measurement_id = get_option('ga4_measurement_id', '');
         $api_secret = get_option('ga4_api_secret', '');
@@ -277,6 +337,14 @@ class GA4_Server_Side_Tagging_Admin
         $cloudflare_worker_url = get_option('ga4_cloudflare_worker_url', '');
         $yith_raq_form_id = get_option('ga4_yith_raq_form_id', '');
         $conversion_form_ids = get_option('ga4_conversion_form_ids', '');
+        
+        // GDPR Consent settings
+        $use_iubenda = get_option('ga4_use_iubenda', false);
+        $consent_accept_selector = get_option('ga4_consent_accept_selector', '.accept-all');
+        $consent_deny_selector = get_option('ga4_consent_deny_selector', '.deny-all');
+        $consent_default_timeout = get_option('ga4_consent_default_timeout', 30);
+        $consent_mode_enabled = get_option('ga4_consent_mode_enabled', true);
+
         // Include the admin view
         include GA4_SERVER_SIDE_TAGGING_PLUGIN_DIR . 'admin/partials/ga4-server-side-tagging-admin-display.php';
     }
@@ -333,9 +401,11 @@ class GA4_Server_Side_Tagging_Admin
         if (isset($_POST['ga4_yith_raq_form_id'])) {
             update_option('ga4_yith_raq_form_id', sanitize_text_field(wp_unslash($_POST['ga4_yith_raq_form_id'])));
         }
+
         if (isset($_POST['ga4_conversion_form_ids'])) {
             update_option('ga4_conversion_form_ids', sanitize_text_field(wp_unslash($_POST['ga4_conversion_form_ids'])));
         }
+
         // GA4 Checkbox options
         update_option('ga4_use_server_side', isset($_POST['ga4_use_server_side']));
         update_option('ga4_server_side_tagging_debug_mode', isset($_POST['ga4_server_side_tagging_debug_mode']));
@@ -343,6 +413,24 @@ class GA4_Server_Side_Tagging_Admin
         update_option('ga4_anonymize_ip', isset($_POST['ga4_anonymize_ip']));
         update_option('ga4_ecommerce_tracking', isset($_POST['ga4_ecommerce_tracking']));
 
+        // GDPR Consent settings
+        update_option('ga4_use_iubenda', isset($_POST['ga4_use_iubenda']));
+        update_option('ga4_consent_mode_enabled', isset($_POST['ga4_consent_mode_enabled']));
+
+        if (isset($_POST['ga4_consent_accept_selector'])) {
+            update_option('ga4_consent_accept_selector', sanitize_text_field(wp_unslash($_POST['ga4_consent_accept_selector'])));
+        }
+
+        if (isset($_POST['ga4_consent_deny_selector'])) {
+            update_option('ga4_consent_deny_selector', sanitize_text_field(wp_unslash($_POST['ga4_consent_deny_selector'])));
+        }
+
+        if (isset($_POST['ga4_consent_default_timeout'])) {
+            $timeout = absint($_POST['ga4_consent_default_timeout']);
+            // Limit timeout to reasonable values (0-300 seconds)
+            $timeout = min(300, max(0, $timeout));
+            update_option('ga4_consent_default_timeout', $timeout);
+        }
 
         // Update logger debug mode
         $this->logger->set_debug_mode(isset($_POST['ga4_server_side_tagging_debug_mode']));
@@ -485,7 +573,6 @@ class GA4_Server_Side_Tagging_Admin
             'cloudflare' => $cloudflare_result,
         );
     }
-
 
     /**
      * Clear logs.

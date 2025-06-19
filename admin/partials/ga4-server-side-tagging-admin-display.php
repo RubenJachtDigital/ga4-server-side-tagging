@@ -29,6 +29,74 @@ if (!defined('WPINC')) {
             <form method="post" action="">
                 <?php wp_nonce_field('ga4_server_side_tagging_settings'); ?>
 
+                <!-- GDPR Consent Settings -->
+                <div class="ga4-server-side-tagging-admin-section">
+                    <h3>GDPR Consent Settings</h3>
+                    
+                    <table class="form-table">
+                        <tr>
+                            <th scope="row">Use Iubenda</th>
+                            <td>
+                                <label for="ga4_use_iubenda">
+                                    <input type="checkbox" id="ga4_use_iubenda" name="ga4_use_iubenda" <?php checked($use_iubenda); ?> />
+                                    I use Iubenda for consent management
+                                </label>
+                                <p class="description">Check this if you're using Iubenda. If unchecked, we'll use custom consent selectors.</p>
+                            </td>
+                        </tr>
+                    </table>
+
+                    <div id="custom_consent_settings" style="<?php echo $use_iubenda ? 'display: none;' : ''; ?>">
+                        <table class="form-table">
+                            <tr>
+                                <th scope="row">
+                                    <label for="ga4_consent_accept_selector">Accept All CSS Selector</label>
+                                </th>
+                                <td>
+                                    <input type="text" id="ga4_consent_accept_selector" name="ga4_consent_accept_selector"
+                                        value="<?php echo esc_attr($consent_accept_selector); ?>" class="regular-text" 
+                                        placeholder=".accept-all, #accept-cookies" />
+                                    <p class="description">CSS selector for the "Accept All" button/link (e.g., ".accept-all", "#accept-cookies")</p>
+                                </td>
+                            </tr>
+                            <tr>
+                                <th scope="row">
+                                    <label for="ga4_consent_deny_selector">Deny All CSS Selector</label>
+                                </th>
+                                <td>
+                                    <input type="text" id="ga4_consent_deny_selector" name="ga4_consent_deny_selector"
+                                        value="<?php echo esc_attr($consent_deny_selector); ?>" class="regular-text" 
+                                        placeholder=".deny-all, #reject-cookies" />
+                                    <p class="description">CSS selector for the "Deny All" button/link (e.g., ".deny-all", "#reject-cookies")</p>
+                                </td>
+                            </tr>
+                        </table>
+                    </div>
+
+                    <table class="form-table">
+                        <tr>
+                            <th scope="row">
+                                <label for="ga4_consent_default_timeout">Default Consent Timeout</label>
+                            </th>
+                            <td>
+                                <input type="number" id="ga4_consent_default_timeout" name="ga4_consent_default_timeout"
+                                    value="<?php echo esc_attr($consent_default_timeout); ?>" min="0" max="300" />
+                                <span>seconds</span>
+                                <p class="description">Time in seconds before automatically accepting consent (0 = disabled). User can still deny during this time.</p>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th scope="row">Consent Mode</th>
+                            <td>
+                                <label for="ga4_consent_mode_enabled">
+                                    <input type="checkbox" id="ga4_consent_mode_enabled" name="ga4_consent_mode_enabled" <?php checked($consent_mode_enabled); ?> />
+                                    Enable Google Consent Mode v2
+                                </label>
+                                <p class="description">Send consent signals to Google Analytics for better data modeling when users deny consent</p>
+                            </td>
+                        </tr>
+                    </table>
+                </div>
 
                 <!-- Tracking Options -->
                 <div class="ga4-server-side-tagging-admin-section">
@@ -92,6 +160,7 @@ if (!defined('WPINC')) {
                         </tr>
                     </table>
                 </div>
+
                 <!-- Cloudflare Integration -->
                 <div class="ga4-server-side-tagging-admin-section">
                     <h3>Cloudflare Integration</h3>
@@ -110,6 +179,7 @@ if (!defined('WPINC')) {
                         </tr>
                     </table>
                 </div>
+
                 <!-- GA4 Analytics Settings -->
                 <div class="ga4-server-side-tagging-admin-section">
                     <h3>Google Analytics 4 Configuration</h3>
@@ -145,7 +215,6 @@ if (!defined('WPINC')) {
                                 <p class="description">Your YITH Request a Quote Form id(found in Gravity forms)</p>
                             </td>
                         </tr>
-                        </tr>
                         <tr>
                             <th scope="row">
                                 <label for="ga4_conversion_form_ids">Conversion form id(s)</label>
@@ -159,14 +228,11 @@ if (!defined('WPINC')) {
                     </table>
                 </div>
 
-
-
                 <p class="submit">
                     <input type="submit" name="ga4_server_side_tagging_settings_submit" class="button-primary"
                         value="Save Settings" />
                     <input type="submit" name="ga4_test_connection" class="button-secondary"
                         value="Test GA4 Connection" />
-                
                 </p>
             </form>
 
@@ -185,14 +251,13 @@ if (!defined('WPINC')) {
                     </div>
                 </div>
             <?php endif; ?>
-
-    
         </div>
 
         <div class="ga4-server-side-tagging-admin-sidebar">
             <div class="ga4-server-side-tagging-admin-box">
                 <h3>Getting Started</h3>
                 <ol>
+                    <li>Configure GDPR consent settings</li>
                     <li>Enter your GA4 Measurement ID and API Secret</li>
                     <li>Set up your Cloudflare Workers (optional)</li>
                     <li>Adjust tracking options as needed</li>
@@ -200,7 +265,17 @@ if (!defined('WPINC')) {
                 </ol>
             </div>
 
-      
+            <div class="ga4-server-side-tagging-admin-box">
+                <h3>GDPR Consent Guide</h3>
+                <p>For GDPR compliance:</p>
+                <ol>
+                    <li>Check "Use Iubenda" if you use their consent system</li>
+                    <li>Or provide CSS selectors for your consent buttons</li>
+                    <li>Set a timeout for automatic consent (optional)</li>
+                    <li>Enable Consent Mode v2 for better data modeling</li>
+                </ol>
+                <p><strong>Note:</strong> When consent is denied, only timezone-based location (continent level) will be tracked.</p>
+            </div>
 
             <div class="ga4-server-side-tagging-admin-box">
                 <h3>Cloudflare Worker Setup</h3>
@@ -216,3 +291,16 @@ if (!defined('WPINC')) {
         </div>
     </div>
 </div>
+
+<script>
+jQuery(document).ready(function($) {
+    // Toggle custom consent settings based on Iubenda checkbox
+    $('#ga4_use_iubenda').on('change', function() {
+        if ($(this).is(':checked')) {
+            $('#custom_consent_settings').hide();
+        } else {
+            $('#custom_consent_settings').show();
+        }
+    });
+});
+</script>
