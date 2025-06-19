@@ -1,10 +1,11 @@
 /**
- * Enhanced GA4 Server-Side Tagging
- * WITH COMPREHENSIVE BOT DETECTION
+ * Enhanced GA4 Server-Side Tagging with GDPR Compliance
+ * WITH COMPREHENSIVE BOT DETECTION AND CONSENT HANDLING
  *
  * This worker receives events from the WordPress plugin and forwards them to GA4
+ * with full GDPR compliance and consent management
  *
- * @version 2.1.1 - Fixed
+ * @version 2.2.0 - GDPR Enhanced
  */
 
 // GA4 Configuration
@@ -16,6 +17,139 @@ const GA4_API_SECRET = "xx"; // Your GA4 API Secret
 // Bot Detection Configuration
 const BOT_DETECTION_ENABLED = true; // Set to false to disable bot filtering
 const BOT_LOG_ENABLED = true; // Set to false to disable bot logging
+
+/**
+ * =============================================================================
+ * GDPR CONSENT HANDLING
+ * =============================================================================
+ */
+
+/**
+ * Process consent data and apply GDPR compliance rules
+ * @param {Object} payload - The event payload
+ * @returns {Object} Processed payload with consent applied
+ */
+function processGDPRConsent(payload) {
+  // Extract consent data from payload
+  const consent = payload.params?.consent || {};
+  
+  if (DEBUG_MODE) {
+    console.log("Processing GDPR consent:", JSON.stringify(consent));
+  }
+
+  // Apply consent-based data filtering
+  if (consent.analytics_storage === "denied") {
+    payload = applyAnalyticsConsentDenied(payload);
+  }
+
+  if (consent.ad_storage === "denied") {
+    payload = applyAdvertisingConsentDenied(payload);
+  }
+
+  // Add consent signals to the GA4 payload at the top level
+  if (Object.keys(consent).length > 0) {
+    payload.consent = {
+      ad_storage: consent.ad_storage || "denied",
+      ad_user_data: consent.ad_user_data || "denied",
+      ad_personalization: consent.ad_personalization || "denied"
+    };
+  }
+
+  return payload;
+}
+
+/**
+ * Apply analytics consent denied rules
+ * @param {Object} payload - The event payload
+ * @returns {Object} Modified payload
+ */
+function applyAnalyticsConsentDenied(payload) {
+  if (DEBUG_MODE) {
+    console.log("Applying analytics consent denied rules");
+  }
+
+  // Remove or anonymize personal identifiers
+  if (payload.user_id) {
+    delete payload.user_id;
+  }
+
+  // Use session-based client ID if available
+  if (payload.client_id && !payload.client_id.startsWith("session_")) {
+    // Keep session-based client IDs, anonymize persistent ones
+    const timestamp = Math.floor(Date.now() / 1000);
+    payload.client_id = `session_${timestamp}`;
+  }
+
+  // Remove precise location data
+  if (payload.params) {
+    delete payload.params.geo_latitude;
+    delete payload.params.geo_longitude;
+    delete payload.params.geo_city;
+    delete payload.params.geo_region;
+    delete payload.params.geo_country;
+    
+    // Keep only continent-level location
+    // (geo_continent should already be set by client if available)
+  }
+
+  // Anonymize user agent in bot data
+  if (payload.params?.botData?.user_agent_full) {
+    payload.params.botData.user_agent_full = anonymizeUserAgent(payload.params.botData.user_agent_full);
+  }
+
+  if (payload.params?.user_agent) {
+    payload.params.user_agent = anonymizeUserAgent(payload.params.user_agent);
+  }
+
+  return payload;
+}
+
+/**
+ * Apply advertising consent denied rules
+ * @param {Object} payload - The event payload
+ * @returns {Object} Modified payload
+ */
+function applyAdvertisingConsentDenied(payload) {
+  if (DEBUG_MODE) {
+    console.log("Applying advertising consent denied rules");
+  }
+
+  if (payload.params) {
+    // Remove advertising attribution data
+    delete payload.params.gclid;
+    delete payload.params.content;
+    delete payload.params.term;
+
+    // Anonymize campaign data for paid traffic
+    if (payload.params.campaign && 
+        !["(organic)", "(direct)", "(not set)", "(referral)"].includes(payload.params.campaign)) {
+      payload.params.campaign = "(not provided)";
+    }
+
+    // Anonymize source/medium for paid traffic
+    if (payload.params.medium && 
+        ["cpc", "ppc", "paidsearch", "display", "banner", "cpm"].includes(payload.params.medium)) {
+      payload.params.source = "(not provided)";
+      payload.params.medium = "(not provided)";
+    }
+  }
+
+  return payload;
+}
+
+/**
+ * Anonymize user agent string
+ * @param {string} userAgent - Original user agent
+ * @returns {string} Anonymized user agent
+ */
+function anonymizeUserAgent(userAgent) {
+  if (!userAgent) return "";
+  
+  return userAgent
+    .replace(/\d+\.\d+[\.\d]*/g, "x.x") // Replace version numbers
+    .replace(/\([^)]*\)/g, "(anonymous)") // Replace system info in parentheses
+    .substring(0, 100); // Truncate to 100 characters
+}
 
 /**
  * =============================================================================
@@ -233,7 +367,6 @@ function checkWordPressBotData(botData) {
     suspiciousPatterns.push('no_javascript');
   }
 
-
   // Check engagement time - ADJUSTED
   if (botData.engagement_calculated && parseInt(botData.engagement_calculated) < 500) {
     suspiciousPatterns.push('very_short_engagement');
@@ -243,7 +376,6 @@ function checkWordPressBotData(botData) {
   var screenWidth = parseInt(botData.screen_available_width);
   var screenHeight = parseInt(botData.screen_available_height);
   if (screenWidth && screenHeight) {
-  
     // Check for impossible dimensions
     if (screenWidth < 320 || screenHeight < 240 || screenWidth > 7680 || screenHeight > 4320) {
       suspiciousPatterns.push('impossible_screen_dimensions');
@@ -273,7 +405,6 @@ function checkWordPressBotData(botData) {
     suspiciousPatterns.push('suspicious_timezone');
   }
 
-
   // Require fewer patterns for bot detection
   if (suspiciousPatterns.length >= 2) {
     return { isBot: true, reason: 'wordpress_bot_data: ' + suspiciousPatterns.join(', ') };
@@ -296,32 +427,8 @@ function checkBehaviorPatterns(botData, params) {
     }
   }
 
-  // Perfect timing patterns (bots often have regular intervals)
-  if (params.event_timestamp) {
-    var timestamp = parseInt(params.event_timestamp);
-    if (timestamp % 10 === 0 || timestamp % 60 === 0) {
-      suspiciousPatterns.push('round_timestamp');
-    }
-  }
 
-  // Enhanced engagement time analysis
-  if (params.engagement_time_msec) {
-    var engagementTime = parseInt(params.engagement_time_msec);
-    
-    // Check for impossible fast engagement
-    if (engagementTime < 100) {
-      suspiciousPatterns.push('impossible_fast_engagement');
-    }
-  }
 
-  // Check scroll percentage patterns (for scroll events)
-  if (params.percent_scrolled) {
-    var scrollPercent = parseInt(params.percent_scrolled);
-    // Bots often have perfect scroll percentages
-    if ([25, 50, 75, 90, 100].includes(scrollPercent)) {
-      suspiciousPatterns.push('perfect_scroll_percentage');
-    }
-  }
 
   // Check timezone consistency
   if (botData.timezone) {
@@ -331,7 +438,6 @@ function checkBehaviorPatterns(botData, params) {
       suspiciousPatterns.push('suspicious_timezone');
     }
   }
-
 
   if (suspiciousPatterns.length >= 2) {
     return { isBot: true, reason: 'behavior_patterns: ' + suspiciousPatterns.join(', ') };
@@ -459,7 +565,6 @@ function checkEventData(payload) {
     suspiciousPatterns.push('very_short_engagement');
   }
 
-
   // Suspicious screen resolutions common to headless browsers
   const botResolutions = ['1024x768', '1366x768', '1920x1080', '800x600', '1280x720'];
   if (params.screen_resolution && botResolutions.includes(params.screen_resolution)) {
@@ -524,10 +629,10 @@ function logBotDetection(detection, request, payload) {
     eventName: payload.name,
     timestamp: new Date().toISOString(),
     url: request.url,
-    userAgent: getUserAgent(payload, request) // Log the actual UA being checked
+    userAgent: getUserAgent(payload, request), // Log the actual UA being checked
+    consent_mode: payload.params?.consent?.analytics_storage || 'unknown'
   }));
 }
-
 
 /**
  * =============================================================================
@@ -540,7 +645,7 @@ addEventListener("fetch", (event) => {
 });
 
 /**
- * Handle the incoming request (ENHANCED WITH BOT DETECTION)
+ * Handle the incoming request (ENHANCED WITH GDPR COMPLIANCE)
  * @param {Request} request
  */
 async function handleRequest(request) {
@@ -565,11 +670,14 @@ async function handleRequest(request) {
       console.log("Received payload:", JSON.stringify(payload));
     }
 
+    // GDPR CONSENT PROCESSING - Apply before bot detection
+    const consentProcessedPayload = processGDPRConsent(payload);
+
     // BOT DETECTION CHECK
-    const botDetection = detectBot(request, payload);
+    const botDetection = detectBot(request, consentProcessedPayload);
     
     if (botDetection.isBot) {
-      logBotDetection(botDetection, request, payload);
+      logBotDetection(botDetection, request, consentProcessedPayload);
       
       // Return success response but don't process the event
       return new Response(
@@ -578,7 +686,8 @@ async function handleRequest(request) {
           filtered: true,
           reason: "bot_detected",
           bot_score: botDetection.score,
-          bot_details: DEBUG_MODE ? botDetection : undefined
+          bot_details: DEBUG_MODE ? botDetection : undefined,
+          gdpr_processed: true
         }),
         {
           status: 200,
@@ -592,18 +701,19 @@ async function handleRequest(request) {
 
     // Log legitimate traffic (optional, for monitoring)
     if (DEBUG_MODE) {
+      const consentInfo = consentProcessedPayload.params?.consent || {};
       console.log("Legitimate traffic detected:", JSON.stringify({
-        eventName: payload.name,
+        eventName: consentProcessedPayload.name,
         country: String(request.cf && request.cf.country || 'unknown'),
         city: String(request.cf && request.cf.city || 'unknown'),
         userAgent: (request.headers.get('User-Agent') || ''),
         bot_score: botDetection.score,
-
+        consent_mode: consentInfo.analytics_storage || 'unknown',
+        gdpr_processed: true
       }));
     }
 
- 
-      return await handleGA4Event(payload, request);
+    return await handleGA4Event(consentProcessedPayload, request);
     
   } catch (error) {
     // Log the error
@@ -614,6 +724,7 @@ async function handleRequest(request) {
       JSON.stringify({
         success: false,
         error: error.message,
+        gdpr_processed: false
       }),
       {
         status: 500,
@@ -626,9 +737,8 @@ async function handleRequest(request) {
   }
 }
 
-
 /**
- * Handle regular GA4 events
+ * Handle GA4 events (Enhanced with consent handling)
  * @param {Object} payload
  * @param {Request} request
  */
@@ -636,13 +746,13 @@ async function handleGA4Event(payload, request) {
   // Process the event data
   const processedData = processEventData(payload, request);
 
-  // if (processedData.params.debug_mode) {
-  //   DEBUG_MODE = true;
-  // }
-
   // Log the incoming event data
   if (DEBUG_MODE) {
     console.log("Received GA4 event:", JSON.stringify(payload));
+    
+    // Log consent status
+    const consentInfo = processedData.params?.consent || {};
+    console.log("Consent status:", JSON.stringify(consentInfo));
   }
 
   // Validate required parameters
@@ -670,6 +780,11 @@ async function handleGA4Event(payload, request) {
     ],
   };
 
+  // Add consent signals at the request level if available
+  if (processedData.consent) {
+    ga4Payload.consent = processedData.consent;
+  }
+
   // Add user_location at request level if available
   if (userLocation && Object.keys(userLocation).length > 0) {
     ga4Payload.user_location = userLocation;
@@ -679,18 +794,27 @@ async function handleGA4Event(payload, request) {
   if (ga4Payload.events[0].params.hasOwnProperty("client_id")) {
     delete ga4Payload.events[0].params.client_id;
   }
+  
   // Remove botData from params
   if (ga4Payload.events[0].params.hasOwnProperty("botData")) {
     delete ga4Payload.events[0].params.botData;
   }
 
-  // Add user_id if available
+  // Remove consent from params (it's at request level now)
+  if (ga4Payload.events[0].params.hasOwnProperty("consent")) {
+    delete ga4Payload.events[0].params.consent;
+  }
+
+  // Add user_id if available and consent allows
   if (processedData.params.user_id) {
     ga4Payload.user_id = processedData.params.user_id;
     // Remove from params to avoid duplication
     delete processedData.params.user_id;
   }
-
+  
+  if(ga4Payload.consent.analytics_storage){
+    delete ga4Payload.consent.analytics_storage;
+  }
   // Check if params exceeds 25
   const payloadParamsCount = Object.keys(processedData.params).length;
   if (payloadParamsCount > 25) {
@@ -707,10 +831,15 @@ async function handleGA4Event(payload, request) {
       }
     );
   }
-  if(DEBUG_MODE){
-    if(processedData.name == 'page_view' || processedData.name == 'custom_session_start' || processedData.name == 'custom_first_visit'){
+
+  if (DEBUG_MODE) {
+    if (processedData.name == 'page_view' || processedData.name == 'custom_session_start' || processedData.name == 'custom_first_visit') {
       console.log("Traffic Type:" + processedData.params.traffic_type);
     }
+    
+    // Log consent mode for tracking
+    const consentMode = ga4Payload.consent?.analytics_storage || 'unknown';
+    console.log("Sending event with consent mode:", consentMode);
   }
   
   if (DEBUG_MODE) {
@@ -744,7 +873,7 @@ async function handleGA4Event(payload, request) {
     console.log("GA4 API Response Body:", ga4ResponseBody);
   }
 
-  // Return success response
+  // Return success response with consent information
   return new Response(
     JSON.stringify({
       "success": true,
@@ -752,6 +881,8 @@ async function handleGA4Event(payload, request) {
       "ga4_status": ga4Response.status,
       "ga4_response": DEBUG_MODE ? ga4ResponseBody : undefined,
       "debug": DEBUG_MODE ? ga4Payload : undefined,
+      "consent_applied": ga4Payload.consent ? true : false,
+      "consent_mode": ga4Payload.consent?.analytics_storage || 'unknown'
     }),
     {
       headers: {
@@ -767,9 +898,6 @@ async function handleGA4Event(payload, request) {
  * UTILITY FUNCTIONS
  * =============================================================================
  */
-
-
-
 
 /**
  * Get continent and subcontinent info based on country code
@@ -975,6 +1103,26 @@ function extractLocationData(params) {
     delete params.region;
   }
 
+  // Handle continent-only location (for GDPR compliance)
+  if (params.geo_continent) {
+    // Map continent to a general country for GA4 compatibility
+    const continentMap = {
+      "Europe": "NL",
+      "America": "US", 
+      "North America": "US",
+      "South America": "BR",
+      "Asia": "JP",
+      "Africa": "ZA",
+      "Oceania": "AU"
+    };
+    
+    if (!userLocation.country_id && continentMap[params.geo_continent]) {
+      userLocation.country_id = continentMap[params.geo_continent];
+    }
+    
+    delete params.geo_continent;
+  }
+
   if (userLocation.country_id && !userLocation.continent_id) {
     const continentInfo = getContinentInfo(userLocation.country_id);
 
@@ -1151,6 +1299,63 @@ function formatRegionId(regionName, countryCode) {
 }
 
 /**
+ * Process and normalize event data (Enhanced with consent handling)
+ */
+function processEventData(data, request) {
+  const processedData = JSON.parse(JSON.stringify(data));
+
+  if (!processedData.params) {
+    processedData.params = {};
+  }
+
+  // Extract consent data if present
+  if (processedData.params.consent) {
+    processedData.consent = processedData.params.consent;
+    // Keep consent in params for now, will be removed later
+  }
+
+  const referer = request.headers.get("Referer") || "";
+  const origin = request.headers.get("Origin") || "";
+  const host = origin
+    ? new URL(origin).host
+    : referer
+    ? new URL(referer).host
+    : request.headers.get("Host");
+
+  switch (processedData.name) {
+    case "page_view":
+      if (!processedData.params.page_title) {
+        processedData.params.page_title = "Unknown Page";
+      }
+      if (!processedData.params.page_location) {
+        if (processedData.params.page_path) {
+          processedData.params.page_location = `https://${host}${processedData.params.page_path}`;
+        } else if (referer) {
+          processedData.params.page_location = referer;
+        }
+      }
+      break;
+
+    case "add_to_cart":
+    case "purchase":
+      if (!processedData.params.currency) {
+        processedData.params.currency = "EUR";
+      }
+      break;
+  }
+
+  if (!processedData.params.engagement_time_msec) {
+    processedData.params.engagement_time_msec = 1000;
+  }
+
+  if (DEBUG_MODE) {
+    console.log("Processed event data:", JSON.stringify(processedData));
+  }
+
+  return processedData;
+}
+
+/**
  * =============================================================================
  * CORS AND REQUEST HANDLING
  * =============================================================================
@@ -1178,59 +1383,4 @@ function getCORSHeaders(request) {
     "Access-Control-Allow-Headers": "Content-Type, Authorization",
     "Access-Control-Max-Age": "86400",
   };
-}
-
-/**
- * Process and normalize event data
- */
-function processEventData(data, request) {
-  const processedData = JSON.parse(JSON.stringify(data));
-
-  if (!processedData.params) {
-    processedData.params = {};
-  }
-
-  const referer = request.headers.get("Referer") || "";
-  const origin = request.headers.get("Origin") || "";
-  const host = origin
-    ? new URL(origin).host
-    : referer
-    ? new URL(referer).host
-    : request.headers.get("Host");
-
-  switch (processedData.name) {
-    case "page_view":
-      if (!processedData.params.page_title) {
-        processedData.params.page_title = "Unknown Page";
-      }
-      if (!processedData.params.page_location) {
-        if (processedData.params.page_path) {
-          processedData.params.page_location = `https://${host}${processedData.params.page_path}`;
-        } else if (referer) {
-          processedData.params.page_location = referer;
-        }
-      }
-      break;
-
-    case "add_to_cart":
-      if (!processedData.params.currency) {
-        processedData.params.currency = "EUR";
-      }
-      break;
-    case "purchase":
-      if (!processedData.params.currency) {
-        processedData.params.currency = "EUR";
-      }
-      break;
-  }
-
-  if (!processedData.params.engagement_time_msec) {
-    processedData.params.engagement_time_msec = 1000;
-  }
-
-  if (DEBUG_MODE) {
-    console.log("Processed event data:", JSON.stringify(processedData));
-  }
-
-  return processedData;
 }

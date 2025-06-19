@@ -14,30 +14,36 @@
     config: window.ga4ServerSideTagging || {},
     pageStartTime: Date.now(),
 
-    init: function () {
-      // Check if we have the required configuration
-      if (!this.config.measurementId) {
-        this.log("Measurement ID not configured");
-        return;
-      }
-      if (this.config.ga4TrackLoggedInUsers != true) {
-        this.log("Not tracking logged in users");
-        return;
-      }
+  init: function () {
+    // Check if we have the required configuration
+    if (!this.config.measurementId) {
+      this.log("Measurement ID not configured");
+      return;
+    }
+    if (this.config.ga4TrackLoggedInUsers != true) {
+      this.log("Not tracking logged in users");
+      return;
+    }
 
-      if (this.config.useServerSide == true) {
-        this.trackPageView();
-      }
+    // Initialize GDPR Consent Manager
+    if (this.config.consentSettings && this.config.consentSettings.consentModeEnabled) {
+      GA4ConsentManager.init(this.config.consentSettings);
+      this.log("GDPR Consent Manager initialized", this.config.consentSettings);
+    }
 
-      // Set up event listeners
-      this.setupEventListeners();
+    if (this.config.useServerSide == true) {
+      this.trackPageView();
+    }
 
-      // Log initialization
-      this.log(
-        "%c GA4 Server-Side Tagging initialized v1 ",
-        "background: #4CAF50; color: white; font-size: 16px; font-weight: bold; padding: 8px 12px; border-radius: 4px;"
-      );
-    },
+    // Set up event listeners
+    this.setupEventListeners();
+
+    // Log initialization
+    this.log(
+      "%c GA4 Server-Side Tagging initialized v3 ",
+      "background: #4CAF50; color: white; font-size: 16px; font-weight: bold; padding: 8px 12px; border-radius: 4px;"
+    );
+  },
     /**
      * REPLACE the existing trackPageView function with this enhanced version
      */
@@ -1711,123 +1717,236 @@
     },
 
     /**
-     * ENHANCED sendServerSideEvent function for WordPress Plugin
-     * Passes bot detection data to Cloudflare Worker
-     */
+      * ENHANCED sendServerSideEvent function for WordPress Plugin
+      * Passes bot detection data to Cloudflare Worker
+    */
     sendServerSideEvent: async function (eventName, eventParams) {
-      // Create a copy of the event params
-      var params = JSON.parse(JSON.stringify(eventParams));
-      var session = GA4Utils.session.get();
+    // Create a copy of the event params
+    var params = JSON.parse(JSON.stringify(eventParams));
+    var session = GA4Utils.session.get();
 
-      // Add user ID if available
-      if (!params.hasOwnProperty("user_id") && this.config.user_id) {
+    // Get consent data FIRST (before any data processing)
+    var consentData = GA4Utils.consent.getForServerSide();
+    this.log("Current consent status", consentData);
+
+    // Add user ID if available and consent allows
+    if (!params.hasOwnProperty("user_id") && this.config.user_id) {
+      if (consentData.analytics_storage === "granted") {
         params.user_id = this.config.user_id;
       }
+      // If consent denied, we skip user_id (it will be handled in anonymization)
+    }
 
-      // Add session information
-      if (!params.hasOwnProperty("session_id")) {
-        params.session_id = session.id;
-      }
-      if (!params.hasOwnProperty("session_count")) {
-        params.session_count = session.sessionCount;
-      }
-      if (!params.hasOwnProperty("engagement_time_msec")) {
-        params.engagement_time_msec = GA4Utils.time.calculateEngagementTime(
-          session.start
-        );
-      }
-
-      // Handle location data based on IP anonymization setting
-      await this.addLocationData(params);
-
-      // Get client ID
-      var clientId = GA4Utils.clientId.get();
-      if (clientId) {
-        params.client_id = clientId;
-        this.log("Using client ID: " + clientId);
-      }
-
-      // Get user agent and client behavior data
-      var userAgentInfo = GA4Utils.device.parseUserAgent();
-      var clientBehavior = GA4Utils.botDetection.getClientBehaviorData();
-
-      // Perform bot detection
-      var botDetectionResult = GA4Utils.botDetection.isBot(
-        userAgentInfo,
-        params,
-        clientBehavior
+    // Add session information
+    if (!params.hasOwnProperty("session_id")) {
+      params.session_id = session.id;
+    }
+    if (!params.hasOwnProperty("session_count")) {
+      params.session_count = session.sessionCount;
+    }
+    if (!params.hasOwnProperty("engagement_time_msec")) {
+      params.engagement_time_msec = GA4Utils.time.calculateEngagementTime(
+        session.start
       );
+    }
 
-      // If it's a bot, don't send to Cloudflare at all
-      if (botDetectionResult) {
-        this.log("Bot detected in sendServerSideEvent - aborting send", {
-          eventName: eventName,
-          userAgent: userAgentInfo.user_agent,
-          geoLocation: `${params.geo_city}, ${params.geo_country}`,
-          botScore: GA4Utils.botDetection.calculateBotScore(
-            userAgentInfo,
-            clientBehavior
-          ),
-        });
-        // return; // Don't send bot traffic
-      } else {
-        this.log("No bot detected in sendServerSideEvent - allowing send", {
-          eventName: eventName,
-          userAgent: userAgentInfo.user_agent,
-          geoLocation: `${params.geo_city}, ${params.geo_country}`,
-          botScore: GA4Utils.botDetection.calculateBotScore(
-            userAgentInfo,
-            clientBehavior
-          ),
-        });
-      }
+    // Handle location data based on consent
+    await this.addLocationDataWithConsent(params, consentData);
 
-      // Add bot detection data for Cloudflare Worker analysis
-      params.botData = {
-        // User agent info
-        user_agent_full: userAgentInfo.user_agent,
-        browser_name: userAgentInfo.browser_name,
-        device_type: userAgentInfo.device_type,
-        is_mobile: userAgentInfo.is_mobile,
+    // Get client ID (handle consent-based anonymization)
+    var clientId = this.getConsentAwareClientId(consentData);
+    if (clientId) {
+      params.client_id = clientId;
+      this.log("Using client ID: " + clientId);
+    }
 
-        // Client behavior data
-        has_javascript: clientBehavior.hasJavaScript,
-        screen_available_width: clientBehavior.screenAvailWidth,
-        screen_available_height: clientBehavior.screenAvailHeight,
-        color_depth: clientBehavior.colorDepth,
-        pixel_depth: clientBehavior.pixelDepth,
-        timezone: clientBehavior.timezone,
-        platform: clientBehavior.platform,
-        cookie_enabled: clientBehavior.cookieEnabled,
-        hardware_concurrency: clientBehavior.hardwareConcurrency,
-        max_touch_points: clientBehavior.maxTouchPoints,
-        webdriver_detected: clientBehavior.webdriver,
-        has_automation_indicators: clientBehavior.hasAutomationIndicators,
-        page_load_time: clientBehavior.pageLoadTime,
-        user_interaction_detected: clientBehavior.hasInteracted,
+    // Get user agent and client behavior data
+    var userAgentInfo = GA4Utils.device.parseUserAgent();
+    var clientBehavior = GA4Utils.botDetection.getClientBehaviorData();
 
-        // Bot scoring
-        bot_score: GA4Utils.botDetection.calculateBotScore(
+    // Perform bot detection
+    var botDetectionResult = GA4Utils.botDetection.isBot(
+      userAgentInfo,
+      params,
+      clientBehavior
+    );
+
+    if (botDetectionResult) {
+      this.log("Bot detected in sendServerSideEvent - aborting send", {
+        eventName: eventName,
+        userAgent: userAgentInfo.user_agent,
+        geoLocation: `${params.geo_city}, ${params.geo_country}`,
+        botScore: GA4Utils.botDetection.calculateBotScore(
           userAgentInfo,
           clientBehavior
         ),
-      };
+      });
+      return; // Don't send bot traffic
+    }
 
-      // Determine endpoint
-      var endpoint = this.config.cloudflareWorkerUrl || this.config.apiEndpoint;
+    // Add bot detection data for Cloudflare Worker analysis
+    params.botData = {
+      user_agent_full: userAgentInfo.user_agent,
+      browser_name: userAgentInfo.browser_name,
+      device_type: userAgentInfo.device_type,
+      is_mobile: userAgentInfo.is_mobile,
+      has_javascript: clientBehavior.hasJavaScript,
+      screen_available_width: clientBehavior.screenAvailWidth,
+      screen_available_height: clientBehavior.screenAvailHeight,
+      color_depth: clientBehavior.colorDepth,
+      pixel_depth: clientBehavior.pixelDepth,
+      timezone: clientBehavior.timezone,
+      platform: clientBehavior.platform,
+      cookie_enabled: clientBehavior.cookieEnabled,
+      hardware_concurrency: clientBehavior.hardwareConcurrency,
+      max_touch_points: clientBehavior.maxTouchPoints,
+      webdriver_detected: clientBehavior.webdriver,
+      has_automation_indicators: clientBehavior.hasAutomationIndicators,
+      page_load_time: clientBehavior.pageLoadTime,
+      user_interaction_detected: clientBehavior.hasInteracted,
+      bot_score: GA4Utils.botDetection.calculateBotScore(
+        userAgentInfo,
+        clientBehavior
+      ),
+    };
 
-      if (!endpoint) {
-        this.log("No server-side endpoint configured");
-        return;
+    // Apply GDPR anonymization based on consent
+    params = this.applyGDPRAnonymization(params, consentData);
+
+    // Add consent data to the payload
+    params.consent = consentData;
+
+    // Determine endpoint
+    var endpoint = this.config.cloudflareWorkerUrl || this.config.apiEndpoint;
+
+    if (!endpoint) {
+      this.log("No server-side endpoint configured");
+      return;
+    }
+
+    this.log("Sending to endpoint: " + endpoint, {
+      consent: consentData,
+      anonymized: consentData.analytics_storage !== "granted"
+    });
+
+    // Format data based on endpoint type
+    var data = this.formatEventData(eventName, params, endpoint);
+    this.sendAjaxPayload(endpoint, data);
+  },
+  // NEW METHOD: Get consent-aware client ID
+  getConsentAwareClientId: function(consentData) {
+    if (consentData.analytics_storage === "granted") {
+      // Full consent - use persistent client ID
+      return GA4Utils.clientId.get();
+    } else {
+      // No consent - use session-based client ID
+      var sessionId = GA4Utils.session.get().id;
+      return "session_" + sessionId;
+    }
+  },
+
+  // NEW METHOD: Add location data considering consent
+  addLocationDataWithConsent: async function(params, consentData) {
+    if (consentData.analytics_storage === "granted") {
+      // Full consent - use IP-based location if IP anonymization is disabled
+      if (this.config.anonymizeIp !== true) {
+        try {
+          const locationData = await this.getUserLocation();
+          if (locationData) {
+            if (locationData.latitude) params.geo_latitude = locationData.latitude;
+            if (locationData.longitude) params.geo_longitude = locationData.longitude;
+            if (locationData.city) params.geo_city = locationData.city;
+            if (locationData.country) params.geo_country = locationData.country;
+            if (locationData.region) params.geo_region = locationData.region;
+          }
+        } catch (error) {
+          this.log("Location tracking error:", error);
+        }
+      } else {
+        // IP anonymization enabled - only timezone info
+        try {
+          const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+          if (timezone) {
+            const timezoneRegions = timezone.split("/");
+            if (timezoneRegions.length > 0) {
+              params.geo_continent = timezoneRegions[0] || "";
+            }
+          }
+        } catch (e) {
+          this.log("Error getting timezone info:", e);
+        }
       }
+    } else {
+      // No analytics consent - only continent-level location via timezone
+      try {
+        const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+        if (timezone) {
+          const timezoneRegions = timezone.split("/");
+          if (timezoneRegions.length > 0) {
+            params.geo_continent = timezoneRegions[0] || "";
+            params.timezone = timezone;
+          }
+        }
+      } catch (e) {
+        this.log("Error getting timezone info:", e);
+      }
+    }
+  },
 
-      this.log("Sending to endpoint: " + endpoint);
+  // NEW METHOD: Apply GDPR anonymization
+  applyGDPRAnonymization: function(params, consentData) {
+    var anonymizedParams = JSON.parse(JSON.stringify(params));
 
-      // Format data based on endpoint type
-      var data = this.formatEventData(eventName, params, endpoint);
-      this.sendAjaxPayload(endpoint, data);
-    },
+    if (consentData.analytics_storage === "denied") {
+      // Remove/anonymize personal data
+      delete anonymizedParams.user_id;
+      
+      // Anonymize user agent
+      if (anonymizedParams.user_agent) {
+        anonymizedParams.user_agent = this.anonymizeUserAgent(anonymizedParams.user_agent);
+      }
+      
+      // Remove precise location data (keep only continent if available)
+      delete anonymizedParams.geo_latitude;
+      delete anonymizedParams.geo_longitude;
+      delete anonymizedParams.geo_city;
+      delete anonymizedParams.geo_region;
+      delete anonymizedParams.geo_country;
+      
+      // Use session-based client ID (already handled in getConsentAwareClientId)
+    }
 
+    if (consentData.ad_storage === "denied") {
+      // Remove advertising/attribution data
+      delete anonymizedParams.gclid;
+      delete anonymizedParams.content;
+      delete anonymizedParams.term;
+      
+      // Anonymize campaign info for paid traffic
+      if (anonymizedParams.campaign && 
+          !["(organic)", "(direct)", "(not set)", "(referral)"].includes(anonymizedParams.campaign)) {
+        anonymizedParams.campaign = "(not provided)";
+      }
+      
+      // Remove detailed referrer info for paid traffic
+      if (anonymizedParams.medium && 
+          ["cpc", "ppc", "paidsearch", "display", "banner", "cpm"].includes(anonymizedParams.medium)) {
+        anonymizedParams.source = "(not provided)";
+        anonymizedParams.medium = "(not provided)";
+      }
+    }
+
+    return anonymizedParams;
+  },
+
+  // NEW METHOD: Anonymize user agent
+  anonymizeUserAgent: function(userAgent) {
+    // Remove version numbers and specific browser details
+    return userAgent
+      .replace(/\d+\.\d+[\.\d]*/g, "x.x") // Replace version numbers
+      .replace(/\([^)]*\)/g, "(anonymous)") // Replace system info in parentheses
+      .substring(0, 100); // Truncate to 100 characters
+  },
     /**
      * Add location data to event parameters
      */

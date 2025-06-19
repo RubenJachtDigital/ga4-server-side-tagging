@@ -16,7 +16,7 @@
      * Client ID Management
      */
     clientId: {
-      /**
+        /**
        * Get or generate client ID
        * @returns {string}
        */
@@ -50,6 +50,16 @@
 
         return clientId;
       },
+
+      /**
+       * Get session-based client ID (for when consent is denied)
+       * @returns {string}
+       */
+      getSessionBased: function() {
+        var sessionId = GA4Utils.session.get().id;
+        return "session_" + sessionId;
+      }
+
     },
 
     /**
@@ -341,6 +351,15 @@
      * Device and Browser Detection
      */
     device: {
+        anonymizeUserAgent: function(userAgent) {
+          if (!userAgent) return "";
+          
+          // Remove version numbers and specific details
+          return userAgent
+            .replace(/\d+\.\d+[\.\d]*/g, "x.x") // Replace version numbers
+            .replace(/\([^)]*\)/g, "(anonymous)") // Replace system info in parentheses
+            .substring(0, 100); // Truncate to 100 characters
+        },
       /**
        * Parse user agent and get device information
        * @returns {Object}
@@ -1284,6 +1303,163 @@
         });
       },
     },
+ // ADD these methods to the GA4Utils.consent namespace in ga4-utilities.js
+
+consent: {
+  /**
+   * Check if user has given analytics consent
+   */
+  hasAnalyticsConsent: function () {
+    var consent =
+      window.GA4ConsentStatus ||
+      (window.GA4ConsentManager &&
+        window.GA4ConsentManager.getStoredConsent());
+    return consent && consent.analytics_storage === "granted";
+  },
+
+  /**
+   * Check if user has given advertising consent
+   */
+  hasAdvertisingConsent: function () {
+    var consent =
+      window.GA4ConsentStatus ||
+      (window.GA4ConsentManager &&
+        window.GA4ConsentManager.getStoredConsent());
+    return consent && consent.ad_storage === "granted";
+  },
+
+  /**
+   * Get consent mode
+   */
+  getMode: function () {
+    var consent =
+      window.GA4ConsentStatus ||
+      (window.GA4ConsentManager &&
+        window.GA4ConsentManager.getStoredConsent());
+
+    if (!consent) {
+      return "unknown";
+    }
+
+    if (
+      consent.analytics_storage === "granted" &&
+      consent.ad_storage === "granted"
+    ) {
+      return "granted";
+    } else if (
+      consent.analytics_storage === "denied" &&
+      consent.ad_storage === "denied"
+    ) {
+      return "denied";
+    } else {
+      return "partial";
+    }
+  },
+
+  /**
+   * Get anonymized parameters based on consent
+   */
+  getAnonymizedParams: function (originalParams) {
+    var consent =
+      window.GA4ConsentStatus ||
+      (window.GA4ConsentManager &&
+        window.GA4ConsentManager.getStoredConsent());
+    var params = JSON.parse(JSON.stringify(originalParams));
+
+    if (!consent || consent.analytics_storage === "denied") {
+      // Remove or anonymize personal data
+      delete params.user_id;
+      if (params.user_agent) {
+        params.user_agent = GA4Utils.device.anonymizeUserAgent(
+          params.user_agent
+        );
+      }
+      if (params.client_id && !params.client_id.startsWith("session_")) {
+        params.client_id = GA4Utils.clientId.getSessionBased();
+      }
+    }
+
+    if (!consent || consent.ad_storage === "denied") {
+      // Remove advertising data
+      delete params.gclid;
+      delete params.content;
+      delete params.term;
+      if (
+        params.campaign &&
+        !["(organic)", "(direct)", "(not set)"].includes(params.campaign)
+      ) {
+        params.campaign = "(not provided)";
+      }
+    }
+
+    return params;
+  },
+
+  /**
+   * Get consent data for server-side events
+   */
+  getForServerSide: function () {
+    var consent =
+      window.GA4ConsentStatus ||
+      (window.GA4ConsentManager &&
+        window.GA4ConsentManager.getStoredConsent());
+
+    if (!consent) {
+      return {
+        analytics_storage: "denied", // Default to denied for GDPR compliance
+        ad_storage: "denied",
+        ad_user_data: "denied",
+        ad_personalization: "denied",
+        functionality_storage: "denied",
+        personalization_storage: "denied",
+        security_storage: "granted",
+        consent_mode: "denied",
+        consent_timestamp: null,
+      };
+    }
+
+    return {
+      analytics_storage: consent.analytics_storage || "denied",
+      ad_storage: consent.ad_storage || "denied",
+      ad_user_data: consent.ad_user_data || "denied",
+      ad_personalization: consent.ad_personalization || "denied",
+      functionality_storage: consent.functionality_storage || "denied",
+      personalization_storage: consent.personalization_storage || "denied",
+      security_storage: consent.security_storage || "granted",
+      consent_mode: this.getMode(),
+      consent_timestamp: consent.timestamp,
+    };
+  },
+
+  /**
+   * Get consent-aware client ID
+   */
+  getConsentAwareClientId: function() {
+    var consent = this.getForServerSide();
+    
+    if (consent.analytics_storage === "granted") {
+      return GA4Utils.clientId.get();
+    } else {
+      // Use session-based client ID for denied consent
+      var sessionId = GA4Utils.session.get().id;
+      return "session_" + sessionId;
+    }
+  },
+
+  /**
+   * Check if we should track user data
+   */
+  shouldTrackUserData: function() {
+    return this.hasAnalyticsConsent();
+  },
+
+  /**
+   * Check if we should track advertising data
+   */
+  shouldTrackAdvertisingData: function() {
+    return this.hasAdvertisingConsent();
+  }
+},
 
     /**
      * Time and Engagement Utilities

@@ -63,6 +63,7 @@ class GA4_Server_Side_Tagging_Public
      *
      * @since    1.0.0
      */
+
     public function enqueue_scripts()
     {
         // Only enqueue if we have a measurement ID
@@ -75,6 +76,7 @@ class GA4_Server_Side_Tagging_Public
         if (is_user_logged_in() && !get_option('ga4_track_logged_in_users', true)) {
             return;
         }
+
         // 1. First enqueue the utilities library (dependency for other scripts)
         wp_enqueue_script(
             'ga4-utilities',
@@ -83,24 +85,26 @@ class GA4_Server_Side_Tagging_Public
             GA4_SERVER_SIDE_TAGGING_VERSION,
             false
         );
-          // Enqueue the consent management script
+
+        // 2. Enqueue the consent management script BEFORE the main tracking script
         wp_enqueue_script(
             'ga4-server-side-tagging-consent-management',
             GA4_SERVER_SIDE_TAGGING_PLUGIN_URL . 'public/js/ga4-consent-manager.js',
-            array('jquery'),
+            array('jquery', 'ga4-utilities'),
             GA4_SERVER_SIDE_TAGGING_VERSION,
             false
         );
 
-        // Enqueue the main tracking script
+        // 3. Enqueue the main tracking script (depends on both utilities and consent)
         wp_enqueue_script(
             'ga4-server-side-tagging-public',
             GA4_SERVER_SIDE_TAGGING_PLUGIN_URL . 'public/js/ga4-server-side-tagging-public.js',
-            array('jquery'),
+            array('jquery', 'ga4-utilities', 'ga4-server-side-tagging-consent-management'),
             GA4_SERVER_SIDE_TAGGING_VERSION,
             false
         );
-        // Prepare data for the script
+
+        // Prepare data for the script (enhanced with GDPR consent settings)
         $script_data = array(
             'measurementId' => $measurement_id,
             'useServerSide' => get_option('ga4_use_server_side', true),
@@ -116,7 +120,7 @@ class GA4_Server_Side_Tagging_Public
             'currency' => function_exists('get_woocommerce_currency') ? get_woocommerce_currency() : 'EUR',
             'siteName' => get_bloginfo('name'),
 
-            // GDPR Consent settings
+            // GDPR Consent settings (enhanced)
             'consentSettings' => array(
                 'useIubenda' => get_option('ga4_use_iubenda', false),
                 'acceptSelector' => get_option('ga4_consent_accept_selector', '.accept-all'),
@@ -160,8 +164,8 @@ class GA4_Server_Side_Tagging_Public
         } else {
             $script_data['isThankYouPage'] = false;
         }
-        if (method_exists('\CompuactEudonetAPI\Functions\CustomFunctions', 'get_raq_cart_data')) {
 
+        if (method_exists('\CompuactEudonetAPI\Functions\CustomFunctions', 'get_raq_cart_data')) {
             if (!empty(\CompuactEudonetAPI\Functions\CustomFunctions::get_raq_cart_data())) {
                 $quote_data = $this->get_order_quote_data_for_tracking();
                 $this->logger->info('Quote data:' . json_encode($quote_data));
@@ -169,6 +173,7 @@ class GA4_Server_Side_Tagging_Public
                 $this->logger->info('Added quote data for request a quote event tracking. Order ID: ' . $quote_data['transaction_id']);
             }
         }
+
         // Pass data to the script
         wp_localize_script(
             'ga4-server-side-tagging-public',
@@ -176,6 +181,15 @@ class GA4_Server_Side_Tagging_Public
             $script_data
         );
 
+        // Initialize consent manager immediately after localizing the script
+        wp_add_inline_script(
+            'ga4-server-side-tagging-consent-management',
+            'jQuery(document).ready(function($) {
+            if (typeof GA4ConsentManager !== "undefined" && ga4ServerSideTagging.consentSettings) {
+                GA4ConsentManager.init(ga4ServerSideTagging.consentSettings);
+            }
+        });'
+        );
     }
 
     /**
