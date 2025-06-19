@@ -865,6 +865,10 @@ async function handleGA4Event(payload, request) {
     // Remove from params to avoid duplication
     delete processedData.params.user_id;
   }
+  
+  if(ga4Payload.consent.analytics_storage){
+    delete ga4Payload.consent.analytics_storage;
+  }
 
   // Check if params exceeds 25
   const payloadParamsCount = Object.keys(processedData.params).length;
