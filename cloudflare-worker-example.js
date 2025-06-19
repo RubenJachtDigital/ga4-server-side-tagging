@@ -853,6 +853,9 @@ async function handleGA4Event(payload, request) {
   if (ga4Payload.events[0].params.hasOwnProperty("botData")) {
     delete ga4Payload.events[0].params.botData;
   }
+  if (!ga4Payload.events[0].params.consent_mode) {
+    ga4Payload.events[0].params.consent_mode = "ad_personalization: " + ga4Payload.consent.ad_personalization + ". ad_user_data: " + ga4Payload.consent.ad_user_data
+  }
 
   // Remove consent from params (it's at request level now)
   if (ga4Payload.events[0].params.hasOwnProperty("consent")) {
@@ -911,7 +914,7 @@ async function handleGA4Event(payload, request) {
     }
     
     // Log consent mode for tracking
-    const consentMode = ga4Payload.consent?.analytics_storage_temp || 'unknown';
+    const consentMode = ga4Payload.consent?.ad_user_data || 'unknown';
     console.log("Sending event with consent mode:", consentMode);
   }
   
