@@ -84,25 +84,25 @@ class GA4_Server_Side_Tagging_Public
             GA4_SERVER_SIDE_TAGGING_PLUGIN_URL . 'public/js/ga4-utilities.js',
             array('jquery'),
             GA4_SERVER_SIDE_TAGGING_VERSION,
-            true // Load in footer
+            false
         );
 
-        // 2. Enqueue the consent management script
+        // 2. Enqueue the consent management script BEFORE the main tracking script
         wp_enqueue_script(
             'ga4-server-side-tagging-consent-management',
             GA4_SERVER_SIDE_TAGGING_PLUGIN_URL . 'public/js/ga4-consent-manager.js',
             array('jquery', 'ga4-utilities'),
             GA4_SERVER_SIDE_TAGGING_VERSION,
-            true // Load in footer
+            false
         );
 
-        // 3. Enqueue the main tracking script
+        // 3. Enqueue the main tracking script (depends on both utilities and consent)
         wp_enqueue_script(
             'ga4-server-side-tagging-public',
             GA4_SERVER_SIDE_TAGGING_PLUGIN_URL . 'public/js/ga4-server-side-tagging-public.js',
             array('jquery', 'ga4-utilities', 'ga4-server-side-tagging-consent-management'),
             GA4_SERVER_SIDE_TAGGING_VERSION,
-            true // Load in footer
+            false
         );
 
         // Prepare data for the script (enhanced with GDPR consent settings)
@@ -126,9 +126,8 @@ class GA4_Server_Side_Tagging_Public
                 'useIubenda' => get_option('ga4_use_iubenda', false),
                 'acceptSelector' => get_option('ga4_consent_accept_selector', '.accept-all'),
                 'denySelector' => get_option('ga4_consent_deny_selector', '.deny-all'),
-                'defaultTimeout' => get_option('ga4_consent_default_timeout', 30),
-                'consentModeEnabled' => get_option('ga4_consent_mode_enabled', true),
-                'debugMode' => get_option('ga4_server_side_tagging_debug_mode', false) // Add debug to consent
+                'defaultTimeout' => get_option('ga4_consent_default_timeout', 0),
+                'consentModeEnabled' => get_option('ga4_consent_mode_enabled', true)
             )
         );
 
@@ -183,43 +182,14 @@ class GA4_Server_Side_Tagging_Public
             $script_data
         );
 
-        // Simple initialization script without retry logic
+        // Initialize consent manager immediately after localizing the script
         wp_add_inline_script(
-            'ga4-server-side-tagging-public',
-            '(function() {
-            var initGA4 = function() {
-                try {
-                    // Initialize tracking if all dependencies are available
-                    if (typeof GA4ServerSideTagging !== "undefined" && 
-                        typeof jQuery !== "undefined" && 
-                        typeof GA4Utils !== "undefined" && 
-                        typeof GA4ConsentManager !== "undefined") {
-                        
-                        jQuery(document).ready(function($) {
-                            GA4ServerSideTagging.init();
-                            
-                            if (ga4ServerSideTagging.debugMode) {
-                                console.log("✅ GA4 Server-Side Tagging initialized successfully");
-                            }
-                        });
-                    } else {
-                        if (ga4ServerSideTagging.debugMode) {
-                            console.log("ℹ️ GA4 dependencies not yet loaded - will initialize after consent action");
-                        }
-                    }
-                } catch (error) {
-                    console.error("❌ Error initializing GA4 tracking:", error);
-                }
-            };
-            
-            // Initialize when DOM is ready
-            if (document.readyState === "loading") {
-                document.addEventListener("DOMContentLoaded", initGA4);
-            } else {
-                initGA4();
+            'ga4-server-side-tagging-consent-management',
+            'jQuery(document).ready(function($) {
+            if (typeof GA4ConsentManager !== "undefined" && ga4ServerSideTagging.consentSettings) {
+                GA4ConsentManager.init(ga4ServerSideTagging.consentSettings);
             }
-        })();',
-            'after'
+        });'
         );
     }
 

@@ -19,6 +19,7 @@
     consentGiven: false,
     consentStatus: null,
     trackingInstance: null, // Reference to main tracking instance
+    consentProcessed: false, // NEW: Flag to prevent duplicate consent processing
 
     /**
      * Initialize the consent manager
@@ -27,7 +28,10 @@
       this.config = config || {};
       this.trackingInstance = trackingInstance;
       
-      this.log("Initializing GDPR Consent Manager with event queue", this.config);
+      this.log("Initializing GDPR Consent Manager with event queue", {
+        config: this.config,
+        defaultTimeout: this.config.defaultTimeout
+      });
 
       // Check for existing consent
       var existingConsent = this.getStoredConsent();
@@ -36,6 +40,7 @@
         this.log("Found existing consent", existingConsent);
         this.consentGiven = true;
         this.consentStatus = existingConsent;
+        this.consentProcessed = true; // NEW: Mark as processed to prevent duplicates
         this.applyConsent(existingConsent);
         
         // Allow tracking to start immediately
@@ -45,19 +50,23 @@
 
       // No existing consent - set up listeners and wait
       this.consentGiven = false;
+      this.consentProcessed = false; // NEW: Reset flag for new consent flow
       this.setupConsentListeners();
 
-      // Set up default consent timeout if configured
-      if (this.config.defaultTimeout && this.config.defaultTimeout > 0) {
-        this.setupDefaultConsentTimeout();
-      }
-
-      // Initialize consent mode with denied state
+      // Initialize consent mode with denied state BEFORE setting timeout
       if (this.config.consentModeEnabled) {
         this.initializeConsentMode();
       }
 
-      this.log("Waiting for user consent - events will be queued");
+      // Set up default consent timeout if configured (AFTER consent mode initialization)
+      if (this.config.defaultTimeout && this.config.defaultTimeout > 0) {
+        this.setupDefaultConsentTimeout();
+      }
+
+      this.log("Waiting for user consent - events will be queued", {
+        timeoutEnabled: !!(this.config.defaultTimeout && this.config.defaultTimeout > 0),
+        timeoutSeconds: this.config.defaultTimeout
+      });
     },
 
     /**
@@ -336,6 +345,7 @@
           self.log("Consent detected via polling", storedConsent);
           self.consentGiven = true;
           self.consentStatus = storedConsent;
+          self.consentProcessed = true; // NEW: Mark as processed
           self.applyConsent(storedConsent);
           self.enableTracking();
           self.processQueuedEvents();
@@ -406,12 +416,37 @@
     setupDefaultConsentTimeout: function () {
       var self = this;
       
-      this.log("Setting up consent timeout", { timeout: this.config.defaultTimeout });
+      // Don't set timeout if it's 0 or negative
+      if (!this.config.defaultTimeout || this.config.defaultTimeout <= 0) {
+        this.log("Default consent timeout disabled (set to 0 or negative)");
+        return;
+      }
+      
+      this.log("Setting up consent timeout", { 
+        timeout: this.config.defaultTimeout,
+        timeoutMs: this.config.defaultTimeout * 1000 
+      });
 
       this.consentTimeout = setTimeout(function () {
-        self.log("Consent timeout reached - applying default consent");
+        self.log("🕐 Consent timeout reached - applying default consent (granted)");
         self.handleConsentGiven();
       }, this.config.defaultTimeout * 1000);
+      
+      // Log countdown in debug mode
+      if (this.config.debugMode) {
+        var countdown = this.config.defaultTimeout;
+        var countdownInterval = setInterval(function() {
+          countdown--;
+          if (countdown <= 0 || self.consentGiven) {
+            clearInterval(countdownInterval);
+            return;
+          }
+          
+          if (countdown % 5 === 0) { // Log every 5 seconds
+            self.log("⏳ Consent timeout in " + countdown + " seconds");
+          }
+        }, 1000);
+      }
     },
 
     /**
@@ -421,13 +456,23 @@
       if (this.consentTimeout) {
         clearTimeout(this.consentTimeout);
         this.consentTimeout = null;
+        this.log("🚫 Consent timeout cleared");
       }
     },
 
     /**
-     * Handle consent given
+     * Handle consent given - MODIFIED to prevent duplicate processing
      */
     handleConsentGiven: function () {
+      // NEW: Check if consent has already been processed
+      if (this.consentProcessed) {
+        this.log("⚠️ Consent already processed - ignoring duplicate consent given", {
+          consentGiven: this.consentGiven,
+          consentProcessed: this.consentProcessed
+        });
+        return;
+      }
+
       this.clearConsentTimeout();
       
       var consent = {
@@ -443,13 +488,15 @@
 
       this.consentGiven = true;
       this.consentStatus = consent;
+      this.consentProcessed = true; // NEW: Mark as processed to prevent duplicates
       
       this.storeConsent(consent);
       this.applyConsent(consent);
       
-      this.log("Consent granted - processing queued events", { 
+      this.log("✅ Consent granted - processing queued events", { 
         consent: consent, 
-        queuedEvents: this.eventQueue.length 
+        queuedEvents: this.eventQueue.length,
+        consentProcessed: this.consentProcessed
       });
 
       // Enable tracking and process queued events
@@ -458,9 +505,18 @@
     },
 
     /**
-     * Handle consent denied
+     * Handle consent denied - MODIFIED to prevent duplicate processing
      */
     handleConsentDenied: function () {
+      // NEW: Check if consent has already been processed
+      if (this.consentProcessed) {
+        this.log("⚠️ Consent already processed - ignoring duplicate consent denied", {
+          consentGiven: this.consentGiven,
+          consentProcessed: this.consentProcessed
+        });
+        return;
+      }
+
       this.clearConsentTimeout();
       
       var consent = {
@@ -476,13 +532,15 @@
 
       this.consentGiven = true; // Allow events to be sent (but anonymized)
       this.consentStatus = consent;
+      this.consentProcessed = true; // NEW: Mark as processed to prevent duplicates
 
       this.storeConsent(consent);
       this.applyConsent(consent);
       
-      this.log("Consent denied - processing queued events with anonymization", { 
+      this.log("❌ Consent denied - processing queued events with anonymization", { 
         consent: consent, 
-        queuedEvents: this.eventQueue.length 
+        queuedEvents: this.eventQueue.length,
+        consentProcessed: this.consentProcessed
       });
 
       // Enable tracking and process queued events (they will be anonymized)
@@ -740,6 +798,7 @@
       this.clearEventQueue();
       this.consentGiven = false;
       this.consentStatus = null;
+      this.consentProcessed = false; // NEW: Reset the processed flag
       
       // Reset consent mode if enabled
       if (this.config.consentModeEnabled) {
@@ -778,6 +837,7 @@
       return {
         consentGiven: this.consentGiven,
         consentStatus: this.consentStatus,
+        consentProcessed: this.consentProcessed, // NEW: Include processed flag
         queueLength: this.eventQueue.length,
         queuedEvents: this.eventQueue.map(function(event) {
           return {
@@ -786,8 +846,52 @@
           };
         }),
         config: this.config,
-        hasTrackingInstance: !!this.trackingInstance
+        hasTrackingInstance: !!this.trackingInstance,
+        timeoutActive: !!this.consentTimeout,
+        timeoutConfig: this.config.defaultTimeout
       };
+    },
+
+    /**
+     * Test timeout functionality (for debugging)
+     */
+    testTimeout: function(seconds) {
+      seconds = seconds || 5; // Default 5 seconds for testing
+      
+      this.log("🧪 Testing consent timeout", { testSeconds: seconds });
+      
+      // Clear existing timeout
+      this.clearConsentTimeout();
+      
+      // Reset consent state
+      this.consentGiven = false;
+      this.consentStatus = null;
+      this.consentProcessed = false; // NEW: Reset processed flag for testing
+      
+      // Set test timeout
+      var self = this;
+      this.consentTimeout = setTimeout(function () {
+        self.log("🕐 TEST timeout reached - applying default consent");
+        self.handleConsentGiven();
+      }, seconds * 1000);
+      
+      // Add countdown for testing
+      var countdown = seconds;
+      var countdownInterval = setInterval(function() {
+        countdown--;
+        if (countdown <= 0 || self.consentGiven) {
+          clearInterval(countdownInterval);
+          return;
+        }
+        self.log("⏳ TEST timeout in " + countdown + " seconds");
+      }, 1000);
+    },
+
+    /**
+     * Check if timeout is active
+     */
+    isTimeoutActive: function() {
+      return !!this.consentTimeout;
     }
   };
 
