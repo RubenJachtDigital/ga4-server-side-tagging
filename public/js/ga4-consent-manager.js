@@ -822,77 +822,11 @@
       }
     },
 
-    /**
-     * Force process queued events (for debugging)
-     */
-    forceProcessQueue: function() {
-      this.log("Force processing queue", { queueLength: this.eventQueue.length });
-      this.processQueuedEvents();
-    },
 
-    /**
-     * Get debug information
-     */
-    getDebugInfo: function() {
-      return {
-        consentGiven: this.consentGiven,
-        consentStatus: this.consentStatus,
-        consentProcessed: this.consentProcessed, // NEW: Include processed flag
-        queueLength: this.eventQueue.length,
-        queuedEvents: this.eventQueue.map(function(event) {
-          return {
-            eventName: event.eventName,
-            age: Date.now() - event.timestamp
-          };
-        }),
-        config: this.config,
-        hasTrackingInstance: !!this.trackingInstance,
-        timeoutActive: !!this.consentTimeout,
-        timeoutConfig: this.config.defaultTimeout
-      };
-    },
 
-    /**
-     * Test timeout functionality (for debugging)
-     */
-    testTimeout: function(seconds) {
-      seconds = seconds || 5; // Default 5 seconds for testing
-      
-      this.log("🧪 Testing consent timeout", { testSeconds: seconds });
-      
-      // Clear existing timeout
-      this.clearConsentTimeout();
-      
-      // Reset consent state
-      this.consentGiven = false;
-      this.consentStatus = null;
-      this.consentProcessed = false; // NEW: Reset processed flag for testing
-      
-      // Set test timeout
-      var self = this;
-      this.consentTimeout = setTimeout(function () {
-        self.log("🕐 TEST timeout reached - applying default consent");
-        self.handleConsentGiven();
-      }, seconds * 1000);
-      
-      // Add countdown for testing
-      var countdown = seconds;
-      var countdownInterval = setInterval(function() {
-        countdown--;
-        if (countdown <= 0 || self.consentGiven) {
-          clearInterval(countdownInterval);
-          return;
-        }
-        self.log("⏳ TEST timeout in " + countdown + " seconds");
-      }, 1000);
-    },
 
-    /**
-     * Check if timeout is active
-     */
-    isTimeoutActive: function() {
-      return !!this.consentTimeout;
-    }
+
+
   };
 
   // Expose globally
