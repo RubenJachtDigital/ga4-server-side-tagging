@@ -250,6 +250,7 @@ if (!defined('WPINC')) {
                     <li>Enter your GA4 Measurement ID and API Secret</li>
                     <li>Set up your Cloudflare Workers (optional)</li>
                     <li>Adjust tracking options as needed</li>
+                    <li>Force your consent manager plugin to refresh all sessions. This can be done by changing the settings.</li>
                     <li>Save settings and test the connections</li>
                 </ol>
             </div>
