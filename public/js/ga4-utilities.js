@@ -1303,118 +1303,115 @@
         });
       },
     },
- // ADD these methods to the GA4Utils.consent namespace in ga4-utilities.js
 
-// UPDATE the GA4Utils.consent namespace in ga4-utilities.js to work with the consent manager:
+    consent: {
+      /**
+       * Check if user has given analytics consent
+       */
+      hasAnalyticsConsent: function () {
+        if (window.GA4ConsentManager && typeof window.GA4ConsentManager.isAnalyticsAllowed === 'function') {
+          return window.GA4ConsentManager.isAnalyticsAllowed();
+        }
+        
+        // Fallback to checking global status
+        var consent = window.GA4ConsentStatus;
+        return consent && consent.analytics_storage === "GRANTED";
+      },
 
-consent: {
-  /**
-   * Check if user has given analytics consent
-   */
-  hasAnalyticsConsent: function () {
-    if (window.GA4ConsentManager && typeof window.GA4ConsentManager.isAnalyticsAllowed === 'function') {
-      return window.GA4ConsentManager.isAnalyticsAllowed();
-    }
-    
-    // Fallback to checking global status
-    var consent = window.GA4ConsentStatus;
-    return consent && consent.analytics_storage === "GRANTED";
-  },
+      /**
+       * Check if user has given advertising consent
+       */
+      hasAdvertisingConsent: function () {
+        if (window.GA4ConsentManager && typeof window.GA4ConsentManager.isAdvertisingAllowed === 'function') {
+          return window.GA4ConsentManager.isAdvertisingAllowed();
+        }
+        
+        // Fallback to checking global status
+        var consent = window.GA4ConsentStatus;
+        return consent && consent.ad_storage === "GRANTED";
+      },
 
-  /**
-   * Check if user has given advertising consent
-   */
-  hasAdvertisingConsent: function () {
-    if (window.GA4ConsentManager && typeof window.GA4ConsentManager.isAdvertisingAllowed === 'function') {
-      return window.GA4ConsentManager.isAdvertisingAllowed();
-    }
-    
-    // Fallback to checking global status
-    var consent = window.GA4ConsentStatus;
-    return consent && consent.ad_storage === "GRANTED";
-  },
+      /**
+       * Get consent mode
+       */
+      getMode: function () {
+        if (window.GA4ConsentManager && typeof window.GA4ConsentManager.getConsentMode === 'function') {
+          return window.GA4ConsentManager.getConsentMode();
+        }
+        
+        // Fallback implementation
+        var consent = window.GA4ConsentStatus;
+        if (!consent) {
+          return "UNKNOWN";
+        }
 
-  /**
-   * Get consent mode
-   */
-  getMode: function () {
-    if (window.GA4ConsentManager && typeof window.GA4ConsentManager.getConsentMode === 'function') {
-      return window.GA4ConsentManager.getConsentMode();
-    }
-    
-    // Fallback implementation
-    var consent = window.GA4ConsentStatus;
-    if (!consent) {
-      return "unknown";
-    }
+        if (
+          consent.analytics_storage === "GRANTED" &&
+          consent.ad_storage === "GRANTED"
+        ) {
+          return "GRANTED";
+        } else if (
+          consent.analytics_storage === "DENIED" &&
+          consent.ad_storage === "DENIED"
+        ) {
+          return "DENIED";
+        } else {
+          return "PARTIAL";
+        }
+      },
 
-    if (
-      consent.analytics_storage === "GRANTED" &&
-      consent.ad_storage === "GRANTED"
-    ) {
-      return "GRANTED";
-    } else if (
-      consent.analytics_storage === "DENIED" &&
-      consent.ad_storage === "DENIED"
-    ) {
-      return "DENIED";
-    } else {
-      return "partial";
-    }
-  },
+      /**
+       * Get consent data for server-side events
+       */
+      getForServerSide: function () {
+        if (window.GA4ConsentManager && typeof window.GA4ConsentManager.getConsentForServerSide === 'function') {
+          return window.GA4ConsentManager.getConsentForServerSide();
+        }
+        
+        // Fallback implementation
+        var consent = window.GA4ConsentStatus;
 
-  /**
-   * Get consent data for server-side events
-   */
-  getForServerSide: function () {
-    if (window.GA4ConsentManager && typeof window.GA4ConsentManager.getConsentForServerSide === 'function') {
-      return window.GA4ConsentManager.getConsentForServerSide();
-    }
-    
-    // Fallback implementation
-    var consent = window.GA4ConsentStatus;
+        if (!consent) {
+          return {
+            analytics_storage: "DENIED", // Default to DENIED for GDPR compliance
+            ad_storage: "DENIED",
+            ad_user_data: "DENIED",
+            ad_personalization: "DENIED",
+            functionality_storage: "DENIED",
+            personalization_storage: "DENIED",
+            security_storage: "GRANTED",
+            consent_mode: "DENIED",
+            consent_timestamp: null,
+          };
+        }
 
-    if (!consent) {
-      return {
-        analytics_storage: "DENIED", // Default to denied for GDPR compliance
-        ad_storage: "DENIED",
-        ad_user_data: "DENIED",
-        ad_personalization: "DENIED",
-        functionality_storage: "DENIED",
-        personalization_storage: "DENIED",
-        security_storage: "GRANTED",
-        consent_mode: "DENIED",
-        consent_timestamp: null,
-      };
-    }
+        return {
+          analytics_storage: consent.analytics_storage || "DENIED",
+          ad_storage: consent.ad_storage || "DENIED",
+          ad_user_data: consent.ad_user_data || "DENIED",
+          ad_personalization: consent.ad_personalization || "DENIED",
+          functionality_storage: consent.functionality_storage || "DENIED",
+          personalization_storage: consent.personalization_storage || "DENIED",
+          security_storage: consent.security_storage || "GRANTED",
+          consent_mode: this.getMode(),
+          consent_timestamp: consent.timestamp,
+        };
+      },
 
-    return {
-      analytics_storage: consent.analytics_storage || "DENIED",
-      ad_storage: consent.ad_storage || "DENIED",
-      ad_user_data: consent.ad_user_data || "DENIED",
-      ad_personalization: consent.ad_personalization || "DENIED",
-      functionality_storage: consent.functionality_storage || "DENIED",
-      personalization_storage: consent.personalization_storage || "DENIED",
-      security_storage: consent.security_storage || "GRANTED",
-      consent_mode: this.getMode(),
-      consent_timestamp: consent.timestamp,
-    };
-  },
+      /**
+       * Check if we should track user data
+       */
+      shouldTrackUserData: function() {
+        return this.hasAnalyticsConsent();
+      },
 
-  /**
-   * Check if we should track user data
-   */
-  shouldTrackUserData: function() {
-    return this.hasAnalyticsConsent();
-  },
-
-  /**
-   * Check if we should track advertising data
-   */
-  shouldTrackAdvertisingData: function() {
-    return this.hasAdvertisingConsent();
-  }
-},
+      /**
+       * Check if we should track advertising data
+       */
+      shouldTrackAdvertisingData: function() {
+        return this.hasAdvertisingConsent();
+      }
+    },
 
     /**
      * Time and Engagement Utilities

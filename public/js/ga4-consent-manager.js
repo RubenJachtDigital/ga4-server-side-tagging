@@ -111,6 +111,7 @@
      */
     processQueuedEvents: function() {
       if (this.eventQueue.length === 0) {
+        this.log("No queued events to process");
         return;
       }
 
@@ -118,34 +119,52 @@
 
       // Process events in order
       var eventsToProcess = this.eventQueue.slice(); // Copy array
-      this.eventQueue = []; // Clear queue
+      this.eventQueue = []; // Clear queue immediately
 
-      // Send events via the main tracking system
-      eventsToProcess.forEach(function(queuedEvent) {
-        this.log("Sending queued event", { 
-          eventName: queuedEvent.eventName, 
-          age: Date.now() - queuedEvent.timestamp 
-        });
+      // Use setTimeout to ensure events are processed after consent is fully applied
+      setTimeout(function() {
+        eventsToProcess.forEach(function(queuedEvent, index) {
+          this.log("Sending queued event", { 
+            eventName: queuedEvent.eventName, 
+            index: index + 1,
+            total: eventsToProcess.length,
+            age: Date.now() - queuedEvent.timestamp 
+          });
 
-        // Call the tracking function with bypass flag
-        this.sendEventWithBypass(queuedEvent.eventName, queuedEvent.eventParams);
-      }.bind(this));
+          // Add small delay between events to prevent overwhelming the server
+          setTimeout(function() {
+            this.sendEventWithBypass(queuedEvent.eventName, queuedEvent.eventParams);
+          }.bind(this), index * 100); // 100ms delay between events
+          
+        }.bind(this));
+      }.bind(this), 200); // 200ms delay before starting to process
     },
 
     /**
      * Send event bypassing consent check (for queued events)
      */
     sendEventWithBypass: function(eventName, eventParams) {
+      this.log("Sending bypassed event", { eventName: eventName, params: eventParams });
+      
       if (this.trackingInstance && typeof this.trackingInstance.sendServerSideEvent === 'function') {
         // Call server-side tracking directly
         this.trackingInstance.sendServerSideEvent(eventName, eventParams);
       } else if (this.trackingInstance && typeof this.trackingInstance.trackEventInternal === 'function') {
         // Call internal tracking method
         this.trackingInstance.trackEventInternal(eventName, eventParams);
+      } else if (window.GA4ServerSideTagging && typeof window.GA4ServerSideTagging.sendServerSideEvent === 'function') {
+        // Fallback to global instance
+        window.GA4ServerSideTagging.sendServerSideEvent(eventName, eventParams);
+      } else if (window.GA4ServerSideTagging && typeof window.GA4ServerSideTagging.trackEventInternal === 'function') {
+        // Fallback to global instance internal method
+        window.GA4ServerSideTagging.trackEventInternal(eventName, eventParams);
       } else {
-        // Fallback to gtag if available
+        // Final fallback to gtag if available
         if (typeof gtag === "function") {
           gtag("event", eventName, eventParams);
+          this.log("Sent queued event via gtag", { eventName: eventName });
+        } else {
+          this.log("No tracking method available for queued event", { eventName: eventName });
         }
       }
     },
@@ -154,8 +173,20 @@
      * Enable tracking by notifying main tracking instance
      */
     enableTracking: function() {
+      // Initialize main tracking if it hasn't been initialized yet
+      if (typeof GA4ServerSideTagging !== "undefined" && !GA4ServerSideTagging.consentReady) {
+        try {
+          this.log("Initializing GA4ServerSideTagging after consent");
+          GA4ServerSideTagging.init();
+        } catch (error) {
+          this.log("Error initializing GA4ServerSideTagging", error);
+        }
+      }
+      
       if (this.trackingInstance && typeof this.trackingInstance.onConsentReady === 'function') {
         this.trackingInstance.onConsentReady();
+      } else if (typeof GA4ServerSideTagging !== "undefined" && typeof GA4ServerSideTagging.onConsentReady === 'function') {
+        GA4ServerSideTagging.onConsentReady();
       }
     },
 
@@ -218,18 +249,155 @@
       var self = this;
 
       if (this.config.acceptSelector) {
-        $(document).on('click', this.config.acceptSelector, function (e) {
+        // Use both click and change events to catch different consent implementations
+        $(document).on('click change', this.config.acceptSelector, function (e) {
+          e.preventDefault(); // Prevent default behavior
           self.log("Custom accept consent clicked", { selector: self.config.acceptSelector });
-          self.handleConsentGiven();
+          
+          // Add small delay to ensure consent UI has updated
+          setTimeout(function() {
+            self.handleConsentGiven();
+          }, 100);
+        });
+        
+        // Also listen for the button becoming visible (some consent tools load dynamically)
+        this.watchForConsentButtons(this.config.acceptSelector, function() {
+          self.log("Accept consent button detected");
         });
       }
 
       if (this.config.denySelector) {
-        $(document).on('click', this.config.denySelector, function (e) {
+        $(document).on('click change', this.config.denySelector, function (e) {
+          e.preventDefault(); // Prevent default behavior
           self.log("Custom deny consent clicked", { selector: self.config.denySelector });
-          self.handleConsentDenied();
+          
+          // Add small delay to ensure consent UI has updated
+          setTimeout(function() {
+            self.handleConsentDenied();
+          }, 100);
+        });
+        
+        // Also listen for the button becoming visible
+        this.watchForConsentButtons(this.config.denySelector, function() {
+          self.log("Deny consent button detected");
         });
       }
+
+      // Also try to detect consent changes by polling localStorage/cookies
+      this.startConsentPolling();
+    },
+
+    /**
+     * Watch for consent buttons to appear (for dynamically loaded consent tools)
+     */
+    watchForConsentButtons: function(selector, callback) {
+      var self = this;
+      var checkInterval = setInterval(function() {
+        if ($(selector).length > 0) {
+          clearInterval(checkInterval);
+          if (callback) callback();
+          
+          // Re-attach listeners to ensure they work
+          $(document).off('click change', selector).on('click change', selector, function(e) {
+            e.preventDefault();
+            self.log("Consent button clicked after detection", { selector: selector });
+            
+            setTimeout(function() {
+              if (selector === self.config.acceptSelector) {
+                self.handleConsentGiven();
+              } else {
+                self.handleConsentDenied();
+              }
+            }, 100);
+          });
+        }
+      }, 500);
+
+      // Stop checking after 30 seconds
+      setTimeout(function() {
+        clearInterval(checkInterval);
+      }, 30000);
+    },
+
+    /**
+     * Poll for consent changes (fallback for consent tools that don't trigger events)
+     */
+    startConsentPolling: function() {
+      var self = this;
+      var pollInterval = setInterval(function() {
+        if (self.consentGiven) {
+          clearInterval(pollInterval);
+          return;
+        }
+
+        // Check if consent has been set in localStorage by other means
+        var storedConsent = self.getStoredConsent();
+        if (storedConsent && !self.consentGiven) {
+          self.log("Consent detected via polling", storedConsent);
+          self.consentGiven = true;
+          self.consentStatus = storedConsent;
+          self.applyConsent(storedConsent);
+          self.enableTracking();
+          self.processQueuedEvents();
+          clearInterval(pollInterval);
+        }
+
+        // Check for common consent cookies
+        self.checkConsentCookies();
+      }, 1000);
+
+      // Stop polling after 2 minutes
+      setTimeout(function() {
+        clearInterval(pollInterval);
+      }, 120000);
+    },
+
+    /**
+     * Check for common consent cookies
+     */
+    checkConsentCookies: function() {
+      if (this.consentGiven) return;
+
+      var commonConsentCookies = [
+        'cookieConsent',
+        'cookie_consent',
+        'gdpr_consent',
+        'privacy_consent',
+        'cookie-consent',
+        'acceptCookies',
+        'cookiesAccepted'
+      ];
+
+      for (var i = 0; i < commonConsentCookies.length; i++) {
+        var cookieValue = this.getCookie(commonConsentCookies[i]);
+        if (cookieValue) {
+          this.log("Consent cookie detected", { cookie: commonConsentCookies[i], value: cookieValue });
+          
+          // Try to determine if it's accept or deny based on cookie value
+          var normalizedValue = cookieValue.toLowerCase();
+          if (normalizedValue.includes('accept') || normalizedValue.includes('true') || normalizedValue === '1' || normalizedValue === 'yes') {
+            this.handleConsentGiven();
+            return;
+          } else if (normalizedValue.includes('deny') || normalizedValue.includes('false') || normalizedValue === '0' || normalizedValue === 'no') {
+            this.handleConsentDenied();
+            return;
+          }
+        }
+      }
+    },
+
+    /**
+     * Get cookie value by name
+     */
+    getCookie: function(name) {
+      var nameEQ = name + "=";
+      var ca = document.cookie.split(';');
+      for (var i = 0; i < ca.length; i++) {
+        var c = ca[i];
+        while (c.charAt(0) === ' ') c = c.substring(1, c.length);
+        if (c.indexOf(nameEQ) === 0) return c.substring(nameEQ.length, c.length);
+      }
+      return null;
     },
 
     /**
@@ -352,13 +520,13 @@
     initializeConsentMode: function () {
       if (typeof gtag === 'function') {
         gtag('consent', 'default', {
-          analytics_storage: 'DENIED',
-          ad_storage: 'DENIED',
-          ad_user_data: 'DENIED',
-          ad_personalization: 'DENIED',
-          functionality_storage: 'DENIED',
-          personalization_storage: 'DENIED',
-          security_storage: 'GRANTED',
+          analytics_storage: 'denied',
+          ad_storage: 'denied',
+          ad_user_data: 'denied',
+          ad_personalization: 'denied',
+          functionality_storage: 'denied',
+          personalization_storage: 'denied',
+          security_storage: 'granted',
           wait_for_update: 30000 // Wait 30 seconds for consent update
         });
 
@@ -469,7 +637,7 @@
       var consent = this.getStoredConsent();
       
       if (!consent) {
-        return 'unknown';
+        return 'UNKNOWN';
       }
       
       if (consent.analytics_storage === 'GRANTED' && consent.ad_storage === 'GRANTED') {
@@ -477,7 +645,7 @@
       } else if (consent.analytics_storage === 'DENIED' && consent.ad_storage === 'DENIED') {
         return 'DENIED';
       } else {
-        return 'partial';
+        return 'PARTIAL';
       }
     },
 
@@ -593,6 +761,33 @@
           console.log(prefix + " " + message);
         }
       }
+    },
+
+    /**
+     * Force process queued events (for debugging)
+     */
+    forceProcessQueue: function() {
+      this.log("Force processing queue", { queueLength: this.eventQueue.length });
+      this.processQueuedEvents();
+    },
+
+    /**
+     * Get debug information
+     */
+    getDebugInfo: function() {
+      return {
+        consentGiven: this.consentGiven,
+        consentStatus: this.consentStatus,
+        queueLength: this.eventQueue.length,
+        queuedEvents: this.eventQueue.map(function(event) {
+          return {
+            eventName: event.eventName,
+            age: Date.now() - event.timestamp
+          };
+        }),
+        config: this.config,
+        hasTrackingInstance: !!this.trackingInstance
+      };
     }
   };
 

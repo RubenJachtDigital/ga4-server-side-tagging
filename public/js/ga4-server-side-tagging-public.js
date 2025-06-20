@@ -10,7 +10,7 @@
 
   // GA4 Server-Side Tagging Client
   var GA4ServerSideTagging = {
-    // Configuration
+        // Configuration
     config: window.ga4ServerSideTagging || {},
     pageStartTime: Date.now(),
     consentReady: false,
@@ -34,49 +34,51 @@
 
       // Log initialization
       this.log(
-        "%c GA4 Server-Side Tagging initialized v5 ",
+        "%c GA4 Server-Side Tagging initialized v1 ",
         "background: #4CAF50; color: white; font-size: 16px; font-weight: bold; padding: 8px 12px; border-radius: 4px;"
       );
-  },
+    },
 
-  /**
-   * Initialize consent system
-   */
-  initializeConsentSystem: function() {
-    var self = this;
-    
-    if (this.config.consentSettings && this.config.consentSettings.consentModeEnabled) {
-      // Initialize consent manager with reference to this tracking instance
-      if (window.GA4ConsentManager && typeof window.GA4ConsentManager.init === 'function') {
-        window.GA4ConsentManager.init(this.config.consentSettings, this);
-        
-        // Listen for consent updates
-        $(document).on('ga4ConsentUpdated', function(event, consent) {
-          self.log("Consent updated", consent);
-        });
+    /**
+     * Initialize consent system
+     */
+    initializeConsentSystem: function() {
+      var self = this;
+      
+      if (this.config.consentSettings && this.config.consentSettings.consentModeEnabled) {
+        // Initialize consent manager with reference to this tracking instance
+        if (window.GA4ConsentManager && typeof window.GA4ConsentManager.init === 'function') {
+          window.GA4ConsentManager.init(this.config.consentSettings, this);
+          
+          // Listen for consent updates
+          $(document).on('ga4ConsentUpdated', function(event, consent) {
+            self.log("Consent updated", consent);
+          });
+        } else {
+          this.log("GA4ConsentManager not available");
+          // If consent manager is not available, assume consent and start tracking
+          this.onConsentReady();
+        }
       } else {
-        this.log("GA4ConsentManager not available");
-        // If consent manager is not available, assume consent and start tracking
+        this.log("Consent mode disabled - starting tracking immediately");
+        // If consent mode is disabled, start tracking immediately
         this.onConsentReady();
       }
-    } else {
-      this.log("Consent mode disabled - starting tracking immediately");
-      // If consent mode is disabled, start tracking immediately
-      this.onConsentReady();
-    }
-  },
+    },
 
-  /**
-   * Called when consent is ready (either given/denied or not required)
-   */
-  onConsentReady: function() {
-    this.consentReady = true;
-    this.log("Consent ready - starting tracking");
-    
-    if (this.config.useServerSide == true) {
-      this.trackPageView();
-    }
-  },
+    /**
+     * Called when consent is ready (either given/denied or not required)
+     */
+    onConsentReady: function() {
+      this.consentReady = true;
+      this.log("Consent ready - starting tracking");
+      
+      if (this.config.useServerSide == true) {
+        this.trackPageView();
+      }
+    },
+
+
   
     /**
      * REPLACE the existing trackPageView function with this enhanced version
