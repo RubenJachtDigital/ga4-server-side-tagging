@@ -34,7 +34,7 @@
 
       // Log initialization
       this.log(
-        "%c GA4 Server-Side Tagging initialized v2 ",
+        "%c GA4 Server-Side Tagging initialized v3 ",
         "background: #4CAF50; color: white; font-size: 16px; font-weight: bold; padding: 8px 12px; border-radius: 4px;"
       );
     },
@@ -45,9 +45,19 @@
     initializeConsentSystem: function() {
       var self = this;
       
+      this.log("🔍 Checking consent system configuration", {
+        hasConsentSettings: !!(this.config.consentSettings),
+        consentModeEnabled: this.config.consentSettings && this.config.consentSettings.consentModeEnabled,
+        GA4ConsentManagerAvailable: !!(window.GA4ConsentManager),
+        GA4ConsentManagerInitFunction: window.GA4ConsentManager && typeof window.GA4ConsentManager.init === 'function'
+      });
+      
       if (this.config.consentSettings && this.config.consentSettings.consentModeEnabled) {
+        this.log("✅ Consent mode is enabled, attempting to initialize consent manager");
+        
         // Initialize consent manager with reference to this tracking instance
         if (window.GA4ConsentManager && typeof window.GA4ConsentManager.init === 'function') {
+          this.log("🎯 Initializing GA4ConsentManager with settings", this.config.consentSettings);
           window.GA4ConsentManager.init(this.config.consentSettings, this);
           
           // Listen for consent updates
@@ -55,12 +65,12 @@
             self.log("Consent updated", consent);
           });
         } else {
-          this.log("GA4ConsentManager not available");
+          this.log("❌ GA4ConsentManager not available - starting tracking without consent management");
           // If consent manager is not available, assume consent and start tracking
           this.onConsentReady();
         }
       } else {
-        this.log("Consent mode disabled - starting tracking immediately");
+        this.log("ℹ️ Consent mode disabled - starting tracking immediately");
         // If consent mode is disabled, start tracking immediately
         this.onConsentReady();
       }
@@ -1749,8 +1759,17 @@
           this.log("Event queued by consent manager: " + eventName);
           return; // Event was queued, don't send now
         }
+        
+        // Consent manager says we can send, ensure our flag is also set
+        if (!this.consentReady) {
+          this.log("🔧 Consent manager says send, updating consentReady flag");
+          this.consentReady = true;
+        }
       } else if (!this.consentReady) {
-        this.log("Consent not ready, skipping event: " + eventName);
+        this.log("Consent not ready, skipping event: " + eventName, {
+          consentReady: this.consentReady,
+          hasConsentManager: !!(window.GA4ConsentManager)
+        });
         return;
       }
 

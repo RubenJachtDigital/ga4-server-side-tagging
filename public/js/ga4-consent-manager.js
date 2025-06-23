@@ -19,7 +19,8 @@
     consentGiven: false,
     consentStatus: null,
     trackingInstance: null, // Reference to main tracking instance
-    consentProcessed: false, // NEW: Flag to prevent duplicate consent processing
+    consentProcessed: false, // Flag to prevent duplicate consent processing
+    eventsProcessed: false, // Flag to prevent duplicate event processing
 
     /**
      * Initialize the consent manager
@@ -28,9 +29,12 @@
       this.config = config || {};
       this.trackingInstance = trackingInstance;
       
-      this.log("Initializing GDPR Consent Manager with event queue", {
+      this.log("🚀 Initializing GDPR Consent Manager with event queue", {
         config: this.config,
-        defaultTimeout: this.config.defaultTimeout
+        defaultTimeout: this.config.defaultTimeout,
+        useIubenda: this.config.useIubenda,
+        consentModeEnabled: this.config.consentModeEnabled,
+        debugMode: this.config.debugMode
       });
 
       // Check for existing consent
@@ -59,6 +63,7 @@
       }
 
       // Set up default consent timeout if configured (AFTER consent mode initialization)
+      // Auto-accept after X seconds regardless of consent method
       if (this.config.defaultTimeout && this.config.defaultTimeout > 0) {
         this.setupDefaultConsentTimeout();
       }
@@ -90,11 +95,20 @@
      * @returns {boolean} - true if event should be sent now, false if queued
      */
     shouldSendEvent: function(eventName, eventParams) {
+      this.log("🤔 Checking if event should be sent", {
+        eventName: eventName,
+        consentGiven: this.consentGiven,
+        consentProcessed: this.consentProcessed,
+        consentStatus: this.consentStatus ? this.consentStatus.analytics_storage : 'none'
+      });
+      
       if (this.consentGiven) {
+        this.log("✅ Consent given - sending event immediately: " + eventName);
         return true; // Send immediately
       }
 
       // Queue the event
+      this.log("⏳ No consent yet - queuing event: " + eventName);
       this.queueEvent(eventName, eventParams);
       return false; // Don't send now
     },
@@ -124,11 +138,26 @@
         return;
       }
 
-      this.log("Processing queued events", { count: this.eventQueue.length });
+      // Prevent duplicate processing if events were already processed
+      if (this.eventsProcessed) {
+        this.log("⚠️ Events already processed - clearing queue without reprocessing", {
+          queueLength: this.eventQueue.length
+        });
+        this.eventQueue = []; // Clear queue
+        return;
+      }
+
+      this.log("📤 Processing queued events", { 
+        count: this.eventQueue.length,
+        consentStatus: this.consentStatus ? this.consentStatus.analytics_storage : 'unknown'
+      });
+
+      // Mark events as being processed
+      this.eventsProcessed = true;
 
       // Process events in order
       var eventsToProcess = this.eventQueue.slice(); // Copy array
-      this.eventQueue = []; // Clear queue immediately
+      this.eventQueue = []; // Clear queue immediately to prevent reprocessing
 
       // Use setTimeout to ensure events are processed after consent is fully applied
       setTimeout(function() {
@@ -182,21 +211,48 @@
      * Enable tracking by notifying main tracking instance
      */
     enableTracking: function() {
-      // Initialize main tracking if it hasn't been initialized yet
-      if (typeof GA4ServerSideTagging !== "undefined" && !GA4ServerSideTagging.consentReady) {
+      this.log("🚀 Enabling tracking after consent decision");
+      
+      // Set global consent ready flag
+      window.GA4ConsentReady = true;
+      
+      // Directly set the consentReady flag on the tracking instance
+      if (typeof GA4ServerSideTagging !== "undefined") {
+        this.log("📍 Setting GA4ServerSideTagging.consentReady = true");
+        GA4ServerSideTagging.consentReady = true;
+      }
+      
+      // Set on tracking instance reference if available
+      if (this.trackingInstance) {
+        this.log("📍 Setting trackingInstance.consentReady = true");
+        this.trackingInstance.consentReady = true;
+      }
+      
+      // Call onConsentReady methods
+      if (this.trackingInstance && typeof this.trackingInstance.onConsentReady === 'function') {
+        this.log("📞 Calling onConsentReady on tracking instance");
         try {
-          this.log("Initializing GA4ServerSideTagging after consent");
-          GA4ServerSideTagging.init();
+          this.trackingInstance.onConsentReady();
         } catch (error) {
-          this.log("Error initializing GA4ServerSideTagging", error);
+          this.log("❌ Error calling onConsentReady on tracking instance", error);
+        }
+      } else if (typeof GA4ServerSideTagging !== "undefined" && typeof GA4ServerSideTagging.onConsentReady === 'function') {
+        this.log("📞 Calling onConsentReady on global GA4ServerSideTagging");
+        try {
+          GA4ServerSideTagging.onConsentReady();
+        } catch (error) {
+          this.log("❌ Error calling onConsentReady on GA4ServerSideTagging", error);
         }
       }
       
-      if (this.trackingInstance && typeof this.trackingInstance.onConsentReady === 'function') {
-        this.trackingInstance.onConsentReady();
-      } else if (typeof GA4ServerSideTagging !== "undefined" && typeof GA4ServerSideTagging.onConsentReady === 'function') {
-        GA4ServerSideTagging.onConsentReady();
-      }
+      // Trigger a custom event that can be listened to by other scripts
+      $(document).trigger('ga4TrackingEnabled', [this.consentStatus]);
+      
+      this.log("✅ Tracking enabled successfully", {
+        globalConsentReady: window.GA4ConsentReady,
+        trackingInstanceReady: this.trackingInstance ? this.trackingInstance.consentReady : 'N/A',
+        globalTrackingReady: typeof GA4ServerSideTagging !== "undefined" ? GA4ServerSideTagging.consentReady : 'N/A'
+      });
     },
 
     /**
@@ -213,10 +269,26 @@
      * Setup consent listeners based on configuration
      */
     setupConsentListeners: function () {
-      if (this.config.useIubenda) {
+      // Check if useIubenda is true (can be string "1" or boolean true)
+      var useIubenda = this.config.useIubenda === true || this.config.useIubenda === "1" || this.config.useIubenda === 1;
+      
+      this.log("🎯 Setting up consent listeners", {
+        useIubenda: useIubenda,
+        useIubendaRaw: this.config.useIubenda,
+        hasAcceptSelector: !!(this.config.acceptSelector),
+        hasDenySelector: !!(this.config.denySelector),
+        acceptSelector: this.config.acceptSelector,
+        denySelector: this.config.denySelector
+      });
+      
+      if (useIubenda) {
+        this.log("🔵 Using Iubenda consent management (ignoring custom selectors)");
         this.setupIubendaListeners();
-      } else {
+      } else if (this.config.acceptSelector || this.config.denySelector) {
+        this.log("🟡 Using custom CSS selector consent management");
         this.setupCustomConsentListeners();
+      } else {
+        this.log("⚠️ No consent method configured - using timeout or default consent");
       }
     },
 
@@ -228,22 +300,85 @@
 
       var checkIubenda = function () {
         if (typeof _iub !== 'undefined' && _iub.csConfiguration) {
+          self.log("✅ Iubenda detected, setting up callbacks (custom selectors will be ignored)");
+          
+          // Store original callbacks if they exist
+          var originalCallbacks = _iub.csConfiguration.callback || {};
           _iub.csConfiguration.callback = _iub.csConfiguration.callback || {};
           
+          // Set up consent given callback
           _iub.csConfiguration.callback.onConsentGiven = function () {
-            self.log("Iubenda consent given");
-            self.handleConsentGiven();
+            self.log("🟢 Iubenda consent given callback triggered");
+            
+            // Call original callback if it existed
+            if (originalCallbacks.onConsentGiven && typeof originalCallbacks.onConsentGiven === 'function') {
+              try {
+                originalCallbacks.onConsentGiven();
+              } catch (e) {
+                self.log("Error calling original onConsentGiven callback", e);
+              }
+            }
+            
+            // Handle our consent logic - ensure it runs
+            self.log("🚀 Processing consent given...");
+            setTimeout(function() {
+              self.handleConsentGiven();
+            }, 50); // Small delay to ensure Iubenda has finished processing
           };
 
+          // Set up consent rejected callback
           _iub.csConfiguration.callback.onConsentRejected = function () {
-            self.log("Iubenda consent rejected");
-            self.handleConsentDenied();
+            self.log("🔴 Iubenda consent rejected callback triggered");
+            
+            // Call original callback if it existed
+            if (originalCallbacks.onConsentRejected && typeof originalCallbacks.onConsentRejected === 'function') {
+              try {
+                originalCallbacks.onConsentRejected();
+              } catch (e) {
+                self.log("Error calling original onConsentRejected callback", e);
+              }
+            }
+            
+            // Handle our consent logic - ensure it runs
+            self.log("🚀 Processing consent denied...");
+            setTimeout(function() {
+              self.handleConsentDenied();
+            }, 50); // Small delay to ensure Iubenda has finished processing
           };
 
-          if (typeof _iub.csConfiguration.callback.onConsentFirstGiven === 'function') {
-            _iub.csConfiguration.callback.onConsentFirstGiven();
-          }
+          // Set up first consent callback
+          _iub.csConfiguration.callback.onConsentFirstGiven = function () {
+            self.log("🆕 Iubenda first consent given callback triggered");
+            
+            // Call original callback if it existed
+            if (originalCallbacks.onConsentFirstGiven && typeof originalCallbacks.onConsentFirstGiven === 'function') {
+              try {
+                originalCallbacks.onConsentFirstGiven();
+              } catch (e) {
+                self.log("Error calling original onConsentFirstGiven callback", e);
+              }
+            }
+            
+            // This is triggered when consent is given for the first time
+            self.log("🚀 Processing first consent given...");
+            setTimeout(function() {
+              self.handleConsentGiven();
+            }, 50);
+          };
+
+          self.log("✅ Iubenda callbacks configured successfully");
+          
+          // IMPORTANT: Also set up direct button click listeners as fallback
+          // In case Iubenda callbacks don't fire properly
+          self.setupIubendaButtonFallback();
+          
+          // Check if consent was already given/denied before we attached listeners
+          // Focus on callbacks working for new decisions rather than complex existing consent detection
+          setTimeout(function() {
+            self.checkExistingIubendaConsent();
+          }, 200);
         } else {
+          // Keep checking for Iubenda to load
           setTimeout(checkIubenda, 100);
         }
       };
@@ -252,10 +387,193 @@
     },
 
     /**
+     * Setup direct Iubenda button click listeners as fallback
+     */
+    setupIubendaButtonFallback: function() {
+      var self = this;
+      
+      // Iubenda specific button selectors
+      var iubendaAcceptSelectors = [
+        '.iubenda-cs-accept-btn',
+        '.iub-cs-accept-btn', 
+        '[class*="iubenda"][class*="accept"]',
+        '[class*="iub"][class*="accept"]'
+      ].join(', ');
+      
+      var iubendaRejectSelectors = [
+        '.iubenda-cs-reject-btn',
+        '.iub-cs-reject-btn',
+        '[class*="iubenda"][class*="reject"]',
+        '[class*="iub"][class*="reject"]',
+        '[class*="iubenda"][class*="deny"]',
+        '[class*="iub"][class*="deny"]'
+      ].join(', ');
+      
+      this.log("🎯 Setting up Iubenda button fallback listeners", {
+        acceptSelectors: iubendaAcceptSelectors,
+        rejectSelectors: iubendaRejectSelectors
+      });
+      
+      // Accept button listeners
+      $(document).on('click', iubendaAcceptSelectors, function(e) {
+        self.log("🟢 Iubenda ACCEPT button clicked directly (fallback)", { 
+          element: this.className,
+          selector: this.tagName + '.' + this.className.split(' ').join('.')
+        });
+        
+        // Small delay to let Iubenda process first, then handle our consent
+        setTimeout(function() {
+          if (!self.consentProcessed) {
+            self.log("📝 Processing accept via button fallback");
+            self.handleConsentGiven();
+          } else {
+            self.log("ℹ️ Accept already processed via callback, skipping fallback");
+          }
+        }, 100);
+      });
+      
+      // Reject button listeners  
+      $(document).on('click', iubendaRejectSelectors, function(e) {
+        self.log("🔴 Iubenda REJECT button clicked directly (fallback)", { 
+          element: this.className,
+          selector: this.tagName + '.' + this.className.split(' ').join('.')
+        });
+        
+        // Small delay to let Iubenda process first, then handle our consent
+        setTimeout(function() {
+          if (!self.consentProcessed) {
+            self.log("📝 Processing reject via button fallback");
+            self.handleConsentDenied();
+          } else {
+            self.log("ℹ️ Reject already processed via callback, skipping fallback");
+          }
+        }, 100);
+      });
+      
+      // Also watch for buttons that appear dynamically
+      this.watchForIubendaButtons();
+    },
+
+    /**
+     * Watch for Iubenda buttons that might be added dynamically
+     */
+    watchForIubendaButtons: function() {
+      var self = this;
+      var checkInterval = setInterval(function() {
+        var acceptBtn = document.querySelector('.iubenda-cs-accept-btn, .iub-cs-accept-btn');
+        var rejectBtn = document.querySelector('.iubenda-cs-reject-btn, .iub-cs-reject-btn');
+        
+        if (acceptBtn || rejectBtn) {
+          self.log("✨ Iubenda buttons detected in DOM", {
+            acceptBtn: !!acceptBtn,
+            rejectBtn: !!rejectBtn,
+            acceptClass: acceptBtn ? acceptBtn.className : 'none',
+            rejectClass: rejectBtn ? rejectBtn.className : 'none'
+          });
+          clearInterval(checkInterval);
+        }
+      }, 500);
+
+      // Stop checking after 30 seconds
+      setTimeout(function() {
+        clearInterval(checkInterval);
+      }, 30000);
+    },
+
+    /**
+     * Check for existing Iubenda consent that may have been set before our listeners
+     */
+    checkExistingIubendaConsent: function() {
+      var self = this;
+      
+      // Wait a bit for Iubenda to initialize
+      setTimeout(function() {
+        self.log("🔍 Checking for existing Iubenda consent", {
+          iubAvailable: typeof _iub !== 'undefined',
+          hasCs: typeof _iub !== 'undefined' && _iub.cs,
+          hasApi: typeof _iub !== 'undefined' && _iub.cs && _iub.cs.api,
+          apiMethods: typeof _iub !== 'undefined' && _iub.cs && _iub.cs.api ? Object.keys(_iub.cs.api) : []
+        });
+        
+        if (typeof _iub !== 'undefined' && _iub.cs) {
+          try {
+            // In incognito mode or fresh sessions, wait for user interaction instead of assuming consent
+            var consentStatus = null;
+            
+            // Only check for existing consent if we're confident it's valid
+            // Look for Iubenda banner - if it's visible, no consent has been given yet
+            var banner = document.querySelector('#iubenda-cs-banner, .iub-cs-banner, [id*="iubenda"], .iubenda-cs-banner, [class*="iubenda"]');
+            
+            if (banner && (banner.offsetParent !== null && banner.style.display !== 'none')) {
+              // Banner is visible = no consent given yet
+              self.log("🟡 Iubenda banner is visible, waiting for user interaction");
+              consentStatus = null; // Don't assume any consent
+            } else {
+              // Banner is hidden or doesn't exist, check if consent was actually stored
+              self.log("🔍 Iubenda banner not visible, checking for stored consent");
+              
+              // Check for explicit consent storage (be very strict)
+              var cookieConsent = self.getCookie('iubenda_cookie_policy_agreement');
+              var localConsent = localStorage.getItem('iubenda_cookie_policy_agreement');
+              
+              // Only trust consent if we have explicit storage AND the banner is actually hidden
+              if ((cookieConsent || localConsent) && !banner) {
+                var storedValue = cookieConsent || localConsent;
+                var isConsented = storedValue === 'true' || storedValue === '1';
+                var isDenied = storedValue === 'false' || storedValue === '0';
+                
+                if (isConsented || isDenied) {
+                  consentStatus = { consent: isConsented };
+                  self.log("📋 Valid Iubenda consent found in storage", { 
+                    consent: isConsented, 
+                    source: cookieConsent ? 'cookie' : 'localStorage',
+                    value: storedValue
+                  });
+                } else {
+                  self.log("⚠️ Iubenda storage found but value unclear, waiting for user interaction", { value: storedValue });
+                }
+              } else {
+                self.log("ℹ️ No clear Iubenda consent storage found, waiting for user interaction");
+              }
+            }
+            
+            // Process the consent status
+            if (consentStatus && consentStatus.consent === true) {
+              self.log("✅ Existing Iubenda consent found (granted)");
+              self.handleConsentGiven();
+            } else if (consentStatus && consentStatus.consent === false) {
+              self.log("❌ Existing Iubenda consent found (denied)");
+              self.handleConsentDenied();
+            } else {
+              self.log("⏳ No existing Iubenda consent found, waiting for user interaction");
+            }
+          } catch (error) {
+            self.log("❌ Error checking existing Iubenda consent", error);
+            // Continue waiting for user interaction
+          }
+        } else {
+          self.log("⚠️ Iubenda not fully loaded yet, waiting for user interaction");
+        }
+      }, 1000); // Increased timeout to give Iubenda more time to load
+    },
+
+    /**
      * Setup custom consent listeners using CSS selectors
      */
     setupCustomConsentListeners: function () {
       var self = this;
+      
+      // Double-check that we're not using Iubenda (safety check)
+      var useIubenda = this.config.useIubenda === true || this.config.useIubenda === "1" || this.config.useIubenda === 1;
+      if (useIubenda) {
+        this.log("⚠️ Attempted to setup custom selectors but Iubenda is enabled - skipping");
+        return;
+      }
+      
+      this.log("🔧 Setting up custom consent listeners with selectors", {
+        acceptSelector: this.config.acceptSelector,
+        denySelector: this.config.denySelector
+      });
 
       if (this.config.acceptSelector) {
         // Use both click and change events to catch different consent implementations
@@ -411,7 +729,7 @@
     },
 
     /**
-     * Setup default consent timeout
+     * Setup default consent timeout - auto-accept after X seconds
      */
     setupDefaultConsentTimeout: function () {
       var self = this;
@@ -422,13 +740,20 @@
         return;
       }
       
-      this.log("Setting up consent timeout", { 
+      this.log("⏰ Setting up auto-accept timeout", { 
         timeout: this.config.defaultTimeout,
-        timeoutMs: this.config.defaultTimeout * 1000 
+        timeoutMs: this.config.defaultTimeout * 1000,
+        message: "Will auto-accept consent after " + this.config.defaultTimeout + " seconds"
       });
 
       this.consentTimeout = setTimeout(function () {
-        self.log("🕐 Consent timeout reached - applying default consent (granted)");
+        // Check if consent was already given manually
+        if (self.consentProcessed) {
+          self.log("⏰ Timeout reached but consent already processed manually - no action needed");
+          return;
+        }
+        
+        self.log("⏰ Auto-accept timeout reached (" + self.config.defaultTimeout + "s) - accepting consent automatically");
         self.handleConsentGiven();
       }, this.config.defaultTimeout * 1000);
       
@@ -437,13 +762,13 @@
         var countdown = this.config.defaultTimeout;
         var countdownInterval = setInterval(function() {
           countdown--;
-          if (countdown <= 0 || self.consentGiven) {
+          if (countdown <= 0 || self.consentProcessed) {
             clearInterval(countdownInterval);
             return;
           }
           
           if (countdown % 5 === 0) { // Log every 5 seconds
-            self.log("⏳ Consent timeout in " + countdown + " seconds");
+            self.log("⏳ Auto-accept in " + countdown + " seconds (user can still accept/deny manually)");
           }
         }, 1000);
       }
@@ -461,16 +786,26 @@
     },
 
     /**
-     * Handle consent given - MODIFIED to prevent duplicate processing
+     * Handle consent given - Allow updates from denied to granted, prevent duplicates
      */
     handleConsentGiven: function () {
-      // NEW: Check if consent has already been processed
-      if (this.consentProcessed) {
-        this.log("⚠️ Consent already processed - ignoring duplicate consent given", {
+      // Prevent duplicate processing if consent is already GRANTED
+      if (this.consentProcessed && this.consentGiven && this.consentStatus && this.consentStatus.analytics_storage === 'GRANTED') {
+        this.log("⚠️ Consent already granted - ignoring duplicate consent given", {
           consentGiven: this.consentGiven,
-          consentProcessed: this.consentProcessed
+          consentProcessed: this.consentProcessed,
+          currentStatus: this.consentStatus.analytics_storage,
+          source: "Probably user clicked after auto-accept timeout"
         });
         return;
+      }
+      
+      // Allow updates from DENIED to GRANTED
+      if (this.consentProcessed && this.consentStatus && this.consentStatus.analytics_storage === 'DENIED') {
+        this.log("🔄 Updating consent from DENIED to GRANTED");
+        // Reset flags to allow update
+        this.consentProcessed = false;
+        // Don't reset eventsProcessed here - we don't want to reprocess the same events
       }
 
       this.clearConsentTimeout();
@@ -505,16 +840,23 @@
     },
 
     /**
-     * Handle consent denied - MODIFIED to prevent duplicate processing
+     * Handle consent denied - Allow updates from granted to denied
      */
     handleConsentDenied: function () {
-      // NEW: Check if consent has already been processed
-      if (this.consentProcessed) {
-        this.log("⚠️ Consent already processed - ignoring duplicate consent denied", {
+      // Allow updates if consent was previously granted
+      if (this.consentProcessed && this.consentGiven && this.consentStatus && this.consentStatus.analytics_storage === 'DENIED') {
+        this.log("⚠️ Consent already denied - ignoring duplicate consent denied", {
           consentGiven: this.consentGiven,
-          consentProcessed: this.consentProcessed
+          consentProcessed: this.consentProcessed,
+          currentStatus: this.consentStatus.analytics_storage
         });
         return;
+      }
+      
+      if (this.consentProcessed && this.consentStatus && this.consentStatus.analytics_storage === 'GRANTED') {
+        this.log("🔄 Updating consent from GRANTED to DENIED");
+        // Reset flags to allow update
+        this.consentProcessed = false;
       }
 
       this.clearConsentTimeout();
@@ -578,13 +920,13 @@
     initializeConsentMode: function () {
       if (typeof gtag === 'function') {
         gtag('consent', 'default', {
-          analytics_storage: 'denied',
-          ad_storage: 'denied',
-          ad_user_data: 'denied',
-          ad_personalization: 'denied',
-          functionality_storage: 'denied',
-          personalization_storage: 'denied',
-          security_storage: 'granted',
+          analytics_storage: 'DENIED',
+          ad_storage: 'DENIED',
+          ad_user_data: 'DENIED',
+          ad_personalization: 'DENIED',
+          functionality_storage: 'DENIED',
+          personalization_storage: 'DENIED',
+          security_storage: 'GRANTED',
           wait_for_update: 30000 // Wait 30 seconds for consent update
         });
 
@@ -798,7 +1140,8 @@
       this.clearEventQueue();
       this.consentGiven = false;
       this.consentStatus = null;
-      this.consentProcessed = false; // NEW: Reset the processed flag
+      this.consentProcessed = false; // Reset the processed flag
+      this.eventsProcessed = false; // Reset the events processed flag
       
       // Reset consent mode if enabled
       if (this.config.consentModeEnabled) {

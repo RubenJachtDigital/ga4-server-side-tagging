@@ -182,15 +182,8 @@ class GA4_Server_Side_Tagging_Public
             $script_data
         );
 
-        // Initialize consent manager immediately after localizing the script
-        wp_add_inline_script(
-            'ga4-server-side-tagging-consent-management',
-            'jQuery(document).ready(function($) {
-            if (typeof GA4ConsentManager !== "undefined" && ga4ServerSideTagging.consentSettings) {
-                GA4ConsentManager.init(ga4ServerSideTagging.consentSettings);
-            }
-        });'
-        );
+        // NOTE: Consent manager initialization is now handled by the main tracking script
+        // to ensure proper tracking instance reference is passed
     }
 
     /**

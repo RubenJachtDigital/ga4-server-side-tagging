@@ -85,16 +85,19 @@ if (!defined('WPINC')) {
                                 <p class="description">Time in seconds before automatically accepting consent (0 = disabled). User can still deny during this time.</p>
                             </td>
                         </tr>
-                        <tr>
+                        <!-- Consent Mode hidden - always enabled -->
+                        <tr style="display: none;">
                             <th scope="row">Consent Mode</th>
                             <td>
                                 <label for="ga4_consent_mode_enabled">
-                                    <input type="checkbox" id="ga4_consent_mode_enabled" name="ga4_consent_mode_enabled" <?php checked($consent_mode_enabled); ?> />
+                                    <input type="checkbox" id="ga4_consent_mode_enabled" name="ga4_consent_mode_enabled" checked style="display: none;" />
                                     Enable Google Consent Mode v2
                                 </label>
                                 <p class="description">Send consent signals to Google Analytics for better data modeling when users deny consent</p>
                             </td>
                         </tr>
+                        <!-- Hidden input to ensure consent mode is always enabled -->
+                        <input type="hidden" name="ga4_consent_mode_enabled" value="1" />
                     </table>
                 </div>
 
