@@ -30,31 +30,35 @@ const BOT_LOG_ENABLED = true; // Set to false to disable bot logging
  * @returns {Object} Processed payload with consent applied
  */
 function processGDPRConsent(payload) {
-  // Extract consent data from payload
+  // Extract consent data from payload, default to DENIED if no consent data
   const consent = payload.params?.consent || {};
   
+  // If no consent data is provided, default to DENIED values
+  const processedConsent = {
+    analytics_storage: consent.analytics_storage || "DENIED",
+    ad_storage: consent.ad_storage || "DENIED",
+    ad_user_data: consent.ad_user_data || "DENIED",
+    ad_personalization: consent.ad_personalization || "DENIED"
+  };
+  
   if (DEBUG_MODE) {
-    console.log("Processing GDPR consent:", JSON.stringify(consent));
+    console.log("Processing GDPR consent:", JSON.stringify(processedConsent));
+    if (Object.keys(consent).length === 0) {
+      console.log("No consent data provided - defaulting to DENIED values for GDPR compliance");
+    }
   }
 
-  // Apply consent-based data filtering
-  if (consent.analytics_storage === "DENIED") {
+  // Apply consent-based data filtering based on processed consent
+  if (processedConsent.analytics_storage === "DENIED") {
     payload = applyAnalyticsConsentDenied(payload);
   }
 
-  if (consent.ad_storage === "DENIED") {
+  if (processedConsent.ad_storage === "DENIED") {
     payload = applyAdvertisingConsentDenied(payload);
   }
 
-  // Add consent signals to the GA4 payload at the top level
-  if (Object.keys(consent).length > 0) {
-    payload.consent = {
-      analytics_storage: consent.analytics_storage || "DENIED",
-      ad_storage: consent.ad_storage || "DENIED",
-      ad_user_data: consent.ad_user_data || "DENIED",
-      ad_personalization: consent.ad_personalization || "DENIED"
-    };
-  }
+  // Always add consent signals to the GA4 payload at the top level
+  payload.consent = processedConsent;
 
   return payload;
 }
@@ -696,32 +700,19 @@ async function handleRequest(request) {
       console.log("Received payload:", JSON.stringify(payload));
     }
 
-    // CONSENT VALIDATION - Check if consent data exists
+    // CONSENT PROCESSING - Process consent data or default to DENIED
     const consentData = payload.params?.consent;
     
     if (!consentData || (!consentData.analytics_storage && !consentData.ad_storage)) {
       if (DEBUG_MODE) {
-        console.log("No consent data found - rejecting event");
+        console.log("No consent data found - processing event with DENIED consent defaults");
       }
-      
-      return new Response(
-        JSON.stringify({
-          success: false,
-          error: "No consent data provided",
-          gdpr_processed: false
-        }),
-        {
-          status: 400,
-          headers: {
-            "Content-Type": "application/json",
-            ...getCORSHeaders(request),
-          },
-        }
-      );
-    }
-
-    if (DEBUG_MODE) {
-      console.log("Consent validation passed:", JSON.stringify(consentData));
+      // Continue processing with default DENIED consent values
+      // The processGDPRConsent function will handle the defaults
+    } else {
+      if (DEBUG_MODE) {
+        console.log("Consent data found - processing with provided consent values:", JSON.stringify(consentData));
+      }
     }
 
     // GDPR CONSENT PROCESSING - Apply before bot detection

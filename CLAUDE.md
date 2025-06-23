@@ -68,7 +68,7 @@ fetch(cloudflareWorkerUrl, {
 
 ### 4. **Cloudflare Worker Processing**
 The worker (`cloudflare-worker-example.js`) performs:
-- **Consent Validation**: Applies GDPR rules based on consent status
+- **Consent Processing**: Applies GDPR rules based on consent status (defaults to DENIED if no consent data)
 - **Bot Detection**: Multi-layered filtering using user agent, behavior, and geographic patterns
 - **Data Mapping**: Transforms WordPress event data to GA4 format
 - **Event Forwarding**: Sends clean events to Google Analytics 4
@@ -136,6 +136,7 @@ admin/
 - **DENIED**: Anonymous tracking with anonymized data  
 - **PENDING**: Events queued until user decision
 - **TIMEOUT**: Auto-accept after configured delay (optional)
+- **NO CONSENT**: Events sent with DENIED defaults for GDPR compliance
 
 ## Benefits
 
