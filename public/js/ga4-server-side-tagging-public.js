@@ -14,6 +14,7 @@
     config: window.ga4ServerSideTagging || {},
     pageStartTime: Date.now(),
     consentReady: false,
+    trackedPageViews: new Set(), // Track URLs that have been tracked
 
     init: function () {
       // Check if we have the required configuration
@@ -32,9 +33,15 @@
       // Set up event listeners (these will queue events until consent is ready)
       this.setupEventListeners();
 
+      // Track page view immediately (will be queued if consent not ready)
+      if (this.config.useServerSide == true) {
+        this.log("🚀 Triggering trackPageView immediately on page load");
+        this.trackPageView();
+      }
+
       // Log initialization
       this.log(
-        "%c GA4 Server-Side Tagging initialized v3 ",
+        "%c GA4 Server-Side Tagging initialized v1 ",
         "background: #4CAF50; color: white; font-size: 16px; font-weight: bold; padding: 8px 12px; border-radius: 4px;"
       );
     },
@@ -81,11 +88,18 @@
      */
     onConsentReady: function() {
       this.consentReady = true;
-      this.log("Consent ready - starting tracking");
+      this.log("🚀 onConsentReady called - consent status changed", {
+        currentUrl: window.location.href,
+        hasConsentManager: !!(window.GA4ConsentManager),
+        consentReady: this.consentReady,
+        useServerSide: this.config.useServerSide,
+        source: "onConsentReady function",
+        note: "trackPageView was already called on page load - queued events will now be processed"
+      });
       
-      if (this.config.useServerSide == true) {
-        this.trackPageView();
-      }
+      // trackPageView() is now called immediately on page load
+      // This function just sets the consentReady flag
+      // The consent manager will process any queued events
     },
 
 
@@ -94,6 +108,24 @@
      * REPLACE the existing trackPageView function with this enhanced version
      */
     trackPageView: function () {
+      var currentUrl = window.location.href;
+      
+      this.log("🎯 trackPageView called", {
+        currentUrl: currentUrl,
+        consentReady: this.consentReady,
+        hasConsentManager: !!(window.GA4ConsentManager),
+        trackedUrls: Array.from(this.trackedPageViews)
+      });
+      
+      // Prevent duplicate page views for the same URL
+      if (this.trackedPageViews.has(currentUrl)) {
+        this.log("Page view already sent for this URL - preventing duplicate", { url: currentUrl });
+        return;
+      }
+      
+      this.trackedPageViews.add(currentUrl);
+      this.log("📊 Starting page view tracking for URL", { url: currentUrl });
+      
       // Get current session information using utils
       var session = GA4Utils.session.get();
       this.log("session data: " + session.start);
@@ -425,6 +457,9 @@
         page_location: window.location.href,
         page_referrer: referrer,
 
+        // Timezone information (always included as base location data)
+        timezone: this.getTimezone(),
+
         // Shortened user agent
         user_agent: userAgentInfo.user_agent,
 
@@ -433,6 +468,13 @@
       };
 
       return sessionParams;
+    },
+
+    /**
+     * Get user timezone
+     */
+    getTimezone: function() {
+      return GA4Utils.helpers.getTimezone();
     },
 
     // Method to complete page view tracking after location attempt
@@ -1737,8 +1779,197 @@
       });
     },
 
+    /**
+     * Build complete event data with all session context, attribution, and page data
+     * This preserves the original page context when events are queued
+     */
+    buildCompleteEventData: async function (eventName, eventParams) {
+      // Create a copy of the event params
+      var params = JSON.parse(JSON.stringify(eventParams));
+      var session = GA4Utils.session.get();
+
+      // Add debug_mode and timestamp if not present
+      if (!params.hasOwnProperty("debug_mode")) {
+        if (Boolean(this.config.debugMode) === true) {
+          params.debug_mode = Boolean(this.config.debugMode);
+        }
+      }
+
+      if (!params.hasOwnProperty("event_timestamp")) {
+        params.event_timestamp = Math.floor(Date.now() / 1000);
+      }
+
+      // Get consent data from consent manager (will be DENIED at queueing time)
+      var consentData = null;
+      if (window.GA4ConsentManager && typeof window.GA4ConsentManager.getConsentForServerSide === 'function') {
+        consentData = window.GA4ConsentManager.getConsentForServerSide();
+      } else {
+        // Fallback to GA4Utils
+        consentData = GA4Utils.consent.getForServerSide();
+      }
+
+      // Add session information (preserve original session context)
+      if (!params.hasOwnProperty("session_id")) {
+        params.session_id = session.id;
+      }
+      if (!params.hasOwnProperty("session_count")) {
+        params.session_count = session.sessionCount;
+      }
+      if (!params.hasOwnProperty("engagement_time_msec")) {
+        params.engagement_time_msec = GA4Utils.time.calculateEngagementTime(
+          session.start
+        );
+      }
+
+      // Capture and preserve COMPLETE original page context and attribution
+      // Force override ALL page and attribution data to preserve original context
+      var originalPageLocation = window.location.href;
+      var originalPageTitle = document.title;
+      var originalPageReferrer = document.referrer || "";
+      
+      // Get original attribution data from current page (this is what we want to preserve!)
+      var originalUtmParams = GA4Utils.utm.getAll();
+      var originalGclid = GA4Utils.gclid.get();
+      var originalAttribution = this.calculateAttributionForOriginalPage(
+        originalUtmParams,
+        originalGclid,
+        originalPageReferrer
+      );
+      
+      // Override ALL page and attribution context in params
+      params.page_location = originalPageLocation;
+      params.page_title = originalPageTitle;
+      params.page_referrer = originalPageReferrer;
+      
+      // Override attribution data
+      if (originalAttribution.source) params.source = originalAttribution.source;
+      if (originalAttribution.medium) params.medium = originalAttribution.medium;
+      if (originalAttribution.campaign) params.campaign = originalAttribution.campaign;
+      if (originalAttribution.content) params.content = originalAttribution.content;
+      if (originalAttribution.term) params.term = originalAttribution.term;
+      if (originalAttribution.gclid) params.gclid = originalAttribution.gclid;
+      
+      // Always add timezone (preserve original page timezone)
+      if (!params.timezone) {
+        params.timezone = this.getTimezone();
+      }
+      
+      // Add location data from timezone as fallback
+      if (params.timezone) {
+        var timezoneLocation = GA4Utils.helpers.getLocationFromTimezone(params.timezone);
+        if (!params.geo_continent && timezoneLocation.continent) {
+          params.geo_continent = timezoneLocation.continent;
+        }
+        if (!params.geo_country_tz && timezoneLocation.country) {
+          params.geo_country_tz = timezoneLocation.country;
+        }
+        if (!params.geo_city_tz && timezoneLocation.city) {
+          params.geo_city_tz = timezoneLocation.city;
+        }
+      }
+      
+      this.log("🔒 Captured COMPLETE original context for preservation", {
+        originalPageLocation: originalPageLocation,
+        originalPageTitle: originalPageTitle,
+        originalPageReferrer: originalPageReferrer,
+        originalSource: originalAttribution.source,
+        originalMedium: originalAttribution.medium,
+        originalCampaign: originalAttribution.campaign
+      });
+
+      // Add location data based on current consent (will be DENIED initially)
+      await this.addLocationDataWithConsent(params, consentData);
+
+      // Get client ID
+      var clientId = this.getConsentAwareClientId(consentData);
+      if (clientId) {
+        params.client_id = clientId;
+      }
+
+      // Get user agent and client behavior data (preserve original context)
+      var userAgentInfo = GA4Utils.device.parseUserAgent();
+      var clientBehavior = GA4Utils.botDetection.getClientBehaviorData();
+
+      // Add bot detection data for Cloudflare Worker analysis
+      params.botData = {
+        user_agent_full: userAgentInfo.user_agent,
+        browser_name: userAgentInfo.browser_name,
+        device_type: userAgentInfo.device_type,
+        is_mobile: userAgentInfo.is_mobile,
+        has_javascript: clientBehavior.hasJavaScript,
+        screen_available_width: clientBehavior.screenAvailWidth,
+        screen_available_height: clientBehavior.screenAvailHeight,
+        color_depth: clientBehavior.colorDepth,
+        pixel_depth: clientBehavior.pixelDepth,
+        timezone: clientBehavior.timezone,
+        platform: clientBehavior.platform,
+        cookie_enabled: clientBehavior.cookieEnabled,
+        hardware_concurrency: clientBehavior.hardwareConcurrency,
+        max_touch_points: clientBehavior.maxTouchPoints,
+        webdriver_detected: clientBehavior.webdriver,
+        has_automation_indicators: clientBehavior.hasAutomationIndicators,
+        page_load_time: clientBehavior.pageLoadTime,
+        user_interaction_detected: clientBehavior.hasInteracted,
+        bot_score: GA4Utils.botDetection.calculateBotScore(
+          userAgentInfo,
+          clientBehavior
+        ),
+      };
+
+      // Store original consent status for later processing
+      params._originalConsentStatus = consentData;
+
+      this.log("Built complete event data preserving original context", {
+        eventName: eventName,
+        pageLocation: params.page_location,
+        sessionId: params.session_id
+      });
+
+      return params;
+    },
+
+    /**
+     * Calculate attribution for the original page (similar to calculateAttribution but for preservation)
+     */
+    calculateAttributionForOriginalPage: function(utmParams, gclid, referrer) {
+      var referrerDomain = "";
+      var ignore_referrer = false;
+      
+      // Parse referrer if it exists
+      if (referrer) {
+        try {
+          var referrerURL = new URL(referrer);
+          referrerDomain = referrerURL.hostname;
+          
+          // Check if the referrer is from the same domain (internal link)
+          if (referrerDomain === window.location.hostname) {
+            ignore_referrer = true;
+          }
+        } catch (e) {
+          this.log("Invalid referrer URL:", referrer);
+        }
+      }
+      
+      // Use the existing calculateAttribution logic but for current page context
+      return this.calculateAttribution(
+        utmParams,
+        gclid, 
+        referrerDomain,
+        referrer,
+        ignore_referrer,
+        true // Assume new session for original page calculation
+      );
+    },
+
     trackEvent: function (eventName, eventParams = {}) {
-      this.log("Tracking event: " + eventName, eventParams);
+      this.log("Tracking event: " + eventName, {
+        eventName: eventName,
+        hasPageLocation: !!eventParams.page_location,
+        hasSessionId: !!eventParams.session_id,
+        hasSource: !!eventParams.source,
+        pageLocation: eventParams.page_location || 'not set',
+        currentPageLocation: window.location.href
+      });
 
       // Add debug_mode and timestamp if not present
       if (!eventParams.hasOwnProperty("debug_mode")) {
@@ -1753,11 +1984,36 @@
 
       // Check consent status via consent manager
       if (window.GA4ConsentManager && typeof window.GA4ConsentManager.shouldSendEvent === 'function') {
-        var shouldSend = window.GA4ConsentManager.shouldSendEvent(eventName, eventParams);
+        // Check if eventParams already contains complete session data
+        var hasCompleteData = eventParams.hasOwnProperty('page_location') && 
+                             eventParams.hasOwnProperty('source') && 
+                             eventParams.hasOwnProperty('medium') &&
+                             eventParams.hasOwnProperty('session_id');
         
-        if (!shouldSend) {
-          this.log("Event queued by consent manager: " + eventName);
-          return; // Event was queued, don't send now
+        var criticalEvents = ['page_view', 'custom_session_start', 'custom_first_visit'];
+        
+        if (this.config.useServerSide && criticalEvents.includes(eventName) && hasCompleteData) {
+          // eventParams already contains complete session data - queue it directly
+          var shouldSend = window.GA4ConsentManager.shouldSendEvent(eventName, eventParams, eventParams);
+          
+          if (!shouldSend) {
+            this.log("🎯 Critical event queued with pre-built session data: " + eventName, {
+              originalPageLocation: eventParams.page_location,
+              originalSource: eventParams.source,
+              originalMedium: eventParams.medium,
+              sessionId: eventParams.session_id,
+              currentPageLocation: window.location.href
+            });
+            return; // Event was queued with complete data
+          }
+        } else {
+          // Regular processing for non-critical events or events without complete data
+          var shouldSend = window.GA4ConsentManager.shouldSendEvent(eventName, eventParams);
+          
+          if (!shouldSend) {
+            this.log("Event queued by consent manager: " + eventName);
+            return; // Event was queued, don't send now
+          }
         }
         
         // Consent manager says we can send, ensure our flag is also set
@@ -1787,6 +2043,41 @@
       } else if (typeof gtag === "function") {
         gtag("event", eventName, eventParams);
         this.log("Sent to gtag: " + eventName);
+      }
+    },
+
+    /**
+     * Send raw event data without re-enriching (for queued events with complete data)
+     */
+    sendRawEventData: function(eventName, completeEventData) {
+      this.log("Sending raw event data (preserving original context)", {
+        eventName: eventName,
+        originalPageUrl: completeEventData.page_location,
+        sessionId: completeEventData.session_id
+      });
+      
+      // Update consent data to current status since original was DENIED
+      completeEventData.consent = window.GA4ConsentManager ? 
+        window.GA4ConsentManager.getConsentForServerSide() : 
+        GA4Utils.consent.getForServerSide();
+      
+      // Apply current GDPR anonymization based on new consent status
+      if (window.GA4ConsentManager && typeof window.GA4ConsentManager.applyGDPRAnonymization === 'function') {
+        completeEventData = window.GA4ConsentManager.applyGDPRAnonymization(completeEventData);
+      } else {
+        completeEventData = this.applyGDPRAnonymization(completeEventData, completeEventData.consent);
+      }
+      
+      // Remove the temporary original consent status
+      delete completeEventData._originalConsentStatus;
+      
+      // Determine endpoint and send
+      var endpoint = this.config.cloudflareWorkerUrl || this.config.apiEndpoint;
+      if (endpoint) {
+        var data = this.formatEventData(eventName, completeEventData, endpoint);
+        this.sendAjaxPayload(endpoint, data);
+      } else {
+        this.log("No server-side endpoint configured for raw event data");
       }
     },
 
@@ -1940,34 +2231,66 @@
    * Add location data considering consent
    */
   addLocationDataWithConsent: async function(params, consentData) {
+    // Always add timezone parameter as base information
+    var timezone = GA4Utils.helpers.getTimezone();
+    if (timezone) {
+      params.timezone = timezone;
+      
+      // Extract location data from timezone as fallback
+      var timezoneLocation = GA4Utils.helpers.getLocationFromTimezone(timezone);
+      if (timezoneLocation.continent) params.geo_continent = timezoneLocation.continent;
+      if (timezoneLocation.country) params.geo_country_tz = timezoneLocation.country;
+      if (timezoneLocation.city) params.geo_city_tz = timezoneLocation.city;
+    }
+    
     if (consentData.analytics_storage === "GRANTED") {
         try {
           const locationData = await this.getUserLocation();
-          if (locationData) {
+          if (locationData && locationData.latitude && locationData.longitude) {
+            // Precise location data available - use it
             if (locationData.latitude) params.geo_latitude = locationData.latitude;
             if (locationData.longitude) params.geo_longitude = locationData.longitude;
             if (locationData.city) params.geo_city = locationData.city;
             if (locationData.country) params.geo_country = locationData.country;
             if (locationData.region) params.geo_region = locationData.region;
+            
+            this.log("Using precise location data", {
+              city: locationData.city,
+              country: locationData.country,
+              timezone: params.timezone,
+              timezone_fallback: {
+                city: params.geo_city_tz,
+                country: params.geo_country_tz,
+                continent: params.geo_continent
+              }
+            });
+          } else {
+            // Location data failed or incomplete - timezone is already set as fallback
+            this.log("Precise location unavailable, using timezone fallback", {
+              timezone: params.timezone,
+              geo_continent: params.geo_continent,
+              geo_country_tz: params.geo_country_tz,
+              geo_city_tz: params.geo_city_tz
+            });
           }
         } catch (error) {
-          this.log("Location tracking error:", error);
+          this.log("Location tracking error, using timezone fallback:", {
+            error: error.message,
+            timezone: params.timezone,
+            geo_continent: params.geo_continent,
+            geo_country_tz: params.geo_country_tz,
+            geo_city_tz: params.geo_city_tz
+          });
         }
       
     } else {
-      // No analytics consent - only continent-level location via timezone
-      try {
-        const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-        if (timezone) {
-          const timezoneRegions = timezone.split("/");
-          if (timezoneRegions.length > 0) {
-            params.geo_continent = timezoneRegions[0] || "";
-            params.timezone = timezone;
-          }
-        }
-      } catch (e) {
-        this.log("Error getting timezone info:", e);
-      }
+      // No analytics consent - only continent-level location via timezone (already set above)
+      this.log("No analytics consent, using timezone-based location only", {
+        timezone: params.timezone,
+        geo_continent: params.geo_continent,
+        geo_country_tz: params.geo_country_tz,
+        geo_city_tz: params.geo_city_tz
+      });
     }
   },
 

@@ -21,6 +21,7 @@
     trackingInstance: null, // Reference to main tracking instance
     consentProcessed: false, // Flag to prevent duplicate consent processing
     eventsProcessed: false, // Flag to prevent duplicate event processing
+    sessionStorageKey: 'ga4_queued_events', // Key for storing events in sessionStorage
 
     /**
      * Initialize the consent manager
@@ -36,6 +37,9 @@
         consentModeEnabled: this.config.consentModeEnabled,
         debugMode: this.config.debugMode
       });
+      
+      // Load any existing queued events from session storage
+      this.loadQueuedEventsFromSession();
 
       // Check for existing consent
       var existingConsent = this.getStoredConsent();
@@ -91,10 +95,11 @@
     /**
      * Check if an event should be sent or queued
      * @param {string} eventName - The event name
-     * @param {Object} eventParams - The event parameters
+     * @param {Object} eventParams - The basic event parameters
+     * @param {Object} completeEventData - The complete event data with all context (optional)
      * @returns {boolean} - true if event should be sent now, false if queued
      */
-    shouldSendEvent: function(eventName, eventParams) {
+    shouldSendEvent: function(eventName, eventParams, completeEventData) {
       this.log("🤔 Checking if event should be sent", {
         eventName: eventName,
         consentGiven: this.consentGiven,
@@ -107,25 +112,47 @@
         return true; // Send immediately
       }
 
-      // Queue the event
+      // Queue the event with complete data if available
       this.log("⏳ No consent yet - queuing event: " + eventName);
-      this.queueEvent(eventName, eventParams);
+      if (completeEventData) {
+        this.queueEvent(eventName, completeEventData, true); // true = isCompleteData
+      } else {
+        this.queueEvent(eventName, eventParams, false); // false = basicParams only
+      }
       return false; // Don't send now
     },
 
     /**
      * Queue an event until consent is given
+     * @param {string} eventName - The event name
+     * @param {Object} eventParams - Event parameters (basic or complete)
+     * @param {boolean} isCompleteData - Whether eventParams contains complete enriched data
      */
-    queueEvent: function(eventName, eventParams) {
-      this.eventQueue.push({
+    queueEvent: function(eventName, eventParams, isCompleteData = false) {
+      var queuedEvent = {
         eventName: eventName,
         eventParams: eventParams,
-        timestamp: Date.now()
-      });
+        timestamp: Date.now(),
+        isCompleteData: isCompleteData
+      };
+      
+      // If we don't have complete data, add basic page context for reference
+      if (!isCompleteData) {
+        queuedEvent.pageUrl = window.location.href;
+        queuedEvent.pageTitle = document.title;
+      }
+      
+      this.eventQueue.push(queuedEvent);
+      
+      // Save to session storage to persist across page navigation
+      this.saveQueuedEventsToSession();
 
       this.log("Event queued waiting for consent", { 
         eventName: eventName, 
-        queueLength: this.eventQueue.length 
+        queueLength: this.eventQueue.length,
+        isCompleteData: isCompleteData,
+        originalPageUrl: isCompleteData ? eventParams.page_location : queuedEvent.pageUrl,
+        persistedInSession: true
       });
     },
 
@@ -158,20 +185,26 @@
       // Process events in order
       var eventsToProcess = this.eventQueue.slice(); // Copy array
       this.eventQueue = []; // Clear queue immediately to prevent reprocessing
+      
+      // Clear session storage since events are being processed
+      this.clearQueuedEventsFromSession();
 
       // Use setTimeout to ensure events are processed after consent is fully applied
       setTimeout(function() {
         eventsToProcess.forEach(function(queuedEvent, index) {
-          this.log("Sending queued event", { 
+          this.log("📤 Processing queued event", { 
             eventName: queuedEvent.eventName, 
             index: index + 1,
             total: eventsToProcess.length,
-            age: Date.now() - queuedEvent.timestamp 
+            age: Date.now() - queuedEvent.timestamp,
+            isCompleteData: queuedEvent.isCompleteData,
+            originalPageUrl: queuedEvent.isCompleteData ? queuedEvent.eventParams.page_location : queuedEvent.pageUrl,
+            currentPageUrl: window.location.href
           });
 
           // Add small delay between events to prevent overwhelming the server
           setTimeout(function() {
-            this.sendEventWithBypass(queuedEvent.eventName, queuedEvent.eventParams);
+            this.sendEventWithBypass(queuedEvent.eventName, queuedEvent.eventParams, queuedEvent.isCompleteData);
           }.bind(this), index * 100); // 100ms delay between events
           
         }.bind(this));
@@ -180,29 +213,51 @@
 
     /**
      * Send event bypassing consent check (for queued events)
+     * @param {string} eventName - The event name
+     * @param {Object} eventParams - Event parameters (basic or complete)
+     * @param {boolean} isCompleteData - Whether eventParams contains complete enriched data
      */
-    sendEventWithBypass: function(eventName, eventParams) {
-      this.log("Sending bypassed event", { eventName: eventName, params: eventParams });
+    sendEventWithBypass: function(eventName, eventParams, isCompleteData = false) {
+      this.log("Sending bypassed event", { 
+        eventName: eventName, 
+        isCompleteData: isCompleteData,
+        originalPageUrl: isCompleteData ? eventParams.page_location : 'unknown'
+      });
       
-      if (this.trackingInstance && typeof this.trackingInstance.sendServerSideEvent === 'function') {
-        // Call server-side tracking directly
-        this.trackingInstance.sendServerSideEvent(eventName, eventParams);
-      } else if (this.trackingInstance && typeof this.trackingInstance.trackEventInternal === 'function') {
-        // Call internal tracking method
-        this.trackingInstance.trackEventInternal(eventName, eventParams);
-      } else if (window.GA4ServerSideTagging && typeof window.GA4ServerSideTagging.sendServerSideEvent === 'function') {
-        // Fallback to global instance
-        window.GA4ServerSideTagging.sendServerSideEvent(eventName, eventParams);
-      } else if (window.GA4ServerSideTagging && typeof window.GA4ServerSideTagging.trackEventInternal === 'function') {
-        // Fallback to global instance internal method
-        window.GA4ServerSideTagging.trackEventInternal(eventName, eventParams);
-      } else {
-        // Final fallback to gtag if available
-        if (typeof gtag === "function") {
-          gtag("event", eventName, eventParams);
-          this.log("Sent queued event via gtag", { eventName: eventName });
+      if (isCompleteData) {
+        // Event has complete data, send directly without re-enriching
+        if (this.trackingInstance && typeof this.trackingInstance.sendCompleteEventData === 'function') {
+          // Use new method for complete data
+          this.trackingInstance.sendCompleteEventData(eventName, eventParams);
+        } else if (this.trackingInstance && typeof this.trackingInstance.sendServerSideEvent === 'function') {
+          // Fallback: Update consent data and send
+          eventParams.consent = this.getConsentForServerSide();
+          this.trackingInstance.sendRawEventData(eventName, eventParams);
         } else {
-          this.log("No tracking method available for queued event", { eventName: eventName });
+          this.log("No method available for sending complete event data", { eventName: eventName });
+        }
+      } else {
+        // Basic event data, process normally
+        if (this.trackingInstance && typeof this.trackingInstance.sendServerSideEvent === 'function') {
+          // Call server-side tracking directly
+          this.trackingInstance.sendServerSideEvent(eventName, eventParams);
+        } else if (this.trackingInstance && typeof this.trackingInstance.trackEventInternal === 'function') {
+          // Call internal tracking method
+          this.trackingInstance.trackEventInternal(eventName, eventParams);
+        } else if (window.GA4ServerSideTagging && typeof window.GA4ServerSideTagging.sendServerSideEvent === 'function') {
+          // Fallback to global instance
+          window.GA4ServerSideTagging.sendServerSideEvent(eventName, eventParams);
+        } else if (window.GA4ServerSideTagging && typeof window.GA4ServerSideTagging.trackEventInternal === 'function') {
+          // Fallback to global instance internal method
+          window.GA4ServerSideTagging.trackEventInternal(eventName, eventParams);
+        } else {
+          // Final fallback to gtag if available
+          if (typeof gtag === "function") {
+            gtag("event", eventName, eventParams);
+            this.log("Sent queued event via gtag", { eventName: eventName });
+          } else {
+            this.log("No tracking method available for queued event", { eventName: eventName });
+          }
         }
       }
     },
@@ -261,6 +316,9 @@
     clearEventQueue: function() {
       var queueLength = this.eventQueue.length;
       this.eventQueue = [];
+      
+      // Also clear from session storage
+      this.clearQueuedEventsFromSession();
       
       this.log("Event queue cleared", { clearedEvents: queueLength });
     },
@@ -740,10 +798,14 @@
         return;
       }
       
-      this.log("⏰ Setting up auto-accept timeout", { 
+      var timeoutAction = this.config.timeoutAction || 'deny';
+      var timeoutActionText = timeoutAction === 'accept' ? 'accept' : 'deny';
+      
+      this.log("⏰ Setting up auto-" + timeoutActionText + " timeout", { 
         timeout: this.config.defaultTimeout,
         timeoutMs: this.config.defaultTimeout * 1000,
-        message: "Will auto-accept consent after " + this.config.defaultTimeout + " seconds"
+        timeoutAction: timeoutAction,
+        message: "Will auto-" + timeoutActionText + " consent after " + this.config.defaultTimeout + " seconds"
       });
 
       this.consentTimeout = setTimeout(function () {
@@ -753,8 +815,13 @@
           return;
         }
         
-        self.log("⏰ Auto-accept timeout reached (" + self.config.defaultTimeout + "s) - accepting consent automatically");
-        self.handleConsentGiven();
+        if (timeoutAction === 'accept') {
+          self.log("⏰ Auto-accept timeout reached (" + self.config.defaultTimeout + "s) - accepting consent automatically");
+          self.handleConsentGiven();
+        } else {
+          self.log("⏰ Auto-deny timeout reached (" + self.config.defaultTimeout + "s) - denying consent automatically");
+          self.handleConsentDenied();
+        }
       }, this.config.defaultTimeout * 1000);
       
       // Log countdown in debug mode
@@ -768,7 +835,7 @@
           }
           
           if (countdown % 5 === 0) { // Log every 5 seconds
-            self.log("⏳ Auto-accept in " + countdown + " seconds (user can still accept/deny manually)");
+            self.log("⏳ Auto-" + timeoutActionText + " in " + countdown + " seconds (user can still accept/deny manually)");
           }
         }, 1000);
       }
@@ -1165,10 +1232,73 @@
       }
     },
 
+    /**
+     * Load queued events from session storage
+     */
+    loadQueuedEventsFromSession: function() {
+      try {
+        var stored = sessionStorage.getItem(this.sessionStorageKey);
+        if (stored) {
+          var storedEvents = JSON.parse(stored);
+          if (Array.isArray(storedEvents) && storedEvents.length > 0) {
+            // Filter out events older than 1 hour to prevent stale events
+            var oneHour = 60 * 60 * 1000;
+            var now = Date.now();
+            var validEvents = storedEvents.filter(function(event) {
+              return event.timestamp && (now - event.timestamp) < oneHour;
+            });
+            
+            this.eventQueue = validEvents;
+            this.log("📦 Loaded queued events from session storage", {
+              totalStored: storedEvents.length,
+              validEvents: validEvents.length,
+              filteredOldEvents: storedEvents.length - validEvents.length,
+              events: validEvents.map(function(e) { 
+                return {
+                  name: e.eventName, 
+                  isComplete: e.isCompleteData,
+                  pageUrl: e.isCompleteData ? e.eventParams.page_location : e.pageUrl
+                };
+              })
+            });
+            
+            // Update session storage with only valid events
+            if (validEvents.length !== storedEvents.length) {
+              this.saveQueuedEventsToSession();
+            }
+          }
+        }
+      } catch (e) {
+        this.log("Failed to load queued events from session storage", e);
+        this.eventQueue = [];
+      }
+    },
 
+    /**
+     * Save queued events to session storage
+     */
+    saveQueuedEventsToSession: function() {
+      try {
+        sessionStorage.setItem(this.sessionStorageKey, JSON.stringify(this.eventQueue));
+        this.log("Saved queued events to session storage", {
+          eventCount: this.eventQueue.length
+        });
+      } catch (e) {
+        this.log("Failed to save queued events to session storage", e);
+      }
+    },
 
-
-
+    /**
+     * Clear queued events from session storage
+     */
+    clearQueuedEventsFromSession: function() {
+      try {
+        sessionStorage.removeItem(this.sessionStorageKey);
+        this.log("Cleared queued events from session storage");
+      } catch (e) {
+        this.log("Failed to clear queued events from session storage", e);
+      }
+    }
 
   };
 

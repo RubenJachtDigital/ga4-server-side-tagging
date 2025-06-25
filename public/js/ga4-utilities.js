@@ -2251,6 +2251,194 @@
       },
 
       /**
+       * Get user timezone
+       * @returns {string} Timezone identifier (e.g., "Europe/Amsterdam")
+       */
+      getTimezone: function() {
+        try {
+          return Intl.DateTimeFormat().resolvedOptions().timeZone;
+        } catch (e) {
+          console.log("Error getting timezone:", e);
+          return "";
+        }
+      },
+
+      /**
+       * Get continent from timezone
+       * @param {string} timezone Timezone identifier
+       * @returns {string} Continent name
+       */
+      getContinentFromTimezone: function(timezone) {
+        if (!timezone) return "";
+        try {
+          var timezoneRegions = timezone.split("/");
+          return timezoneRegions.length > 0 ? timezoneRegions[0] : "";
+        } catch (e) {
+          console.log("Error extracting continent from timezone:", e);
+          return "";
+        }
+      },
+
+      /**
+       * Get city from timezone
+       * @param {string} timezone Timezone identifier (e.g., "Europe/Amsterdam")
+       * @returns {string} City name
+       */
+      getCityFromTimezone: function(timezone) {
+        if (!timezone) return "";
+        try {
+          var timezoneRegions = timezone.split("/");
+          if (timezoneRegions.length >= 2) {
+            // Convert timezone city format to readable format
+            // e.g., "New_York" -> "New York", "Los_Angeles" -> "Los Angeles"
+            return timezoneRegions[timezoneRegions.length - 1].replace(/_/g, " ");
+          }
+          return "";
+        } catch (e) {
+          console.log("Error extracting city from timezone:", e);
+          return "";
+        }
+      },
+
+      /**
+       * Get country from timezone
+       * @param {string} timezone Timezone identifier
+       * @returns {string} Country name
+       */
+      getCountryFromTimezone: function(timezone) {
+        if (!timezone) return "";
+        
+        // Map of timezone regions to countries
+        var timezoneToCountry = {
+          // Europe
+          "Europe/Amsterdam": "Netherlands",
+          "Europe/London": "United Kingdom", 
+          "Europe/Paris": "France",
+          "Europe/Berlin": "Germany",
+          "Europe/Rome": "Italy",
+          "Europe/Madrid": "Spain",
+          "Europe/Vienna": "Austria",
+          "Europe/Brussels": "Belgium",
+          "Europe/Zurich": "Switzerland",
+          "Europe/Stockholm": "Sweden",
+          "Europe/Oslo": "Norway",
+          "Europe/Copenhagen": "Denmark",
+          "Europe/Helsinki": "Finland",
+          "Europe/Warsaw": "Poland",
+          "Europe/Prague": "Czech Republic",
+          "Europe/Budapest": "Hungary",
+          "Europe/Athens": "Greece",
+          "Europe/Lisbon": "Portugal",
+          "Europe/Dublin": "Ireland",
+          "Europe/Moscow": "Russia",
+          "Europe/Kiev": "Ukraine",
+          
+          // Americas
+          "America/New_York": "United States",
+          "America/Los_Angeles": "United States",
+          "America/Chicago": "United States",
+          "America/Denver": "United States",
+          "America/Phoenix": "United States",
+          "America/Toronto": "Canada",
+          "America/Vancouver": "Canada",
+          "America/Montreal": "Canada",
+          "America/Mexico_City": "Mexico",
+          "America/Sao_Paulo": "Brazil",
+          "America/Buenos_Aires": "Argentina",
+          "America/Santiago": "Chile",
+          "America/Lima": "Peru",
+          "America/Bogota": "Colombia",
+          "America/Caracas": "Venezuela",
+          
+          // Asia
+          "Asia/Tokyo": "Japan",
+          "Asia/Shanghai": "China",
+          "Asia/Hong_Kong": "Hong Kong",
+          "Asia/Singapore": "Singapore",
+          "Asia/Seoul": "South Korea",
+          "Asia/Bangkok": "Thailand",
+          "Asia/Jakarta": "Indonesia",
+          "Asia/Manila": "Philippines",
+          "Asia/Kuala_Lumpur": "Malaysia",
+          "Asia/Mumbai": "India",
+          "Asia/Kolkata": "India",
+          "Asia/Delhi": "India",
+          "Asia/Dubai": "United Arab Emirates",
+          "Asia/Riyadh": "Saudi Arabia",
+          "Asia/Tel_Aviv": "Israel",
+          "Asia/Istanbul": "Turkey",
+          
+          // Oceania
+          "Australia/Sydney": "Australia",
+          "Australia/Melbourne": "Australia",
+          "Australia/Perth": "Australia",
+          "Australia/Brisbane": "Australia",
+          "Pacific/Auckland": "New Zealand",
+          "Pacific/Fiji": "Fiji",
+          
+          // Africa
+          "Africa/Cairo": "Egypt",
+          "Africa/Lagos": "Nigeria",
+          "Africa/Johannesburg": "South Africa",
+          "Africa/Nairobi": "Kenya",
+          "Africa/Casablanca": "Morocco",
+          "Africa/Tunis": "Tunisia",
+        };
+        
+        try {
+          // Direct lookup first
+          if (timezoneToCountry[timezone]) {
+            return timezoneToCountry[timezone];
+          }
+          
+          // Fallback: extract from timezone structure
+          var timezoneRegions = timezone.split("/");
+          if (timezoneRegions.length >= 2) {
+            var continent = timezoneRegions[0];
+            var location = timezoneRegions[1];
+            
+            // Handle some common patterns
+            if (continent === "America") {
+              if (location.includes("New_York") || location.includes("Los_Angeles") || 
+                  location.includes("Chicago") || location.includes("Denver") || 
+                  location.includes("Phoenix") || location.includes("Detroit") ||
+                  location.includes("Atlanta") || location.includes("Miami")) {
+                return "United States";
+              }
+              if (location.includes("Toronto") || location.includes("Vancouver") || 
+                  location.includes("Montreal") || location.includes("Edmonton")) {
+                return "Canada";
+              }
+              if (location.includes("Mexico")) {
+                return "Mexico";
+              }
+            }
+            
+            // Generic fallback - use location name as country
+            return location.replace(/_/g, " ");
+          }
+          
+          return "";
+        } catch (e) {
+          console.log("Error extracting country from timezone:", e);
+          return "";
+        }
+      },
+
+      /**
+       * Get complete location data from timezone
+       * @param {string} timezone Timezone identifier
+       * @returns {Object} Location data with continent, country, and city
+       */
+      getLocationFromTimezone: function(timezone) {
+        return {
+          continent: this.getContinentFromTimezone(timezone),
+          country: this.getCountryFromTimezone(timezone),
+          city: this.getCityFromTimezone(timezone)
+        };
+      },
+
+      /**
        * Remove cookie
        * @param {string} name Cookie name
        * @param {string} path Cookie path

@@ -277,6 +277,18 @@ class GA4_Server_Side_Tagging_Admin
                 'default' => true,
             )
         );
+
+        register_setting(
+            'ga4_server_side_tagging_settings',
+            'ga4_consent_timeout_action',
+            array(
+                'type' => 'string',
+                'description' => 'Action to take when consent timeout is reached',
+                'sanitize_callback' => 'sanitize_text_field',
+                'show_in_rest' => false,
+                'default' => 'deny',
+            )
+        );
     }
 
     /**
@@ -331,6 +343,7 @@ class GA4_Server_Side_Tagging_Admin
         $consent_deny_selector = get_option('ga4_consent_deny_selector', '.deny-all');
         $consent_default_timeout = get_option('ga4_consent_default_timeout', 30);
         $consent_mode_enabled = get_option('ga4_consent_mode_enabled', true);
+        $consent_timeout_action = get_option('ga4_consent_timeout_action', 'deny');
 
         // Include the admin view
         include GA4_SERVER_SIDE_TAGGING_PLUGIN_DIR . 'admin/partials/ga4-server-side-tagging-admin-display.php';
@@ -416,6 +429,14 @@ class GA4_Server_Side_Tagging_Admin
             // Limit timeout to reasonable values (0-300 seconds)
             $timeout = min(300, max(0, $timeout));
             update_option('ga4_consent_default_timeout', $timeout);
+        }
+
+        if (isset($_POST['ga4_consent_timeout_action'])) {
+            $timeout_action = sanitize_text_field(wp_unslash($_POST['ga4_consent_timeout_action']));
+            // Validate the timeout action value
+            if (in_array($timeout_action, ['accept', 'deny'])) {
+                update_option('ga4_consent_timeout_action', $timeout_action);
+            }
         }
 
         // Update logger debug mode

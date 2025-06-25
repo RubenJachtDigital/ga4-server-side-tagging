@@ -127,6 +127,7 @@ class GA4_Server_Side_Tagging_Public
                 'acceptSelector' => get_option('ga4_consent_accept_selector', '.accept-all'),
                 'denySelector' => get_option('ga4_consent_deny_selector', '.deny-all'),
                 'defaultTimeout' => get_option('ga4_consent_default_timeout', 0),
+                'timeoutAction' => get_option('ga4_consent_timeout_action', 'deny'),
                 'consentModeEnabled' => get_option('ga4_consent_mode_enabled', true)
             )
         );

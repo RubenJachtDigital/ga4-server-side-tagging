@@ -82,7 +82,28 @@ if (!defined('WPINC')) {
                                 <input type="number" id="ga4_consent_default_timeout" name="ga4_consent_default_timeout"
                                     value="<?php echo esc_attr($consent_default_timeout); ?>" min="0" max="300" />
                                 <span>seconds</span>
-                                <p class="description">Time in seconds before automatically accepting consent (0 = disabled). User can still deny during this time.</p>
+                                <p class="description">Time in seconds before automatically taking action (0 = disabled). User can still accept/deny manually during this time.</p>
+                            </td>
+                        </tr>
+                        <tr id="timeout_action_row">
+                            <th scope="row">
+                                <label>Timeout Action</label>
+                            </th>
+                            <td>
+                                <fieldset>
+                                    <label for="ga4_consent_timeout_action_deny">
+                                        <input type="radio" id="ga4_consent_timeout_action_deny" name="ga4_consent_timeout_action" 
+                                            value="deny" <?php checked($consent_timeout_action, 'deny'); ?> />
+                                        Deny All - Automatically deny consent after timeout
+                                    </label>
+                                    <br><br>
+                                    <label for="ga4_consent_timeout_action_accept">
+                                        <input type="radio" id="ga4_consent_timeout_action_accept" name="ga4_consent_timeout_action" 
+                                            value="accept" <?php checked($consent_timeout_action, 'accept'); ?> />
+                                        Accept All - Automatically accept consent after timeout
+                                    </label>
+                                </fieldset>
+                                <p class="description">Choose what happens when the timeout is reached. "Deny All" is more privacy-friendly and GDPR compliant.</p>
                             </td>
                         </tr>
                         <!-- Consent Mode hidden - always enabled -->
@@ -294,6 +315,24 @@ jQuery(document).ready(function($) {
         } else {
             $('#custom_consent_settings').show();
         }
+    });
+    
+    // Function to toggle timeout action visibility based on timeout value
+    function toggleTimeoutActionVisibility() {
+        var timeoutValue = parseInt($('#ga4_consent_default_timeout').val()) || 0;
+        if (timeoutValue > 0) {
+            $('#timeout_action_row').show();
+        } else {
+            $('#timeout_action_row').hide();
+        }
+    }
+    
+    // Initial check on page load
+    toggleTimeoutActionVisibility();
+    
+    // Listen for changes to the timeout input
+    $('#ga4_consent_default_timeout').on('input change keyup', function() {
+        toggleTimeoutActionVisibility();
     });
 });
 </script>

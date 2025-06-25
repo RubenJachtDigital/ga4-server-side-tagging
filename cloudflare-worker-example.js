@@ -1101,10 +1101,9 @@ function getContinentInfo(countryCode) {
  */
 function convertCountryToISO(countryName) {
   const countryMap = {
+    // Europe
     "The Netherlands": "NL",
     "Netherlands": "NL",
-    "United States": "US",
-    "USA": "US",
     "United Kingdom": "GB",
     "UK": "GB",
     "Germany": "DE",
@@ -1112,12 +1111,61 @@ function convertCountryToISO(countryName) {
     "Spain": "ES",
     "Italy": "IT",
     "Belgium": "BE",
+    "Austria": "AT",
+    "Switzerland": "CH",
+    "Sweden": "SE",
+    "Norway": "NO",
+    "Denmark": "DK",
+    "Finland": "FI",
+    "Poland": "PL",
+    "Czech Republic": "CZ",
+    "Hungary": "HU",
+    "Greece": "GR",
+    "Portugal": "PT",
+    "Ireland": "IE",
+    "Russia": "RU",
+    "Ukraine": "UA",
+    
+    // Americas
+    "United States": "US",
+    "USA": "US",
     "Canada": "CA",
-    "Australia": "AU",
+    "Mexico": "MX",
+    "Brazil": "BR",
+    "Argentina": "AR",
+    "Chile": "CL",
+    "Peru": "PE",
+    "Colombia": "CO",
+    "Venezuela": "VE",
+    
+    // Asia
     "Japan": "JP",
     "China": "CN",
     "India": "IN",
-    "Brazil": "BR",
+    "South Korea": "KR",
+    "Thailand": "TH",
+    "Indonesia": "ID",
+    "Philippines": "PH",
+    "Malaysia": "MY",
+    "Singapore": "SG",
+    "Hong Kong": "HK",
+    "United Arab Emirates": "AE",
+    "Saudi Arabia": "SA",
+    "Israel": "IL",
+    "Turkey": "TR",
+    
+    // Oceania
+    "Australia": "AU",
+    "New Zealand": "NZ",
+    "Fiji": "FJ",
+    
+    // Africa
+    "Egypt": "EG",
+    "Nigeria": "NG",
+    "South Africa": "ZA",
+    "Kenya": "KE",
+    "Morocco": "MA",
+    "Tunisia": "TN",
   };
 
   if (countryMap[countryName]) {
@@ -1140,19 +1188,36 @@ function convertCountryToISO(countryName) {
  */
 function extractLocationData(params) {
   const userLocation = {};
+  let locationSource = "continent mapping"; // Default fallback
 
+  // Priority 1: Precise location data (from IP geolocation)
   if (params.geo_city || params.city) {
     const cityName = params.geo_city || params.city;
     userLocation.city = cleanLocationString(cityName);
+    locationSource = "IP geolocation";
     delete params.geo_city;
     delete params.city;
   }
+  // Fallback: Timezone-based city data
+  else if (params.geo_city_tz) {
+    userLocation.city = cleanLocationString(params.geo_city_tz);
+    locationSource = "timezone fallback";
+    delete params.geo_city_tz;
+  }
 
+  // Priority 1: Precise country data (from IP geolocation)
   if (params.geo_country || params.country) {
     const countryName = params.geo_country || params.country;
     userLocation.country_id = convertCountryToISO(countryName);
+    if (locationSource === "continent mapping") locationSource = "IP geolocation";
     delete params.geo_country;
     delete params.country;
+  }
+  // Fallback: Timezone-based country data
+  else if (params.geo_country_tz) {
+    userLocation.country_id = convertCountryToISO(params.geo_country_tz);
+    if (locationSource === "continent mapping") locationSource = "timezone fallback";
+    delete params.geo_country_tz;
   }
 
   if (params.geo_region || params.region) {
@@ -1187,7 +1252,17 @@ function extractLocationData(params) {
       userLocation.country_id = continentMap[params.geo_continent];
     }
     
+    // Always remove geo_continent - it's not a valid GA4 parameter
     delete params.geo_continent;
+  }
+
+  // Clean up timezone parameter - remove it from event params
+  // (timezone is not a standard GA4 event parameter)
+  if (params.timezone) {
+    if (DEBUG_MODE) {
+      console.log("Timezone detected in event:", params.timezone);
+    }
+    delete params.timezone;
   }
 
   if (userLocation.country_id && !userLocation.continent_id) {
@@ -1219,8 +1294,20 @@ function extractLocationData(params) {
     }
   });
 
+  // Clean up any remaining timezone-based parameters that shouldn't be in GA4 events
+  const nonStandardParams = ['geo_continent', 'geo_country_tz', 'geo_city_tz', 'timezone'];
+  nonStandardParams.forEach(param => {
+    if (params[param]) {
+      if (DEBUG_MODE) {
+        console.log(`Removing non-standard GA4 parameter: ${param} = ${params[param]}`);
+      }
+      delete params[param];
+    }
+  });
+
   if (DEBUG_MODE && Object.keys(userLocation).length > 0) {
     console.log("Final user_location object:", JSON.stringify(userLocation));
+    console.log("Location source:", locationSource);
   }
 
   return userLocation;
