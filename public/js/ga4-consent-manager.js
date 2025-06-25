@@ -203,8 +203,8 @@
           });
 
           // Add small delay between events to prevent overwhelming the server
-          setTimeout(function() {
-            this.sendEventWithBypass(queuedEvent.eventName, queuedEvent.eventParams, queuedEvent.isCompleteData);
+          setTimeout(async function() {
+            await this.sendEventWithBypass(queuedEvent.eventName, queuedEvent.eventParams, queuedEvent.isCompleteData);
           }.bind(this), index * 100); // 100ms delay between events
           
         }.bind(this));
@@ -217,7 +217,7 @@
      * @param {Object} eventParams - Event parameters (basic or complete)
      * @param {boolean} isCompleteData - Whether eventParams contains complete enriched data
      */
-    sendEventWithBypass: function(eventName, eventParams, isCompleteData = false) {
+    sendEventWithBypass: async function(eventName, eventParams, isCompleteData = false) {
       this.log("Sending bypassed event", { 
         eventName: eventName, 
         isCompleteData: isCompleteData,
@@ -228,11 +228,11 @@
         // Event has complete data, send directly without re-enriching
         if (this.trackingInstance && typeof this.trackingInstance.sendCompleteEventData === 'function') {
           // Use new method for complete data
-          this.trackingInstance.sendCompleteEventData(eventName, eventParams);
+          await this.trackingInstance.sendCompleteEventData(eventName, eventParams);
         } else if (this.trackingInstance && typeof this.trackingInstance.sendServerSideEvent === 'function') {
           // Fallback: Update consent data and send
           eventParams.consent = this.getConsentForServerSide();
-          this.trackingInstance.sendRawEventData(eventName, eventParams);
+          await this.trackingInstance.sendRawEventData(eventName, eventParams);
         } else {
           this.log("No method available for sending complete event data", { eventName: eventName });
         }

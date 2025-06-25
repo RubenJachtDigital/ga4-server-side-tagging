@@ -16,7 +16,7 @@
     consentReady: false,
     trackedPageViews: new Set(), // Track URLs that have been tracked
 
-    init: function () {
+    init: async function () {
       // Check if we have the required configuration
       if (!this.config.measurementId) {
         this.log("Measurement ID not configured");
@@ -35,13 +35,13 @@
 
       // Track page view immediately (will be queued if consent not ready)
       if (this.config.useServerSide == true) {
-        this.log("🚀 Triggering trackPageView immediately on page load");
-        this.trackPageView();
+        this.log("🚀 Triggering trackPageView immediately on page load - awaiting location data");
+        await this.trackPageView();
       }
 
       // Log initialization
       this.log(
-        "%c GA4 Server-Side Tagging initialized v1 ",
+        "%c GA4 Server-Side Tagging initialized v6 ",
         "background: #4CAF50; color: white; font-size: 16px; font-weight: bold; padding: 8px 12px; border-radius: 4px;"
       );
     },
@@ -107,7 +107,7 @@
     /**
      * REPLACE the existing trackPageView function with this enhanced version
      */
-    trackPageView: function () {
+    trackPageView: async function () {
       var currentUrl = window.location.href;
       
       this.log("🎯 trackPageView called", {
@@ -186,8 +186,8 @@
         referrerDomain
       );
 
-      // Common session parameters needed for all page view events
-      var sessionParams = this.buildSessionParams(
+      // Common session parameters needed for all page view events (with location data)
+      var sessionParams = await this.buildSessionParams(
         session,
         userAgentInfo,
         attribution,
@@ -203,7 +203,7 @@
         this.trackEvent("custom_first_visit", sessionParams);
       }
 
-      this.completePageViewTracking(sessionParams, isNewSession);
+      await this.completePageViewTracking(sessionParams, isNewSession);
     },
 
     /**
@@ -406,9 +406,9 @@
     },
 
     /**
-     * Build session parameters for tracking
+     * Build session parameters for tracking (with async location data)
      */
-    buildSessionParams: function (
+    buildSessionParams: async function (
       session,
       userAgentInfo,
       attribution,
@@ -467,6 +467,59 @@
         event_timestamp: Math.floor(Date.now() / 1000),
       };
 
+      // Add timezone fallback location data first
+      var timezone = sessionParams.timezone;
+      if (timezone) {
+        var timezoneLocation = GA4Utils.helpers.getLocationFromTimezone(timezone);
+        if (timezoneLocation.continent) sessionParams.geo_continent = timezoneLocation.continent;
+        if (timezoneLocation.country) sessionParams.geo_country_tz = timezoneLocation.country;
+        if (timezoneLocation.city) sessionParams.geo_city_tz = timezoneLocation.city;
+      }
+
+      // Only try to get precise location data if we're actually sending events now (not queuing)
+      // For queued events, location will be added when events are actually sent after consent
+      if (window.GA4ConsentManager && window.GA4ConsentManager.hasConsent && window.GA4ConsentManager.hasConsent()) {
+        try {
+          // Check if we have consent for precise location data
+          var consentData = null;
+          if (window.GA4ConsentManager && typeof window.GA4ConsentManager.getConsentForServerSide === 'function') {
+            consentData = window.GA4ConsentManager.getConsentForServerSide();
+          } else {
+            consentData = GA4Utils.consent.getForServerSide();
+          }
+
+          if (consentData && consentData.analytics_storage === "GRANTED") {
+            this.log("Attempting to get precise location data - consent granted");
+            
+            // Wait for location data without timeout
+            const locationData = await this.getUserLocation();
+
+            if (locationData && locationData.latitude && locationData.longitude) {
+              // Replace timezone fallback with precise data
+              if (locationData.latitude) sessionParams.geo_latitude = locationData.latitude;
+              if (locationData.longitude) sessionParams.geo_longitude = locationData.longitude;
+              if (locationData.city) sessionParams.geo_city = locationData.city;
+              if (locationData.country) sessionParams.geo_country = locationData.country;
+              if (locationData.region) sessionParams.geo_region = locationData.region;
+              
+              this.log("Got precise location data", {
+                city: locationData.city,
+                country: locationData.country,
+                timezone_fallback_used: false
+              });
+            } else {
+              this.log("Location API returned incomplete data, using timezone fallback");
+            }
+          } else {
+            this.log("Analytics consent denied, using timezone fallback only");
+          }
+        } catch (error) {
+          this.log("Location API failed, using timezone fallback:", error.message);
+        }
+      } else {
+        this.log("No consent determined yet or consent denied - events will be queued with timezone fallback only");
+      }
+
       return sessionParams;
     },
 
@@ -478,7 +531,7 @@
     },
 
     // Method to complete page view tracking after location attempt
-    completePageViewTracking: function (sessionParams, isNewSession) {
+    completePageViewTracking: async function (sessionParams, isNewSession) {
       // Log session information
       this.log("Page view params:", sessionParams);
       this.log("Is new session: " + isNewSession);
@@ -2049,7 +2102,7 @@
     /**
      * Send raw event data without re-enriching (for queued events with complete data)
      */
-    sendRawEventData: function(eventName, completeEventData) {
+    sendRawEventData: async function(eventName, completeEventData) {
       this.log("Sending raw event data (preserving original context)", {
         eventName: eventName,
         originalPageUrl: completeEventData.page_location,
@@ -2060,6 +2113,30 @@
       completeEventData.consent = window.GA4ConsentManager ? 
         window.GA4ConsentManager.getConsentForServerSide() : 
         GA4Utils.consent.getForServerSide();
+      
+      // If consent is now granted, refresh location data for better accuracy
+      if (completeEventData.consent && completeEventData.consent.analytics_storage === "GRANTED") {
+        try {
+          this.log("Consent granted - refreshing location data for queued event");
+          const locationData = await this.getUserLocation();
+          
+          if (locationData && locationData.latitude && locationData.longitude) {
+            // Update with precise location data
+            completeEventData.geo_latitude = locationData.latitude;
+            completeEventData.geo_longitude = locationData.longitude;
+            completeEventData.geo_city = locationData.city;
+            completeEventData.geo_country = locationData.country;
+            completeEventData.geo_region = locationData.region;
+            
+            this.log("Updated queued event with precise location data", {
+              city: locationData.city,
+              country: locationData.country
+            });
+          }
+        } catch (error) {
+          this.log("Failed to refresh location data for queued event, keeping timezone fallback:", error.message);
+        }
+      }
       
       // Apply current GDPR anonymization based on new consent status
       if (window.GA4ConsentManager && typeof window.GA4ConsentManager.applyGDPRAnonymization === 'function') {
@@ -2420,7 +2497,7 @@
   };
 
   // Initialize when document is ready
-  $(document).ready(function () {
-    GA4ServerSideTagging.init();
+  $(document).ready(async function () {
+    await GA4ServerSideTagging.init();
   });
 })(jQuery);
