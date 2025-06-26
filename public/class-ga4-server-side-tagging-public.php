@@ -131,7 +131,11 @@ class GA4_Server_Side_Tagging_Public
                 'consentModeEnabled' => get_option('ga4_consent_mode_enabled', true),
                 'disableAllIP' => get_option('ga4_disable_all_ip', false),
                 'storageExpirationHours' => get_option('ga4_storage_expiration_hours', 24)
-            )
+            ),
+
+            // A/B Testing settings
+            'abTestsEnabled' => get_option('ga4_ab_tests_enabled', false),
+            'abTestsConfig' => get_option('ga4_ab_tests_config', '[]')
         );
 
         // Add product data if we're on a product page

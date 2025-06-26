@@ -144,7 +144,81 @@ if (!defined('WPINC')) {
                         <input type="hidden" name="ga4_consent_mode_enabled" value="1" />
                     </table>
                 </div>
+      <!-- A/B Testing Settings -->
+                <div class="ga4-server-side-tagging-admin-section">
+                    <h3>A/B Testing Configuration</h3>
+                    
+                    <table class="form-table">
+                        <tr>
+                            <th scope="row">Enable A/B Testing</th>
+                            <td>
+                                <label for="ga4_ab_tests_enabled">
+                                    <input type="checkbox" id="ga4_ab_tests_enabled" name="ga4_ab_tests_enabled" <?php checked($ab_tests_enabled); ?> />
+                                    Enable A/B testing functionality
+                                </label>
+                                <p class="description">Track user interactions with different variations of elements</p>
+                            </td>
+                        </tr>
+                    </table>
 
+                    <div id="ab_testing_config" style="<?php echo $ab_tests_enabled ? '' : 'display: none;'; ?>">
+                        <h4>A/B Test Configurations</h4>
+                        <p class="description">Configure button click tracking for A/B tests. When users click elements with these CSS classes, events will be sent with the variant as the event name (e.g., "button_test_a" or "button_test_b"). Add the CSS classes to your buttons in your theme.</p>
+                        
+                        <div id="ab_tests_container">
+                            <?php if (!empty($ab_tests_array)): ?>
+                                <?php foreach ($ab_tests_array as $index => $test): ?>
+                                    <div class="ab-test-item" data-index="<?php echo $index; ?>">
+                                        <table class="form-table">
+                                            <tr>
+                                                <th scope="row">
+                                                    <label>Test Name</label>
+                                                </th>
+                                                <td>
+                                                    <input type="text" name="ab_test_name[]" value="<?php echo esc_attr($test['name']); ?>" 
+                                                           placeholder="e.g., Button Color Test" class="regular-text" />
+                                                </td>
+                                            </tr>
+                                            <tr>
+                                                <th scope="row">
+                                                    <label>Variant A CSS Class</label>
+                                                </th>
+                                                <td>
+                                                    <input type="text" name="ab_test_class_a[]" value="<?php echo esc_attr($test['class_a']); ?>" 
+                                                           placeholder="e.g., .button-red" class="regular-text" />
+                                                </td>
+                                            </tr>
+                                            <tr>
+                                                <th scope="row">
+                                                    <label>Variant B CSS Class</label>
+                                                </th>
+                                                <td>
+                                                    <input type="text" name="ab_test_class_b[]" value="<?php echo esc_attr($test['class_b']); ?>" 
+                                                           placeholder="e.g., .button-blue" class="regular-text" />
+                                                </td>
+                                            </tr>
+                                            <tr>
+                                                <th scope="row">
+                                                    <label>Enabled</label>
+                                                </th>
+                                                <td>
+                                                    <input type="checkbox" name="ab_test_enabled[]" value="1" <?php checked($test['enabled']); ?> />
+                                                    <span>Test is active</span>
+                                                </td>
+                                            </tr>
+                                        </table>
+                                        <button type="button" class="button remove-ab-test">Remove Test</button>
+                                        <hr>
+                                    </div>
+                                <?php endforeach; ?>
+                            <?php endif; ?>
+                        </div>
+                        
+                        <button type="button" id="add_ab_test" class="button">Add New A/B Test</button>
+                        
+                        <input type="hidden" id="ga4_ab_tests_config" name="ga4_ab_tests_config" value="" />
+                    </div>
+                </div>
                 <!-- Tracking Options -->
                 <div class="ga4-server-side-tagging-admin-section">
                     <h3>Tracking Options</h3>
@@ -263,6 +337,8 @@ if (!defined('WPINC')) {
                         </tr>
                     </table>
                 </div>
+
+          
 
                 <p class="submit">
                     <input type="submit" name="ga4_server_side_tagging_settings_submit" class="button-primary"

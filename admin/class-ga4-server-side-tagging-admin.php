@@ -314,6 +314,31 @@ class GA4_Server_Side_Tagging_Admin
             )
         );
 
+        // A/B Testing Settings
+        register_setting(
+            'ga4_server_side_tagging_settings',
+            'ga4_ab_tests_enabled',
+            array(
+                'type' => 'boolean',
+                'description' => 'Enable A/B testing functionality',
+                'sanitize_callback' => array($this, 'sanitize_checkbox'),
+                'show_in_rest' => false,
+                'default' => false,
+            )
+        );
+
+        register_setting(
+            'ga4_server_side_tagging_settings',
+            'ga4_ab_tests_config',
+            array(
+                'type' => 'string',
+                'description' => 'A/B tests configuration JSON',
+                'sanitize_callback' => array($this, 'sanitize_ab_tests_config'),
+                'show_in_rest' => false,
+                'default' => '[]',
+            )
+        );
+
     }
 
     /**
@@ -345,6 +370,43 @@ class GA4_Server_Side_Tagging_Admin
             $hours = 8760;
         }
         return $hours;
+    }
+
+    /**
+     * Sanitize A/B tests configuration.
+     *
+     * @since    1.0.0
+     * @param    mixed    $input    The input value.
+     * @return   string              The sanitized JSON string.
+     */
+    public function sanitize_ab_tests_config($input)
+    {
+        if (empty($input)) {
+            return '[]';
+        }
+
+        // Decode JSON to validate structure
+        $decoded = json_decode($input, true);
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            return '[]';
+        }
+
+        // Validate each test configuration
+        $sanitized_tests = array();
+        if (is_array($decoded)) {
+            foreach ($decoded as $test) {
+                if (isset($test['name']) && isset($test['class_a']) && isset($test['class_b'])) {
+                    $sanitized_tests[] = array(
+                        'name' => sanitize_text_field($test['name']),
+                        'class_a' => sanitize_text_field($test['class_a']),
+                        'class_b' => sanitize_text_field($test['class_b']),
+                        'enabled' => isset($test['enabled']) ? (bool) $test['enabled'] : true,
+                    );
+                }
+            }
+        }
+
+        return json_encode($sanitized_tests);
     }
 
 
@@ -392,6 +454,14 @@ class GA4_Server_Side_Tagging_Admin
         $disable_all_ip = get_option('ga4_disable_all_ip', false);
         $storage_expiration_hours = get_option('ga4_storage_expiration_hours', 24);
         $consent_expiration_days = get_option('ga4_consent_expiration_days', 30);
+
+        // A/B Testing settings
+        $ab_tests_enabled = get_option('ga4_ab_tests_enabled', false);
+        $ab_tests_config = get_option('ga4_ab_tests_config', '[]');
+        $ab_tests_array = json_decode($ab_tests_config, true);
+        if (!is_array($ab_tests_array)) {
+            $ab_tests_array = array();
+        }
 
         // Include the admin view
         include GA4_SERVER_SIDE_TAGGING_PLUGIN_DIR . 'admin/partials/ga4-server-side-tagging-admin-display.php';
@@ -497,11 +567,16 @@ class GA4_Server_Side_Tagging_Admin
             update_option('ga4_storage_expiration_hours', $hours);
         }
 
-        if (isset($_POST['ga4_consent_expiration_days'])) {
-            $days = absint($_POST['ga4_consent_expiration_days']);
-            // Use the existing sanitize method for validation (1-365 days)
-            $days = $this->sanitize_consent_expiration_days($days);
-            update_option('ga4_consent_expiration_days', $days);
+        // A/B Testing settings
+        update_option('ga4_ab_tests_enabled', isset($_POST['ga4_ab_tests_enabled']));
+        
+        // Process A/B tests configuration from the hidden field
+        if (isset($_POST['ga4_ab_tests_config'])) {
+            $ab_tests_config = wp_unslash($_POST['ga4_ab_tests_config']);
+            update_option('ga4_ab_tests_config', $this->sanitize_ab_tests_config($ab_tests_config));
+        } else {
+            // If no config provided, save empty array
+            update_option('ga4_ab_tests_config', '[]');
         }
 
         // Update logger debug mode

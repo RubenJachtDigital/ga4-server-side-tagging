@@ -33,6 +33,9 @@
       // Set up event listeners (these will queue events until consent is ready)
       this.setupEventListeners();
 
+      // Initialize A/B testing
+      this.initializeABTesting();
+
       // Track page view immediately (will be queued if consent not ready)
       if (this.config.useServerSide == true) {
         this.log("🚀 Triggering trackPageView immediately on page load - awaiting location data");
@@ -102,6 +105,36 @@
       // The consent manager will process any queued events
     },
 
+    /**
+     * Initialize A/B testing functionality
+     */
+    initializeABTesting: function() {
+      this.log("🧪 [Main] Starting A/B testing initialization...", {
+        hasGA4Utils: !!(window.GA4Utils),
+        hasAbTesting: !!(window.GA4Utils && window.GA4Utils.abTesting),
+        configKeys: this.config ? Object.keys(this.config) : 'no config'
+      });
+      
+      if (window.GA4Utils && window.GA4Utils.abTesting) {
+        try {
+          // Initialize A/B tests using the config
+          this.log("🧪 [Main] Calling GA4Utils.abTesting.init with config:", {
+            abTestsEnabled: this.config.abTestsEnabled,
+            abTestsConfig: this.config.abTestsConfig
+          });
+          
+          GA4Utils.abTesting.init(this.config);
+          this.log("✅ [Main] A/B testing initialized successfully");
+        } catch (error) {
+          this.log("❌ [Main] Error initializing A/B testing:", error);
+        }
+      } else {
+        this.log("❌ [Main] GA4Utils.abTesting not available", {
+          hasGA4Utils: !!(window.GA4Utils),
+          hasAbTesting: !!(window.GA4Utils && window.GA4Utils.abTesting)
+        });
+      }
+    },
 
   
     /**
@@ -1912,6 +1945,7 @@
       var userAgentInfo = GA4Utils.device.parseUserAgent();
       var clientBehavior = GA4Utils.botDetection.getClientBehaviorData();
 
+
       // Add bot detection data for Cloudflare Worker analysis
       params.botData = {
         user_agent_full: userAgentInfo.user_agent,
@@ -2205,6 +2239,7 @@
         return; // Don't send bot traffic
       }
 
+
       // Add bot detection data for Cloudflare Worker analysis
       params.botData = {
         user_agent_full: userAgentInfo.user_agent,
@@ -2469,6 +2504,9 @@
       );
     },
   };
+
+  // Expose GA4ServerSideTagging globally for A/B testing and other modules
+  window.GA4ServerSideTagging = GA4ServerSideTagging;
 
   // Initialize when document is ready
   $(document).ready(async function () {

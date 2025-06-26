@@ -63,6 +63,125 @@
             
             return true;
         });
+
+        // A/B Testing functionality
+        initializeABTesting();
     });
+
+    // A/B Testing Functions
+    function initializeABTesting() {
+        // Toggle A/B testing configuration
+        $('#ga4_ab_tests_enabled').on('change', function() {
+            if ($(this).is(':checked')) {
+                $('#ab_testing_config').show();
+            } else {
+                $('#ab_testing_config').hide();
+            }
+        }).trigger('change');
+
+        // Add new A/B test
+        $('#add_ab_test').on('click', function() {
+            addABTest();
+        });
+
+        // Remove A/B test
+        $(document).on('click', '.remove-ab-test', function() {
+            $(this).closest('.ab-test-item').remove();
+            updateABTestsConfig();
+        });
+
+        // Update hidden field when form inputs change
+        $(document).on('input change', 'input[name^="ab_test_"]', function() {
+            updateABTestsConfig();
+        });
+
+        // Initialize with existing tests
+        updateABTestsConfig();
+
+        // Handle form submission - make sure we update config before submit
+        $('form').on('submit', function(e) {
+            updateABTestsConfig();
+            // Small delay to ensure the field is updated
+            return true;
+        });
+    }
+
+    function addABTest() {
+        var index = $('.ab-test-item').length;
+        var template = `
+            <div class="ab-test-item" data-index="${index}">
+                <table class="form-table">
+                    <tr>
+                        <th scope="row">
+                            <label>Test Name</label>
+                        </th>
+                        <td>
+                            <input type="text" name="ab_test_name[]" value="" 
+                                   placeholder="e.g., Button Color Test" class="regular-text" />
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row">
+                            <label>Variant A CSS Class</label>
+                        </th>
+                        <td>
+                            <input type="text" name="ab_test_class_a[]" value="" 
+                                   placeholder="e.g., .button-red" class="regular-text" />
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row">
+                            <label>Variant B CSS Class</label>
+                        </th>
+                        <td>
+                            <input type="text" name="ab_test_class_b[]" value="" 
+                                   placeholder="e.g., .button-blue" class="regular-text" />
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row">
+                            <label>Enabled</label>
+                        </th>
+                        <td>
+                            <input type="checkbox" name="ab_test_enabled[]" value="1" checked />
+                            <span>Test is active</span>
+                        </td>
+                    </tr>
+                </table>
+                <button type="button" class="button remove-ab-test">Remove Test</button>
+                <hr>
+            </div>
+        `;
+        
+        $('#ab_tests_container').append(template);
+        updateABTestsConfig();
+    }
+
+    function updateABTestsConfig() {
+        var tests = [];
+        
+        $('.ab-test-item').each(function() {
+            var $item = $(this);
+            var name = $item.find('input[name="ab_test_name[]"]').val();
+            var classA = $item.find('input[name="ab_test_class_a[]"]').val();
+            var classB = $item.find('input[name="ab_test_class_b[]"]').val();
+            var enabled = $item.find('input[name="ab_test_enabled[]"]').is(':checked');
+            
+            if (name && classA && classB) {
+                tests.push({
+                    name: name,
+                    class_a: classA,
+                    class_b: classB,
+                    enabled: enabled
+                });
+            }
+        });
+        
+        var configJson = JSON.stringify(tests);
+        $('#ga4_ab_tests_config').val(configJson);
+        
+        // Debug logging
+        console.log('A/B Tests Config Updated:', configJson);
+    }
 
 })( jQuery ); 

@@ -3277,6 +3277,258 @@
         return summary;
       },
     },
+
+    /**
+     * A/B Testing functionality - Simplified click tracking only
+     */
+    abTesting: {
+      /**
+       * Initialize A/B tests for the current session
+       * @param {Object} config - GA4 configuration object
+       */
+      init: function(config) {
+        console.log('🧪 [A/B Testing] Starting initialization...', {
+          hasConfig: !!config,
+          abTestsEnabled: config ? config.abTestsEnabled : 'no config',
+          abTestsConfig: config ? config.abTestsConfig : 'no config'
+        });
+        
+        if (!config) {
+          console.log('❌ [A/B Testing] No config provided');
+          return;
+        }
+        
+        if (!config.abTestsEnabled) {
+          console.log('⚠️ [A/B Testing] A/B testing is disabled in admin settings');
+          return;
+        }
+        
+        if (!config.abTestsConfig) {
+          console.log('⚠️ [A/B Testing] No A/B test config provided');
+          return;
+        }
+
+        try {
+          var tests = JSON.parse(config.abTestsConfig);
+          console.log('🧪 [A/B Testing] Parsed test config:', tests);
+          
+          if (!Array.isArray(tests)) {
+            console.log('❌ [A/B Testing] Test config is not an array');
+            return;
+          }
+          
+          if (tests.length === 0) {
+            console.log('⚠️ [A/B Testing] No tests configured');
+            return;
+          }
+
+          var self = this;
+          var enabledTests = 0;
+          tests.forEach(function(test, index) {
+            console.log('🧪 [A/B Testing] Processing test ' + (index + 1) + ':', test);
+            
+            if (test.enabled && test.name && test.class_a && test.class_b) {
+              self.setupTestClickTracking(test);
+              enabledTests++;
+            } else {
+              console.log('⚠️ [A/B Testing] Skipping invalid/disabled test:', {
+                enabled: test.enabled,
+                hasName: !!test.name,
+                hasClassA: !!test.class_a,
+                hasClassB: !!test.class_b
+              });
+            }
+          });
+
+          console.log('✅ [A/B Testing] Initialized click tracking for ' + enabledTests + ' out of ' + tests.length + ' tests');
+        } catch (e) {
+          console.log('❌ [A/B Testing] Error parsing test config:', e);
+        }
+      },
+
+      /**
+       * Set up click tracking for both variants of a test
+       * @param {Object} test - Test configuration
+       */
+      setupTestClickTracking: function(test) {
+        var self = this;
+        
+        console.log('🧪 [A/B Testing] Setting up test:', test);
+        
+        // Set up tracking for Variant A
+        if (document.querySelector(test.class_a)) {
+          self.setupClicksForClass(test, 'A', test.class_a);
+          console.log('✅ [A/B Testing] Set up tracking for "' + test.name + '" Variant A: ' + test.class_a);
+        } else {
+          console.log('⚠️ [A/B Testing] No elements found for Variant A class: ' + test.class_a);
+        }
+        
+        // Set up tracking for Variant B  
+        if (document.querySelector(test.class_b)) {
+          self.setupClicksForClass(test, 'B', test.class_b);
+          console.log('✅ [A/B Testing] Set up tracking for "' + test.name + '" Variant B: ' + test.class_b);
+        } else {
+          console.log('⚠️ [A/B Testing] No elements found for Variant B class: ' + test.class_b);
+        }
+      },
+
+      /**
+       * Set up click tracking for a specific CSS class
+       * @param {Object} test - Test configuration
+       * @param {string} variant - Variant ('A' or 'B')
+       * @param {string} className - CSS class selector
+       */
+      setupClicksForClass: function(test, variant, className) {
+        var self = this;
+        
+        console.log('🎯 [A/B Testing] Setting up click handler for class: ' + className);
+        
+        $(document).on('click', className, function(event) {
+          console.log('🖱️ [A/B Testing] Click detected on element with class: ' + className);
+          self.trackTestClick(test, variant, this);
+        });
+      },
+
+      /**
+       * Track A/B test click event
+       * @param {Object} test - Test configuration
+       * @param {string} variant - Clicked variant ('A' or 'B')
+       * @param {Element} element - Clicked element
+       */
+      trackTestClick: function(test, variant, element) {
+        var session = GA4Utils.session.get();
+        var sessionDurationSeconds = Math.round((Date.now() - session.start) / 1000);
+        var userAgentInfo = GA4Utils.device.parseUserAgent();
+        var clientId = GA4Utils.clientId.get();
+        
+        // Create GA4-compliant event name with variant
+        var eventName = this.createEventName(test.name, variant);
+        
+        var eventData = {
+          // A/B test specific data (3 params)
+          ab_test_name: test.name,
+          ab_test_variant: variant,
+          ab_test_element_class: variant === 'A' ? test.class_a : test.class_b,
+          
+          // Essential session data (2 params)
+          session_id: session.id,
+          session_duration_seconds: sessionDurationSeconds,
+          
+          // Client identification (1 param)
+          client_id: clientId,
+          
+          // Device and browser information (4 params)
+          browser_name: userAgentInfo.browser_name,
+          device_type: userAgentInfo.device_type,
+          is_mobile: userAgentInfo.is_mobile,
+          language: navigator.language || '',
+          
+          // Element context (3 params)
+          element_tag: element.tagName.toLowerCase(),
+          element_text: element.textContent ? element.textContent.trim().substring(0, 100) : '',
+          element_id: element.id || '',
+          
+          // Page context (3 params)
+          page_location: window.location.href,
+          page_title: document.title,
+          page_referrer: document.referrer || '',
+          
+          // Attribution data (3 params)
+          source: this.getStoredAttribution().source || '',
+          medium: this.getStoredAttribution().medium || '',
+          campaign: this.getStoredAttribution().campaign || '',
+          
+          // Engagement metrics (2 params)
+          timezone: GA4Utils.helpers.getTimezone(),
+          engagement_time_msec: GA4Utils.time.calculateEngagementTime(session.start),
+          
+          // Timestamp (1 param)
+          event_timestamp: Math.floor(Date.now() / 1000)
+        };
+        // Total: 22 parameters (within GA4 limit of 25)
+
+        // Track the event using the global tracking function if available
+        if (window.GA4ServerSideTagging && typeof window.GA4ServerSideTagging.trackEvent === 'function') {
+          console.log('📤 [A/B Testing] Sending event "' + eventName + '" to GA4ServerSideTagging.trackEvent');
+          console.log('📊 [A/B Testing] Event data:', eventData);
+          
+          window.GA4ServerSideTagging.trackEvent(eventName, eventData);
+          
+          console.log('✅ [A/B Testing] Event sent successfully');
+        } else {
+          console.log('❌ [A/B Testing] Cannot send event - GA4ServerSideTagging.trackEvent not available', {
+            hasGA4ServerSideTagging: !!(window.GA4ServerSideTagging),
+            hasTrackEvent: !!(window.GA4ServerSideTagging && window.GA4ServerSideTagging.trackEvent),
+            trackEventType: window.GA4ServerSideTagging ? typeof window.GA4ServerSideTagging.trackEvent : 'no GA4ServerSideTagging'
+          });
+        }
+
+        console.log('🧪 [A/B Testing] Tracked click for "' + test.name + '" variant ' + variant + ' as event "' + eventName + '"', {
+          element: element,
+          sessionDuration: sessionDurationSeconds + ' seconds',
+          elementText: eventData.element_text,
+          sessionData: {
+            id: session.id,
+            duration: sessionDurationSeconds,
+            count: session.sessionCount,
+            isNew: session.isNew
+          }
+        });
+      },
+
+      /**
+       * Get stored attribution data
+       * @returns {Object} Attribution data
+       */
+      getStoredAttribution: function() {
+        var userData = GA4Utils.storage.getUserData();
+        return {
+          source: userData.lastSource || '',
+          medium: userData.lastMedium || '',
+          campaign: userData.lastCampaign || '',
+          content: userData.lastContent || '',
+          term: userData.lastTerm || '',
+          gclid: userData.lastGclid || ''
+        };
+      },
+
+      /**
+       * Create GA4-compliant event name from test name and variant
+       * @param {string} testName - Original test name
+       * @param {string} variant - Test variant (A or B)
+       * @returns {string} GA4-compliant event name
+       */
+      createEventName: function(testName, variant) {
+        // Convert to lowercase and replace spaces/special chars with underscores
+        var cleanName = testName
+          .toLowerCase()
+          .replace(/[^a-z0-9]/g, '_')
+          .replace(/_+/g, '_')
+          .replace(/^_|_$/g, '');
+        
+        // Add variant suffix
+        var eventName = cleanName + '_' + variant.toLowerCase();
+        
+        // Ensure max length of 40 characters (GA4 limit)
+        if (eventName.length > 40) {
+          // Truncate the test name part to fit within limit
+          var maxTestNameLength = 40 - 2; // Reserve 2 chars for "_a" or "_b"
+          cleanName = cleanName.substring(0, maxTestNameLength);
+          eventName = cleanName + '_' + variant.toLowerCase();
+        }
+        
+        // Ensure it doesn't start with a number (GA4 requirement)
+        if (/^[0-9]/.test(eventName)) {
+          eventName = 'ab_' + eventName;
+          // Truncate if now too long
+          if (eventName.length > 40) {
+            eventName = eventName.substring(0, 40);
+          }
+        }
+        
+        return eventName;
+      }
+    },
   };
 
   // Expose the utilities globally
