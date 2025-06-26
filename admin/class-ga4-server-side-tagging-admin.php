@@ -289,6 +289,30 @@ class GA4_Server_Side_Tagging_Admin
                 'default' => 'deny',
             )
         );
+
+        register_setting(
+            'ga4_server_side_tagging_settings',
+            'ga4_disable_all_ip',
+            array(
+                'type' => 'boolean',
+                'description' => 'Disable all IP-based location tracking',
+                'sanitize_callback' => array($this, 'sanitize_checkbox'),
+                'show_in_rest' => false,
+                'default' => false,
+            )
+        );
+
+        register_setting(
+            'ga4_server_side_tagging_settings',
+            'ga4_storage_expiration_hours',
+            array(
+                'type' => 'integer',
+                'description' => 'Storage expiration time in hours',
+                'sanitize_callback' => array($this, 'sanitize_storage_expiration_hours'),
+                'show_in_rest' => false,
+                'default' => 24,
+            )
+        );
     }
 
     /**
@@ -301,6 +325,25 @@ class GA4_Server_Side_Tagging_Admin
     public function sanitize_checkbox($input)
     {
         return (bool) $input;
+    }
+
+    /**
+     * Sanitize storage expiration hours.
+     *
+     * @since    1.0.0
+     * @param    mixed    $input    The input value.
+     * @return   int                 The sanitized value (1-8760 hours).
+     */
+    public function sanitize_storage_expiration_hours($input)
+    {
+        $hours = absint($input);
+        // Ensure value is between 1 hour and 8760 hours (1 year)
+        if ($hours < 1) {
+            $hours = 1;
+        } elseif ($hours > 8760) {
+            $hours = 8760;
+        }
+        return $hours;
     }
 
     /**
@@ -344,6 +387,8 @@ class GA4_Server_Side_Tagging_Admin
         $consent_default_timeout = get_option('ga4_consent_default_timeout', 30);
         $consent_mode_enabled = get_option('ga4_consent_mode_enabled', true);
         $consent_timeout_action = get_option('ga4_consent_timeout_action', 'deny');
+        $disable_all_ip = get_option('ga4_disable_all_ip', false);
+        $storage_expiration_hours = get_option('ga4_storage_expiration_hours', 24);
 
         // Include the admin view
         include GA4_SERVER_SIDE_TAGGING_PLUGIN_DIR . 'admin/partials/ga4-server-side-tagging-admin-display.php';
@@ -437,6 +482,16 @@ class GA4_Server_Side_Tagging_Admin
             if (in_array($timeout_action, ['accept', 'deny'])) {
                 update_option('ga4_consent_timeout_action', $timeout_action);
             }
+        }
+
+        // Process new IP and storage settings
+        update_option('ga4_disable_all_ip', isset($_POST['ga4_disable_all_ip']));
+
+        if (isset($_POST['ga4_storage_expiration_hours'])) {
+            $hours = absint($_POST['ga4_storage_expiration_hours']);
+            // Use the existing sanitize method for validation (1-8760 hours)
+            $hours = $this->sanitize_storage_expiration_hours($hours);
+            update_option('ga4_storage_expiration_hours', $hours);
         }
 
         // Update logger debug mode

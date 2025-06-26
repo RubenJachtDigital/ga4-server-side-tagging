@@ -13,23 +13,335 @@
 
   var GA4Utils = {
     /**
-     * Client ID Management
+     * Centralized Storage Management for GDPR Compliance
+     */
+    storage: {
+      /**
+       * Get unified user data from localStorage
+       * @returns {Object}
+       */
+      getUserData: function() {
+        try {
+          var data = localStorage.getItem('ga4_user_data');
+          if (data) {
+            var parsed = JSON.parse(data);
+            console.log('📦 [GA4 Storage] Loading centralized user data:', parsed);
+            
+            // Check if data is expired
+            var expirationHours = this.getExpirationHours();
+            var now = Date.now();
+            var ageHours = (now - parsed.timestamp) / (60 * 60 * 1000);
+            
+            console.log('⏰ [GA4 Storage] Data age: ' + ageHours.toFixed(2) + ' hours, expires after: ' + expirationHours + ' hours');
+            
+            if (parsed.timestamp && (now - parsed.timestamp) > (expirationHours * 60 * 60 * 1000)) {
+              // Data expired, remove it
+              console.log('🗑️ [GA4 Storage] Data expired, clearing and creating new data');
+              this.clearUserData();
+              return this.getDefaultUserData();
+            }
+            return parsed;
+          } else {
+            console.log('📦 [GA4 Storage] No existing centralized data found, creating new data');
+          }
+        } catch (e) {
+          console.log('❌ [GA4 Storage] Error parsing user data:', e);
+          this.clearUserData();
+        }
+        return this.getDefaultUserData();
+      },
+
+      /**
+       * Save unified user data to localStorage
+       * @param {Object} userData User data object
+       */
+      saveUserData: function(userData) {
+        try {
+          userData.timestamp = Date.now();
+          console.log('💾 [GA4 Storage] Saving centralized user data:', userData);
+          localStorage.setItem('ga4_user_data', JSON.stringify(userData));
+          console.log('✅ [GA4 Storage] Data saved successfully');
+        } catch (e) {
+          console.log('❌ [GA4 Storage] Error saving user data:', e);
+        }
+      },
+
+      /**
+       * Get default user data structure
+       * @returns {Object}
+       */
+      getDefaultUserData: function() {
+        var defaultData = {
+          // Client identification
+          clientId: null,
+          sessionId: null,
+          sessionStart: null,
+          sessionCount: 0,
+          firstVisit: null,
+          
+          // Attribution data
+          lastSource: '',
+          lastMedium: '',
+          lastCampaign: '',
+          lastContent: '',
+          lastTerm: '',
+          lastGclid: '',
+          
+          // Location data
+          location: null,
+          
+          // Consent data (separate from main data for compliance)
+          // consent: null, // Keep this separate in ga4_consent_status
+          
+          // Metadata
+          timestamp: Date.now(),
+          version: '1.0'
+        };
+        
+        console.log('🆕 [GA4 Storage] Creating new default user data structure:', defaultData);
+        return defaultData;
+      },
+
+      /**
+       * Get expiration hours from admin setting
+       * @returns {number}
+       */
+      getExpirationHours: function() {
+        // Try to get from global config first
+        if (window.ga4ServerSideTagging && window.ga4ServerSideTagging.consentSettings) {
+          return window.ga4ServerSideTagging.consentSettings.storageExpirationHours || 24;
+        }
+        return 24; // Default 24 hours
+      },
+
+      /**
+       * Clear all user data
+       */
+      clearUserData: function() {
+        localStorage.removeItem('ga4_user_data');
+        
+        // Also clean up legacy items if they exist
+        var legacyKeys = [
+          'server_side_ga4_client_id',
+          'server_side_ga4_session_id', 
+          'server_side_ga4_session_start',
+          'server_side_ga4_session_count',
+          'server_side_ga4_first_visit',
+          'server_side_ga4_last_source',
+          'server_side_ga4_last_medium',
+          'server_side_ga4_last_campaign',
+          'server_side_ga4_last_content',
+          'server_side_ga4_last_term',
+          'server_side_ga4_last_gclid',
+          'user_location_data'
+        ];
+        
+        legacyKeys.forEach(function(key) {
+          localStorage.removeItem(key);
+          localStorage.removeItem(key + '_timestamp');
+        });
+      },
+
+      /**
+       * Migrate legacy data to new centralized system
+       */
+      migrateLegacyData: function() {
+        console.log('🔄 [GA4 Storage] Starting migration from legacy storage...');
+        
+        // Check if we already have centralized data
+        var existingData = localStorage.getItem('ga4_user_data');
+        if (existingData) {
+          console.log('✅ [GA4 Storage] Centralized data already exists, skipping migration');
+          return JSON.parse(existingData);
+        }
+        
+        var userData = this.getDefaultUserData();
+        var needsMigration = false;
+        var migratedItems = [];
+
+        // Migrate client ID
+        var oldClientId = localStorage.getItem('server_side_ga4_client_id');
+        if (oldClientId && !userData.clientId) {
+          userData.clientId = oldClientId;
+          needsMigration = true;
+          migratedItems.push('clientId: ' + oldClientId);
+        }
+
+        // Migrate session data
+        var oldSessionId = localStorage.getItem('server_side_ga4_session_id');
+        var oldSessionStart = localStorage.getItem('server_side_ga4_session_start');
+        var oldSessionCount = localStorage.getItem('server_side_ga4_session_count');
+        var oldFirstVisit = localStorage.getItem('server_side_ga4_first_visit');
+
+        if (oldSessionId) {
+          userData.sessionId = oldSessionId;
+          userData.sessionStart = parseInt(oldSessionStart) || Date.now();
+          userData.sessionCount = parseInt(oldSessionCount) || 1;
+          userData.firstVisit = parseInt(oldFirstVisit) || Date.now();
+          needsMigration = true;
+          migratedItems.push('sessionData: ' + oldSessionId);
+        }
+
+        // Migrate attribution data
+        var attributionKeys = ['source', 'medium', 'campaign', 'content', 'term', 'gclid'];
+        attributionKeys.forEach(function(key) {
+          var oldValue = localStorage.getItem('server_side_ga4_last_' + key);
+          if (oldValue) {
+            userData['last' + key.charAt(0).toUpperCase() + key.slice(1)] = oldValue;
+            needsMigration = true;
+            migratedItems.push(key + ': ' + oldValue);
+          }
+        });
+
+        // Migrate location data
+        var oldLocation = localStorage.getItem('user_location_data');
+        if (oldLocation) {
+          try {
+            userData.location = JSON.parse(oldLocation);
+            needsMigration = true;
+            migratedItems.push('location data');
+          } catch (e) {
+            console.log('❌ [GA4 Storage] Error migrating location data:', e);
+          }
+        }
+
+        if (needsMigration) {
+          console.log('📦 [GA4 Storage] Migrating legacy data items:', migratedItems);
+          this.saveUserData(userData);
+          
+          // Clean up old data after successful migration
+          console.log('🧹 [GA4 Storage] Cleaning up legacy storage items...');
+          setTimeout(() => {
+            this.clearLegacyData(); // Clean only legacy keys, not the new centralized data
+          }, 100);
+          
+          console.log('✅ [GA4 Storage] Migration completed successfully');
+        } else {
+          console.log('ℹ️ [GA4 Storage] No legacy data found to migrate');
+        }
+
+        return userData;
+      },
+
+      /**
+       * Clear only legacy data items (not the new centralized data)
+       */
+      clearLegacyData: function() {
+        var legacyKeys = [
+          'server_side_ga4_client_id',
+          'server_side_ga4_session_id', 
+          'server_side_ga4_session_start',
+          'server_side_ga4_session_count',
+          'server_side_ga4_first_visit',
+          'server_side_ga4_last_source',
+          'server_side_ga4_last_medium',
+          'server_side_ga4_last_campaign',
+          'server_side_ga4_last_content',
+          'server_side_ga4_last_term',
+          'server_side_ga4_last_gclid',
+          'user_location_data'
+        ];
+        
+        var removedItems = [];
+        legacyKeys.forEach(function(key) {
+          if (localStorage.getItem(key)) {
+            localStorage.removeItem(key);
+            removedItems.push(key);
+          }
+          var timestampKey = key + '_timestamp';
+          if (localStorage.getItem(timestampKey)) {
+            localStorage.removeItem(timestampKey);
+            removedItems.push(timestampKey);
+          }
+        });
+        
+        if (removedItems.length > 0) {
+          console.log('🧹 [GA4 Storage] Cleaned up legacy items:', removedItems);
+        }
+      },
+
+      /**
+       * Check if data is expired and clean up if needed
+       */
+      cleanupExpiredData: function() {
+        var userData = this.getUserData();
+        var expirationHours = this.getExpirationHours();
+        var now = Date.now();
+        
+        if (userData.timestamp && (now - userData.timestamp) > (expirationHours * 60 * 60 * 1000)) {
+          this.clearUserData();
+          return true;
+        }
+        return false;
+      },
+
+      /**
+       * Test function to verify the new storage system is working
+       * Call GA4Utils.storage.testNewStorage() in console to test
+       */
+      testNewStorage: function() {
+        console.log('🧪 [GA4 Storage] Testing new centralized storage system...');
+        
+        // Test 1: Get current data
+        console.log('📋 Test 1: Getting current user data');
+        var userData = this.getUserData();
+        console.log('Current data:', userData);
+        
+        // Test 2: Generate client ID
+        console.log('📋 Test 2: Testing client ID generation');
+        var clientId = GA4Utils.clientId.get();
+        console.log('Client ID:', clientId);
+        
+        // Test 3: Test session data
+        console.log('📋 Test 3: Testing session data');
+        var session = GA4Utils.session.get();
+        console.log('Session data:', session);
+        
+        // Test 4: Check data retention setting
+        console.log('📋 Test 4: Checking data retention setting');
+        var expirationHours = this.getExpirationHours();
+        console.log('Data retention hours:', expirationHours);
+        
+        // Test 5: Show localStorage status
+        console.log('📋 Test 5: localStorage status');
+        console.log('New centralized data exists:', !!localStorage.getItem('ga4_user_data'));
+        console.log('Legacy client ID exists:', !!localStorage.getItem('server_side_ga4_client_id'));
+        console.log('Legacy session ID exists:', !!localStorage.getItem('server_side_ga4_session_id'));
+        
+        console.log('✅ [GA4 Storage] Test completed! Check the logs above.');
+        
+        return {
+          userData: userData,
+          clientId: clientId,
+          session: session,
+          expirationHours: expirationHours,
+          newDataExists: !!localStorage.getItem('ga4_user_data'),
+          legacyDataExists: {
+            clientId: !!localStorage.getItem('server_side_ga4_client_id'),
+            sessionId: !!localStorage.getItem('server_side_ga4_session_id')
+          }
+        };
+      }
+    },
+
+    /**
+     * Client ID Management using centralized storage
      */
     clientId: {
-        /**
+      /**
        * Get or generate client ID
        * @returns {string}
        */
       get: function () {
-        // Try to get from localStorage if available
-        if (window.localStorage) {
-          var storedClientId = localStorage.getItem(
-            "server_side_ga4_client_id"
-          );
-          if (storedClientId) {
-            return storedClientId;
-          }
+        console.log('🎯 [GA4 Storage] Getting client ID...');
+        var userData = GA4Utils.storage.getUserData();
+        
+        if (userData.clientId) {
+          console.log('✅ [GA4 Storage] Using existing client ID:', userData.clientId);
+          return userData.clientId;
         }
+        
+        console.log('🆕 [GA4 Storage] No client ID found, generating new one...');
         return this.generate();
       },
 
@@ -43,10 +355,12 @@
           "." +
           Math.round(Date.now() / 1000);
 
-        // Store in localStorage if available
-        if (window.localStorage) {
-          localStorage.setItem("server_side_ga4_client_id", clientId);
-        }
+        console.log('🔑 [GA4 Storage] Generated new client ID:', clientId);
+
+        // Store in centralized storage
+        var userData = GA4Utils.storage.getUserData();
+        userData.clientId = clientId;
+        GA4Utils.storage.saveUserData(userData);
 
         return clientId;
       },
@@ -63,7 +377,7 @@
     },
 
     /**
-     * Session Management
+     * Session Management with centralized data storage
      */
     session: {
       /**
@@ -71,55 +385,47 @@
        * @returns {Object}
        */
       get: function () {
-        var sessionId = localStorage.getItem("server_side_ga4_session_id");
-        var sessionStart = localStorage.getItem(
-          "server_side_ga4_session_start"
-        );
-        var firstVisit = localStorage.getItem("server_side_ga4_first_visit");
-        var sessionCount = parseInt(
-          localStorage.getItem("server_side_ga4_session_count") || "0"
-        );
+        // Get centralized user data
+        var userData = GA4Utils.storage.getUserData();
         var now = Date.now();
         var isNew = false;
         var isFirstVisit = false;
 
         // Check if this is the first visit ever
-        if (!firstVisit) {
-          localStorage.setItem("server_side_ga4_first_visit", now);
+        if (!userData.firstVisit) {
+          userData.firstVisit = now;
           isFirstVisit = true;
         }
 
         // If no session or session expired (30 min inactive)
         if (
-          !sessionId ||
-          !sessionStart ||
-          now - parseInt(sessionStart) > 30 * 60 * 1000
+          !userData.sessionId ||
+          !userData.sessionStart ||
+          now - userData.sessionStart > 30 * 60 * 1000
         ) {
           // Clear expired session data
           this.clear();
 
           // Generate a more robust session ID using timestamp and random values
-          sessionId = GA4Utils.helpers.generateUniqueId();
-          sessionStart = now;
-
-          // Store session data
-          localStorage.setItem("server_side_ga4_session_id", sessionId);
-          localStorage.setItem("server_side_ga4_session_start", sessionStart);
+          userData.sessionId = GA4Utils.helpers.generateUniqueId();
+          userData.sessionStart = now;
 
           // Increment session count
-          sessionCount++;
-          localStorage.setItem("server_side_ga4_session_count", sessionCount);
+          userData.sessionCount = (userData.sessionCount || 0) + 1;
 
           isNew = true;
         }
 
+        // Save updated data
+        GA4Utils.storage.saveUserData(userData);
+
         return {
-          id: sessionId,
-          start: parseInt(sessionStart),
+          id: userData.sessionId,
+          start: userData.sessionStart,
           isNew: isNew,
           isFirstVisit: isFirstVisit,
-          sessionCount: sessionCount,
-          duration: now - parseInt(sessionStart),
+          sessionCount: userData.sessionCount || 1,
+          duration: now - userData.sessionStart,
         };
       },
 
@@ -204,36 +510,144 @@
        * @private
        */
       _clearExpiredLocationData: function () {
+        // This method is deprecated - use _clearExpiredUserData instead
+        this._clearExpiredUserData();
+      },
+
+      /**
+       * Clear all expired user data based on configurable storage expiration
+       * @param {number} [customExpirationHours] - Optional custom expiration time in hours
+       */
+      _clearExpiredUserData: function (customExpirationHours) {
         if (!window.localStorage) return;
 
-        var locationKey = "user_location_data";
-        var locationData = localStorage.getItem(locationKey);
+        // Get expiration time from config or use default
+        var expirationHours = customExpirationHours;
+        if (!expirationHours) {
+          // Try to get from global config
+          if (window.ga4ServerSideTagging && window.ga4ServerSideTagging.consentSettings) {
+            expirationHours = window.ga4ServerSideTagging.consentSettings.storageExpirationHours || 24;
+          } else {
+            expirationHours = 24; // Default 24 hours
+          }
+        }
 
-        if (locationData) {
+        var expirationMs = expirationHours * 60 * 60 * 1000; // Convert hours to milliseconds
+        var now = Date.now();
+        var cleanedItems = [];
+
+        // Define all user data keys that should be cleaned up
+        var userDataKeys = [
+          // Location data
+          'user_location_data',
+          
+          // Client and session data (these should persist longer but still expire)
+          'server_side_ga4_client_id',
+          'server_side_ga4_session_id',
+          'server_side_ga4_session_start',
+          'server_side_ga4_session_count',
+          'server_side_ga4_first_visit',
+          
+          // Attribution data
+          'server_side_ga4_last_source',
+          'server_side_ga4_last_medium',
+          'server_side_ga4_last_campaign',
+          'server_side_ga4_last_content',
+          'server_side_ga4_last_term',
+          'server_side_ga4_last_gclid',
+          
+          // Consent data
+          'ga4_consent_status'
+        ];
+
+        // Clean up timestamped data
+        userDataKeys.forEach(function(key) {
+          var data = localStorage.getItem(key);
+          if (data) {
+            try {
+              // For JSON data with timestamps
+              if (data.startsWith('{') || data.startsWith('[')) {
+                var parsedData = JSON.parse(data);
+                if (parsedData.timestamp && now - parsedData.timestamp > expirationMs) {
+                  localStorage.removeItem(key);
+                  cleanedItems.push(key);
+                }
+              } else {
+                // For simple values, check if they're old enough
+                // This applies to items without timestamps - use a longer expiration
+                var extendedExpiration = expirationMs * 7; // 7x longer for non-timestamped data
+                var itemAge = now - (localStorage.getItem(key + '_timestamp') || 0);
+                if (itemAge > extendedExpiration) {
+                  localStorage.removeItem(key);
+                  localStorage.removeItem(key + '_timestamp');
+                  cleanedItems.push(key);
+                }
+              }
+            } catch (e) {
+              // If we can't parse the data, it's invalid - remove it
+              localStorage.removeItem(key);
+              cleanedItems.push(key + ' (invalid)');
+            }
+          }
+        });
+
+        // Clean up purchase tracking data (separate expiration - 30 minutes)
+        this._clearExpiredPurchaseTracking();
+
+        // Clean up session storage (queued events)
+        this._clearExpiredSessionData(expirationHours);
+
+        // Log cleanup results
+        if (cleanedItems.length > 0) {
+          GA4Utils.helpers.log(
+            "Cleaned up expired user data (" + expirationHours + "h expiration)",
+            { cleanedItems: cleanedItems, expirationHours: expirationHours },
+            {},
+            "[User Data Cleanup]"
+          );
+        }
+      },
+
+      /**
+       * Clear expired session storage data (queued events)
+       * @param {number} expirationHours - Expiration time in hours
+       */
+      _clearExpiredSessionData: function (expirationHours) {
+        if (!window.sessionStorage) return;
+
+        var expirationMs = expirationHours * 60 * 60 * 1000;
+        var now = Date.now();
+
+        // Clean up queued events
+        var queuedEvents = sessionStorage.getItem('ga4_queued_events');
+        if (queuedEvents) {
           try {
-            var data = JSON.parse(locationData);
-            var now = Date.now();
-            var oneHour = 60 * 60 * 1000; // 1 hour in milliseconds
-
-            // Check if the location data has expired (older than 1 hour)
-            if (data.timestamp && now - data.timestamp > oneHour) {
-              localStorage.removeItem(locationKey);
+            var events = JSON.parse(queuedEvents);
+            var validEvents = events.filter(function(event) {
+              return event.timestamp && (now - event.timestamp < expirationMs);
+            });
+            
+            if (validEvents.length !== events.length) {
+              if (validEvents.length === 0) {
+                sessionStorage.removeItem('ga4_queued_events');
+              } else {
+                sessionStorage.setItem('ga4_queued_events', JSON.stringify(validEvents));
+              }
+              
               GA4Utils.helpers.log(
-                "Removed expired location data",
-                null,
+                "Cleaned up expired queued events",
+                { 
+                  original: events.length, 
+                  remaining: validEvents.length,
+                  expirationHours: expirationHours 
+                },
                 {},
-                "[Location Data Cleanup]"
+                "[Session Data Cleanup]"
               );
             }
           } catch (e) {
-            // If we can't parse the data, remove it
-            localStorage.removeItem(locationKey);
-            GA4Utils.helpers.log(
-              "Removed invalid location data",
-              null,
-              {},
-              "[Location Data Cleanup]"
-            );
+            // Invalid data, remove it
+            sessionStorage.removeItem('ga4_queued_events');
           }
         }
       },
@@ -562,7 +976,7 @@
     },
 
     /**
-     * Location Data Management
+     * Location Data Management using centralized storage
      */
     location: {
       /**
@@ -571,52 +985,40 @@
        */
       get: function () {
         return new Promise((resolve, reject) => {
-          // First check if we have cached location data
-          const cachedLocation = localStorage.getItem("user_location_data");
+          // Get location data from centralized storage
+          var userData = GA4Utils.storage.getUserData();
+          var expirationHours = GA4Utils.storage.getExpirationHours();
 
-          if (cachedLocation) {
-            try {
-              const locationData = JSON.parse(cachedLocation);
-              const now = Date.now();
-              const oneHour = 60 * 60 * 1000; // 1 hour in milliseconds
+          if (userData.location && userData.location.timestamp) {
+            var now = Date.now();
+            var expirationMs = expirationHours * 60 * 60 * 1000;
 
-              // Check if cached data is still valid (1 hour expiry)
-              if (
-                locationData.timestamp &&
-                now - locationData.timestamp < oneHour
-              ) {
-                GA4Utils.helpers.log(
-                  "Using cached location data",
-                  locationData,
-                  {},
-                  "[Location Utils]"
-                );
-                resolve(locationData);
-                return;
-              } else {
-                // Expired, remove it
-                localStorage.removeItem("user_location_data");
-                GA4Utils.helpers.log(
-                  "Cached location data expired, fetching fresh data",
-                  null,
-                  {},
-                  "[Location Utils]"
-                );
-              }
-            } catch (e) {
+            // Check if cached data is still valid
+            if (now - userData.location.timestamp < expirationMs) {
               GA4Utils.helpers.log(
-                "Error parsing cached location data",
-                e,
+                "Using cached location data from centralized storage",
+                userData.location,
                 {},
                 "[Location Utils]"
               );
-              localStorage.removeItem("user_location_data");
+              resolve(userData.location);
+              return;
+            } else {
+              GA4Utils.helpers.log(
+                "Cached location data expired, fetching fresh data",
+                null,
+                {},
+                "[Location Utils]"
+              );
             }
           }
 
           // Fetch fresh location data
           this.fetch()
             .then((ipLocationData) => {
+              // Store in centralized storage
+              userData.location = ipLocationData;
+              GA4Utils.storage.saveUserData(userData);
               resolve(ipLocationData);
             })
             .catch((err) => {
@@ -759,7 +1161,7 @@
       },
 
       /**
-       * Cache location data in localStorage
+       * Cache location data in centralized storage
        * @param {Object} locationData Location data to cache
        */
       cache: function (locationData) {
@@ -768,12 +1170,12 @@
         }
 
         try {
-          localStorage.setItem(
-            "user_location_data",
-            JSON.stringify(locationData)
-          );
+          var userData = GA4Utils.storage.getUserData();
+          userData.location = locationData;
+          GA4Utils.storage.saveUserData(userData);
+          
           GA4Utils.helpers.log(
-            "Location data cached successfully",
+            "Location data cached successfully in centralized storage",
             null,
             {},
             "[Location Utils]"
@@ -793,32 +1195,18 @@
        * @returns {Object|null}
        */
       getCached: function () {
-        const cachedLocation = localStorage.getItem("user_location_data");
+        var userData = GA4Utils.storage.getUserData();
+        var expirationHours = GA4Utils.storage.getExpirationHours();
 
-        if (cachedLocation) {
-          try {
-            const locationData = JSON.parse(cachedLocation);
-            const now = Date.now();
-            const oneHour = 60 * 60 * 1000;
+        if (userData.location && userData.location.timestamp) {
+          var now = Date.now();
+          var expirationMs = expirationHours * 60 * 60 * 1000;
 
-            // Check if still valid
-            if (
-              locationData.timestamp &&
-              now - locationData.timestamp < oneHour
-            ) {
-              return locationData;
-            } else {
-              // Expired
-              this.clearCache();
-              return null;
-            }
-          } catch (e) {
-            GA4Utils.helpers.log(
-              "Error parsing cached location data",
-              e,
-              {},
-              "[Location Utils]"
-            );
+          // Check if still valid
+          if (now - userData.location.timestamp < expirationMs) {
+            return userData.location;
+          } else {
+            // Expired
             this.clearCache();
             return null;
           }
@@ -831,9 +1219,12 @@
        * Clear cached location data
        */
       clearCache: function () {
-        localStorage.removeItem("user_location_data");
+        var userData = GA4Utils.storage.getUserData();
+        userData.location = null;
+        GA4Utils.storage.saveUserData(userData);
+        
         GA4Utils.helpers.log(
-          "Location cache cleared",
+          "Location cache cleared from centralized storage",
           null,
           {},
           "[Location Utils]"
@@ -1948,19 +2339,29 @@
       },
 
       /**
-       * Manually clean up expired location data
+       * Manually clean up expired user data
        * Can be called independently for maintenance
+       * @param {number} customExpirationHours Optional custom expiration time in hours
        */
-      cleanupExpiredLocationData: function () {
-        GA4Utils.session._clearExpiredLocationData();
+      cleanupExpiredUserData: function (customExpirationHours) {
+        GA4Utils.session._clearExpiredUserData(customExpirationHours);
       },
 
       /**
-       * Clean up all expired data (purchase tracking and location)
+       * Clean up all expired data (comprehensive user data cleanup)
+       * This method replaces cleanupExpiredLocationData and cleanupExpiredPurchaseTracking
+       * @param {number} customExpirationHours Optional custom expiration time in hours
        */
-      cleanupAllExpiredData: function () {
-        this.cleanupExpiredPurchaseTracking();
-        this.cleanupExpiredLocationData();
+      cleanupAllExpiredData: function (customExpirationHours) {
+        GA4Utils.session._clearExpiredUserData(customExpirationHours);
+      },
+
+      /**
+       * @deprecated Use cleanupExpiredUserData() instead
+       * Backward compatibility alias for cleanupExpiredLocationData
+       */
+      cleanupExpiredLocationData: function () {
+        this.cleanupExpiredUserData();
       },
     },
 
@@ -2447,6 +2848,328 @@
       removeCookie: function (name, path, domain) {
         this.setCookie(name, "", -1, path, domain);
       },
+
+      /**
+       * Comprehensive user data cleanup for GDPR compliance
+       * This method can be called externally for manual cleanup or privacy compliance
+       * @param {Object} options Configuration options for cleanup
+       * @param {boolean} options.clearClientId Whether to clear client ID (default: true)
+       * @param {boolean} options.clearSessionData Whether to clear session data (default: true)
+       * @param {boolean} options.clearConsentData Whether to clear consent data (default: false)
+       * @param {boolean} options.clearLocationData Whether to clear location data (default: true)
+       * @param {boolean} options.clearPurchaseTracking Whether to clear purchase tracking (default: true)
+       * @param {boolean} options.clearQueuedEvents Whether to clear queued events (default: true)
+       * @param {boolean} options.clearAttribution Whether to clear attribution data (default: true)
+       * @param {boolean} options.clearUserInfo Whether to clear user information (default: true)
+       * @param {Array} options.customKeys Additional custom keys to remove
+       * @param {string} options.reason Reason for cleanup (for logging)
+       * @returns {Object} Cleanup results summary
+       */
+      cleanupUserData: function(options) {
+        options = options || {};
+        
+        // Default options
+        var defaults = {
+          clearClientId: true,
+          clearSessionData: true,
+          clearConsentData: false,
+          clearLocationData: true,
+          clearPurchaseTracking: true,
+          clearQueuedEvents: true,
+          clearAttribution: true,
+          clearUserInfo: true,
+          customKeys: [],
+          reason: 'Manual cleanup'
+        };
+        
+        // Merge options with defaults
+        for (var key in defaults) {
+          if (options[key] === undefined) {
+            options[key] = defaults[key];
+          }
+        }
+        
+        var cleanupResults = {
+          localStorage: [],
+          sessionStorage: [],
+          cookies: [],
+          customKeys: [],
+          timestamp: Date.now(),
+          reason: options.reason
+        };
+        
+        // 1. Clear Client ID
+        if (options.clearClientId) {
+          if (localStorage.getItem('server_side_ga4_client_id')) {
+            localStorage.removeItem('server_side_ga4_client_id');
+            cleanupResults.localStorage.push('server_side_ga4_client_id');
+          }
+        }
+        
+        // 2. Clear Session Data
+        if (options.clearSessionData) {
+          var sessionKeys = [
+            'server_side_ga4_session_id',
+            'server_side_ga4_session_start',
+            'server_side_ga4_session_count',
+            'server_side_ga4_first_visit'
+          ];
+          
+          sessionKeys.forEach(function(key) {
+            if (localStorage.getItem(key)) {
+              localStorage.removeItem(key);
+              cleanupResults.localStorage.push(key);
+            }
+          });
+        }
+        
+        // 3. Clear Attribution Data
+        if (options.clearAttribution) {
+          var attributionKeys = [
+            'server_side_ga4_last_source',
+            'server_side_ga4_last_medium',
+            'server_side_ga4_last_campaign',
+            'server_side_ga4_last_content',
+            'server_side_ga4_last_term',
+            'server_side_ga4_last_gclid'
+          ];
+          
+          attributionKeys.forEach(function(key) {
+            if (localStorage.getItem(key)) {
+              localStorage.removeItem(key);
+              cleanupResults.localStorage.push(key);
+            }
+          });
+        }
+        
+        // 4. Clear Location Data
+        if (options.clearLocationData) {
+          if (localStorage.getItem('user_location_data')) {
+            localStorage.removeItem('user_location_data');
+            cleanupResults.localStorage.push('user_location_data');
+          }
+        }
+        
+        // 5. Clear Consent Data (optional)
+        if (options.clearConsentData) {
+          if (localStorage.getItem('ga4_consent_status')) {
+            localStorage.removeItem('ga4_consent_status');
+            cleanupResults.localStorage.push('ga4_consent_status');
+          }
+        }
+        
+        // 6. Clear Purchase Tracking Data
+        if (options.clearPurchaseTracking) {
+          var purchaseKeys = [];
+          
+          // Find all purchase tracking keys
+          for (var i = 0; i < localStorage.length; i++) {
+            var key = localStorage.key(i);
+            if (key && key.startsWith('purchase_tracked_')) {
+              purchaseKeys.push(key);
+            }
+          }
+          
+          // Remove purchase tracking keys
+          purchaseKeys.forEach(function(key) {
+            localStorage.removeItem(key);
+            cleanupResults.localStorage.push(key);
+          });
+        }
+        
+        // 7. Clear Queued Events (sessionStorage)
+        if (options.clearQueuedEvents && window.sessionStorage) {
+          if (sessionStorage.getItem('ga4_queued_events')) {
+            sessionStorage.removeItem('ga4_queued_events');
+            cleanupResults.sessionStorage.push('ga4_queued_events');
+          }
+        }
+        
+        // 8. Clear User Information (if stored)
+        if (options.clearUserInfo) {
+          var userInfoKeys = [
+            'ga4_user_email',
+            'ga4_user_phone',
+            'ga4_user_first_name',
+            'ga4_user_last_name',
+            'ga4_user_data'
+          ];
+          
+          userInfoKeys.forEach(function(key) {
+            if (localStorage.getItem(key)) {
+              localStorage.removeItem(key);
+              cleanupResults.localStorage.push(key);
+            }
+          });
+        }
+        
+        // 9. Clear Custom Keys
+        if (options.customKeys && Array.isArray(options.customKeys)) {
+          options.customKeys.forEach(function(key) {
+            if (localStorage.getItem(key)) {
+              localStorage.removeItem(key);
+              cleanupResults.customKeys.push(key);
+            }
+            if (window.sessionStorage && sessionStorage.getItem(key)) {
+              sessionStorage.removeItem(key);
+              cleanupResults.customKeys.push(key + ' (session)');
+            }
+          });
+        }
+        
+        // 10. Clear relevant cookies
+        var cookiesToClear = [
+          '_ga',
+          '_ga_' + (window.ga4ServerSideTagging ? window.ga4ServerSideTagging.measurementId : ''),
+          '_gid',
+          '_gat',
+          '_gtag',
+          'ga4_consent',
+          'ga4_client_id'
+        ];
+        
+        cookiesToClear.forEach(function(cookieName) {
+          if (cookieName && GA4Utils.helpers.getCookie(cookieName)) {
+            GA4Utils.helpers.removeCookie(cookieName);
+            GA4Utils.helpers.removeCookie(cookieName, '/', '.' + window.location.hostname);
+            cleanupResults.cookies.push(cookieName);
+          }
+        });
+        
+        // Calculate totals
+        cleanupResults.totals = {
+          localStorage: cleanupResults.localStorage.length,
+          sessionStorage: cleanupResults.sessionStorage.length,
+          cookies: cleanupResults.cookies.length,
+          customKeys: cleanupResults.customKeys.length,
+          total: cleanupResults.localStorage.length + 
+                cleanupResults.sessionStorage.length + 
+                cleanupResults.cookies.length + 
+                cleanupResults.customKeys.length
+        };
+        
+        // Log cleanup results
+        GA4Utils.helpers.log(
+          'Comprehensive user data cleanup completed',
+          {
+            reason: options.reason,
+            results: cleanupResults,
+            options: options
+          },
+          {},
+          '[GDPR Cleanup]'
+        );
+        
+        // Trigger cleanup of expired data as well
+        if (GA4Utils.session && typeof GA4Utils.session._clearExpiredUserData === 'function') {
+          GA4Utils.session._clearExpiredUserData();
+        }
+        
+        return cleanupResults;
+      },
+
+      /**
+       * Quick GDPR compliance cleanup - removes all user data
+       * This is a convenience method for complete data removal
+       * @param {string} reason Reason for cleanup (for logging)
+       * @returns {Object} Cleanup results summary
+       */
+      gdprCompliantCleanup: function(reason) {
+        reason = reason || 'GDPR compliance request';
+        
+        return this.cleanupUserData({
+          clearClientId: true,
+          clearSessionData: true,
+          clearConsentData: false, // Keep consent data for compliance
+          clearLocationData: true,
+          clearPurchaseTracking: true,
+          clearQueuedEvents: true,
+          clearAttribution: true,
+          clearUserInfo: true,
+          reason: reason
+        });
+      },
+
+      /**
+       * Selective cleanup for consent withdrawal
+       * Removes tracking data but keeps consent preferences
+       * @param {string} reason Reason for cleanup (for logging)
+       * @returns {Object} Cleanup results summary
+       */
+      consentWithdrawalCleanup: function(reason) {
+        reason = reason || 'Consent withdrawal';
+        
+        return this.cleanupUserData({
+          clearClientId: true,
+          clearSessionData: true,
+          clearConsentData: false, // Keep consent data to remember withdrawal
+          clearLocationData: true,
+          clearPurchaseTracking: false, // Keep purchase data for business purposes
+          clearQueuedEvents: true,
+          clearAttribution: true,
+          clearUserInfo: true,
+          reason: reason
+        });
+      },
+
+      /**
+       * Reset all tracking data (for testing or fresh start)
+       * @param {string} reason Reason for cleanup (for logging)
+       * @returns {Object} Cleanup results summary
+       */
+      resetAllTrackingData: function(reason) {
+        reason = reason || 'Reset all tracking data';
+        
+        return this.cleanupUserData({
+          clearClientId: true,
+          clearSessionData: true,
+          clearConsentData: true,
+          clearLocationData: true,
+          clearPurchaseTracking: true,
+          clearQueuedEvents: true,
+          clearAttribution: true,
+          clearUserInfo: true,
+          reason: reason
+        });
+      },
+
+      /**
+       * Get summary of stored user data (for privacy dashboard)
+       * @returns {Object} Summary of all stored data
+       */
+      getStoredDataSummary: function() {
+        var summary = {
+          localStorage: {
+            clientId: localStorage.getItem('server_side_ga4_client_id') !== null,
+            sessionData: localStorage.getItem('server_side_ga4_session_id') !== null,
+            consentData: localStorage.getItem('ga4_consent_status') !== null,
+            locationData: localStorage.getItem('user_location_data') !== null,
+            attributionData: localStorage.getItem('server_side_ga4_last_source') !== null,
+            userInfo: localStorage.getItem('ga4_user_data') !== null,
+            purchaseTracking: 0
+          },
+          sessionStorage: {
+            queuedEvents: window.sessionStorage ? sessionStorage.getItem('ga4_queued_events') !== null : false
+          },
+          cookies: {
+            ga: GA4Utils.helpers.getCookie('_ga') !== null,
+            gid: GA4Utils.helpers.getCookie('_gid') !== null,
+            gat: GA4Utils.helpers.getCookie('_gat') !== null,
+            consent: GA4Utils.helpers.getCookie('ga4_consent') !== null
+          },
+          timestamp: Date.now()
+        };
+        
+        // Count purchase tracking entries
+        for (var i = 0; i < localStorage.length; i++) {
+          var key = localStorage.key(i);
+          if (key && key.startsWith('purchase_tracked_')) {
+            summary.localStorage.purchaseTracking++;
+          }
+        }
+        
+        return summary;
+      },
     },
   };
 
@@ -2455,11 +3178,15 @@
 
   // Initialize cleanup on page load
   $(document).ready(function () {
+    // Migrate legacy data to new centralized system
+    GA4Utils.storage.migrateLegacyData();
+    
     // Clean up expired data on page load
+    GA4Utils.storage.cleanupExpiredData();
     GA4Utils.page.cleanupAllExpiredData();
 
     GA4Utils.helpers.log(
-      "GA4Utils initialized and cleanup completed",
+      "GA4Utils initialized, migration and cleanup completed",
       null,
       {},
       "[GA4Utils Init]"

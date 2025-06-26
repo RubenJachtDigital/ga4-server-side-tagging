@@ -41,7 +41,7 @@
 
       // Log initialization
       this.log(
-        "%c GA4 Server-Side Tagging initialized v6 ",
+        "%c GA4 Server-Side Tagging initialized v3 ",
         "background: #4CAF50; color: white; font-size: 16px; font-weight: bold; padding: 8px 12px; border-radius: 4px;"
       );
     },
@@ -351,22 +351,22 @@
     },
 
     /**
-     * Get stored attribution from localStorage
+     * Get stored attribution from centralized storage
      */
     getStoredAttribution: function () {
+      var userData = GA4Utils.storage.getUserData();
       return {
-        source: localStorage.getItem("server_side_ga4_last_source") || "",
-        medium: localStorage.getItem("server_side_ga4_last_medium") || "",
-        campaign:
-          localStorage.getItem("server_side_ga4_last_campaign") || "(not set)",
-        content: localStorage.getItem("server_side_ga4_last_content") || "",
-        term: localStorage.getItem("server_side_ga4_last_term") || "",
-        gclid: localStorage.getItem("server_side_ga4_last_gclid") || "",
+        source: userData.lastSource || "",
+        medium: userData.lastMedium || "",
+        campaign: userData.lastCampaign || "(not set)",
+        content: userData.lastContent || "",
+        term: userData.lastTerm || "",
+        gclid: userData.lastGclid || "",
       };
     },
 
     /**
-     * Store attribution data in localStorage
+     * Store attribution data in centralized storage
      */
     storeAttributionData: function (
       attribution,
@@ -386,22 +386,28 @@
         (attribution.source && attribution.source !== "(direct)");
 
       if (shouldStore && attribution.source && attribution.medium) {
-        localStorage.setItem("server_side_ga4_last_source", attribution.source);
-        localStorage.setItem("server_side_ga4_last_medium", attribution.medium);
-        if (attribution.campaign)
-          localStorage.setItem(
-            "server_side_ga4_last_campaign",
-            attribution.campaign
-          );
-        if (attribution.content)
-          localStorage.setItem(
-            "server_side_ga4_last_content",
-            attribution.content
-          );
-        if (attribution.term)
-          localStorage.setItem("server_side_ga4_last_term", attribution.term);
-        if (attribution.gclid)
-          localStorage.setItem("server_side_ga4_last_gclid", attribution.gclid);
+        var userData = GA4Utils.storage.getUserData();
+        
+        userData.lastSource = attribution.source;
+        userData.lastMedium = attribution.medium;
+        
+        if (attribution.campaign) {
+          userData.lastCampaign = attribution.campaign;
+        }
+        
+        if (attribution.content) {
+          userData.lastContent = attribution.content;
+        }
+        
+        if (attribution.term) {
+          userData.lastTerm = attribution.term;
+        }
+        
+        if (attribution.gclid) {
+          userData.lastGclid = attribution.gclid;
+        }
+        
+        GA4Utils.storage.saveUserData(userData);
       }
     },
 
@@ -489,26 +495,31 @@
           }
 
           if (consentData && consentData.analytics_storage === "GRANTED") {
-            this.log("Attempting to get precise location data - consent granted");
-            
-            // Wait for location data without timeout
-            const locationData = await this.getUserLocation();
-
-            if (locationData && locationData.latitude && locationData.longitude) {
-              // Replace timezone fallback with precise data
-              if (locationData.latitude) sessionParams.geo_latitude = locationData.latitude;
-              if (locationData.longitude) sessionParams.geo_longitude = locationData.longitude;
-              if (locationData.city) sessionParams.geo_city = locationData.city;
-              if (locationData.country) sessionParams.geo_country = locationData.country;
-              if (locationData.region) sessionParams.geo_region = locationData.region;
-              
-              this.log("Got precise location data", {
-                city: locationData.city,
-                country: locationData.country,
-                timezone_fallback_used: false
-              });
+            // Check if IP geolocation is disabled by admin
+            if (this.config.consentSettings && this.config.consentSettings.disableAllIP) {
+              this.log("IP geolocation disabled by admin - using timezone fallback only");
             } else {
-              this.log("Location API returned incomplete data, using timezone fallback");
+              this.log("Attempting to get precise location data - consent granted");
+              
+              // Wait for location data without timeout
+              const locationData = await this.getUserLocation();
+
+              if (locationData && locationData.latitude && locationData.longitude) {
+                // Replace timezone fallback with precise data
+                if (locationData.latitude) sessionParams.geo_latitude = locationData.latitude;
+                if (locationData.longitude) sessionParams.geo_longitude = locationData.longitude;
+                if (locationData.city) sessionParams.geo_city = locationData.city;
+                if (locationData.country) sessionParams.geo_country = locationData.country;
+                if (locationData.region) sessionParams.geo_region = locationData.region;
+                
+                this.log("Got precise location data", {
+                  city: locationData.city,
+                  country: locationData.country,
+                  timezone_fallback_used: false
+                });
+              } else {
+                this.log("Location API returned incomplete data, using timezone fallback");
+              }
             }
           } else {
             this.log("Analytics consent denied, using timezone fallback only");
@@ -1694,59 +1705,17 @@
     },
 
     /**
-     * Get user location (IP-based only)
+     * Get user location (IP-based only) using centralized storage
      */
     getUserLocation: function () {
-      return new Promise((resolve, reject) => {
-        // First check if we have cached location data
-        const cachedLocation = localStorage.getItem("user_location_data");
-        if (cachedLocation) {
-          try {
-            const locationData = JSON.parse(cachedLocation);
-            const now = Date.now();
-            const oneHour = 60 * 60 * 1000; // 1 hour in milliseconds
-
-            // Check if cached data is still valid (1 hour expiry)
-            if (
-              locationData.timestamp &&
-              now - locationData.timestamp < oneHour
-            ) {
-              resolve(locationData);
-              return;
-            } else {
-              // Expired, remove it
-              localStorage.removeItem("user_location_data");
-              this.log("Cached location data expired, fetching fresh data");
-            }
-          } catch (e) {
-            this.log("Error parsing cached location data");
-            localStorage.removeItem("user_location_data");
-          }
-        }
-
-        // Use IP-based geolocation
-        this.getIPBasedLocation()
-          .then((ipLocationData) => {
-            // Add timestamp to the location data
-            ipLocationData.timestamp = Date.now();
-            localStorage.setItem(
-              "user_location_data",
-              JSON.stringify(ipLocationData)
-            );
-            resolve(ipLocationData);
-          })
-          .catch((err) => {
-            this.log("IP location error:", err);
-            resolve({});
-          });
-      });
+      return GA4Utils.location.get();
     },
 
     /**
      * Get location based on IP address with fallback services
      */
     getIPBasedLocation: function () {
-      return new Promise((resolve, reject) => {
+      return new Promise((resolve) => {
         // Try ipapi.co first
         fetch("https://ipapi.co/json/")
           .then((response) => {
@@ -2116,25 +2085,30 @@
       
       // If consent is now granted, refresh location data for better accuracy
       if (completeEventData.consent && completeEventData.consent.analytics_storage === "GRANTED") {
-        try {
-          this.log("Consent granted - refreshing location data for queued event");
-          const locationData = await this.getUserLocation();
-          
-          if (locationData && locationData.latitude && locationData.longitude) {
-            // Update with precise location data
-            completeEventData.geo_latitude = locationData.latitude;
-            completeEventData.geo_longitude = locationData.longitude;
+        // Check if IP geolocation is disabled by admin
+        if (this.config.consentSettings && this.config.consentSettings.disableAllIP) {
+          this.log("IP geolocation disabled by admin - keeping timezone fallback for queued event");
+        } else {
+          try {
+            this.log("Consent granted - refreshing location data for queued event");
+            const locationData = await this.getUserLocation();
+            
+            if (locationData && locationData.latitude && locationData.longitude) {
+              // Update with precise location data
+              completeEventData.geo_latitude = locationData.latitude;
+              completeEventData.geo_longitude = locationData.longitude;
             completeEventData.geo_city = locationData.city;
             completeEventData.geo_country = locationData.country;
             completeEventData.geo_region = locationData.region;
             
-            this.log("Updated queued event with precise location data", {
-              city: locationData.city,
-              country: locationData.country
-            });
+              this.log("Updated queued event with precise location data", {
+                city: locationData.city,
+                country: locationData.country
+              });
+            }
+          } catch (error) {
+            this.log("Failed to refresh location data for queued event, keeping timezone fallback:", error.message);
           }
-        } catch (error) {
-          this.log("Failed to refresh location data for queued event, keeping timezone fallback:", error.message);
         }
       }
       

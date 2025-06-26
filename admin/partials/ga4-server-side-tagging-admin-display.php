@@ -106,6 +106,29 @@ if (!defined('WPINC')) {
                                 <p class="description">Choose what happens when the timeout is reached. "Deny All" is more privacy-friendly and GDPR compliant.</p>
                             </td>
                         </tr>
+                        <tr>
+                            <th scope="row">
+                                <label for="ga4_disable_all_ip">Disable All IP Geolocation</label>
+                            </th>
+                            <td>
+                                <label for="ga4_disable_all_ip">
+                                    <input type="checkbox" id="ga4_disable_all_ip" name="ga4_disable_all_ip" <?php checked($disable_all_ip); ?> />
+                                    Disable all IP-based location tracking
+                                </label>
+                                <p class="description">When enabled, only timezone-based location fallback will be used (no external IP geolocation APIs)</p>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th scope="row">
+                                <label for="ga4_storage_expiration_hours">Storage Expiration Time</label>
+                            </th>
+                            <td>
+                                <input type="number" id="ga4_storage_expiration_hours" name="ga4_storage_expiration_hours"
+                                    value="<?php echo esc_attr($storage_expiration_hours); ?>" min="1" max="8760" />
+                                <span>hours</span>
+                                <p class="description">How long to store cached location data (1-8760 hours, default: 24 hours)</p>
+                            </td>
+                        </tr>
                         <!-- Consent Mode hidden - always enabled -->
                         <tr style="display: none;">
                             <th scope="row">Consent Mode</th>
