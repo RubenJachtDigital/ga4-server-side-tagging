@@ -41,7 +41,7 @@
 
       // Log initialization
       this.log(
-        "%c GA4 Server-Side Tagging initialized v3 ",
+        "%c GA4 Server-Side Tagging initialized v4 ",
         "background: #4CAF50; color: white; font-size: 16px; font-weight: bold; padding: 8px 12px; border-radius: 4px;"
       );
     },

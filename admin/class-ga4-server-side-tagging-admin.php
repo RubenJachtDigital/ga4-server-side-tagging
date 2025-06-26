@@ -313,6 +313,7 @@ class GA4_Server_Side_Tagging_Admin
                 'default' => 24,
             )
         );
+
     }
 
     /**
@@ -345,6 +346,7 @@ class GA4_Server_Side_Tagging_Admin
         }
         return $hours;
     }
+
 
     /**
      * Display the plugin admin page.
@@ -389,6 +391,7 @@ class GA4_Server_Side_Tagging_Admin
         $consent_timeout_action = get_option('ga4_consent_timeout_action', 'deny');
         $disable_all_ip = get_option('ga4_disable_all_ip', false);
         $storage_expiration_hours = get_option('ga4_storage_expiration_hours', 24);
+        $consent_expiration_days = get_option('ga4_consent_expiration_days', 30);
 
         // Include the admin view
         include GA4_SERVER_SIDE_TAGGING_PLUGIN_DIR . 'admin/partials/ga4-server-side-tagging-admin-display.php';
@@ -492,6 +495,13 @@ class GA4_Server_Side_Tagging_Admin
             // Use the existing sanitize method for validation (1-8760 hours)
             $hours = $this->sanitize_storage_expiration_hours($hours);
             update_option('ga4_storage_expiration_hours', $hours);
+        }
+
+        if (isset($_POST['ga4_consent_expiration_days'])) {
+            $days = absint($_POST['ga4_consent_expiration_days']);
+            // Use the existing sanitize method for validation (1-365 days)
+            $days = $this->sanitize_consent_expiration_days($days);
+            update_option('ga4_consent_expiration_days', $days);
         }
 
         // Update logger debug mode

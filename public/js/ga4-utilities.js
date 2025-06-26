@@ -115,9 +115,10 @@
       },
 
       /**
-       * Clear all user data
+       * Clear all user data (but preserve consent data)
        */
       clearUserData: function() {
+        console.log('🧹 [GA4 Storage] Clearing user data but preserving consent');
         localStorage.removeItem('ga4_user_data');
         
         // Also clean up legacy items if they exist
@@ -140,6 +141,10 @@
           localStorage.removeItem(key);
           localStorage.removeItem(key + '_timestamp');
         });
+
+        // IMPORTANT: Do NOT clear consent data (ga4_consent_status)
+        // Consent should persist longer than tracking data for GDPR compliance
+        console.log('ℹ️ [GA4 Storage] Consent data preserved during cleanup');
       },
 
       /**
@@ -269,10 +274,85 @@
         var now = Date.now();
         
         if (userData.timestamp && (now - userData.timestamp) > (expirationHours * 60 * 60 * 1000)) {
+          console.log('⏰ [GA4 Storage] User data expired after ' + expirationHours + ' hours, cleaning up');
           this.clearUserData();
           return true;
         }
         return false;
+      },
+
+      /**
+       * Get consent data (separate from user tracking data)
+       * @returns {Object|null}
+       */
+      getConsentData: function() {
+        try {
+          var consentData = localStorage.getItem('ga4_consent_status');
+          if (consentData) {
+            return JSON.parse(consentData);
+          }
+        } catch (e) {
+          console.log('❌ [GA4 Storage] Error parsing consent data:', e);
+        }
+        return null;
+      },
+
+      /**
+       * Save consent data (separate from user tracking data)
+       * @param {Object} consentData
+       */
+      saveConsentData: function(consentData) {
+        try {
+          consentData.timestamp = Date.now();
+          localStorage.setItem('ga4_consent_status', JSON.stringify(consentData));
+          console.log('✅ [GA4 Storage] Consent data saved (separate from tracking data)');
+        } catch (e) {
+          console.log('❌ [GA4 Storage] Error saving consent data:', e);
+        }
+      },
+
+      /**
+       * Check if consent data exists (consent never expires automatically)
+       * @returns {boolean}
+       */
+      hasValidConsent: function() {
+        var consentData = this.getConsentData();
+        if (!consentData || !consentData.timestamp) {
+          console.log('ℹ️ [GA4 Storage] No consent data found - user needs to make initial choice');
+          return false; // No consent data = needs to choose
+        }
+
+        var now = Date.now();
+        // Consent persists for 1 year unless user changes it
+        var oneYearMs = 365 * 24 * 60 * 60 * 1000; // 1 year
+        var ageMs = now - consentData.timestamp;
+        var ageDays = ageMs / (24 * 60 * 60 * 1000);
+
+        // Only expire after 1 year (this is just for data cleanup, not functional expiry)
+        if (ageMs > oneYearMs) {
+          console.log('🗑️ [GA4 Storage] Consent data is over 1 year old (' + ageDays.toFixed(0) + ' days), clearing for cleanup');
+          return false;
+        }
+        
+        console.log('✅ [GA4 Storage] Valid consent found (age: ' + ageDays.toFixed(0) + ' days) - no popup needed');
+        return true;
+      },
+
+      /**
+       * Clear only consent data (for privacy requests or manual reset)
+       */
+      clearConsentData: function() {
+        localStorage.removeItem('ga4_consent_status');
+        console.log('🧹 [GA4 Storage] Consent data manually cleared - popup will show on next visit');
+      },
+
+      /**
+       * Update consent choice (replaces old consent with new choice)
+       * @param {Object} newConsentData New consent choice
+       */
+      updateConsentChoice: function(newConsentData) {
+        this.saveConsentData(newConsentData);
+        console.log('🔄 [GA4 Storage] Consent choice updated - new choice will be remembered');
       },
 
       /**
@@ -302,9 +382,17 @@
         var expirationHours = this.getExpirationHours();
         console.log('Data retention hours:', expirationHours);
         
-        // Test 5: Show localStorage status
-        console.log('📋 Test 5: localStorage status');
+        // Test 5: Check consent data
+        console.log('📋 Test 5: Testing consent data persistence');
+        var consentData = this.getConsentData();
+        var hasValidConsent = this.hasValidConsent();
+        console.log('Consent data:', consentData);
+        console.log('Has valid consent (never expires unless 1+ year old):', hasValidConsent);
+        
+        // Test 6: Show localStorage status
+        console.log('📋 Test 6: localStorage status');
         console.log('New centralized data exists:', !!localStorage.getItem('ga4_user_data'));
+        console.log('Consent data exists:', !!localStorage.getItem('ga4_consent_status'));
         console.log('Legacy client ID exists:', !!localStorage.getItem('server_side_ga4_client_id'));
         console.log('Legacy session ID exists:', !!localStorage.getItem('server_side_ga4_session_id'));
         
@@ -315,7 +403,10 @@
           clientId: clientId,
           session: session,
           expirationHours: expirationHours,
+          consentData: consentData,
+          hasValidConsent: hasValidConsent,
           newDataExists: !!localStorage.getItem('ga4_user_data'),
+          consentDataExists: !!localStorage.getItem('ga4_consent_status'),
           legacyDataExists: {
             clientId: !!localStorage.getItem('server_side_ga4_client_id'),
             sessionId: !!localStorage.getItem('server_side_ga4_session_id')
@@ -536,7 +627,8 @@
         var now = Date.now();
         var cleanedItems = [];
 
-        // Define all user data keys that should be cleaned up
+        // Define user data keys that should be cleaned up
+        // NOTE: ga4_consent_status is NOT included - it has separate expiration rules
         var userDataKeys = [
           // Location data
           'user_location_data',
@@ -554,10 +646,10 @@
           'server_side_ga4_last_campaign',
           'server_side_ga4_last_content',
           'server_side_ga4_last_term',
-          'server_side_ga4_last_gclid',
+          'server_side_ga4_last_gclid'
           
-          // Consent data
-          'ga4_consent_status'
+          // IMPORTANT: ga4_consent_status is deliberately NOT included here
+          // Consent data has separate expiration rules (30 days vs configurable hours)
         ];
 
         // Clean up timestamped data
@@ -596,6 +688,9 @@
 
         // Clean up session storage (queued events)
         this._clearExpiredSessionData(expirationHours);
+
+        // Check consent data expiration separately (uses longer expiration)
+        this._cleanupExpiredConsentData();
 
         // Log cleanup results
         if (cleanedItems.length > 0) {
@@ -649,6 +744,17 @@
             // Invalid data, remove it
             sessionStorage.removeItem('ga4_queued_events');
           }
+        }
+      },
+
+      /**
+       * Clean up very old consent data (1+ year old) - for data hygiene only
+       * @private
+       */
+      _cleanupExpiredConsentData: function() {
+        if (!GA4Utils.storage.hasValidConsent()) {
+          // hasValidConsent already handles logging and cleanup if over 1 year old
+          // This is just for data hygiene, not functional consent expiry
         }
       },
 
