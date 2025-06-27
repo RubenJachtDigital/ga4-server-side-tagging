@@ -339,6 +339,31 @@ class GA4_Server_Side_Tagging_Admin
             )
         );
 
+        // Click Tracking Settings
+        register_setting(
+            'ga4_server_side_tagging_settings',
+            'ga4_click_tracks_enabled',
+            array(
+                'type' => 'boolean',
+                'description' => 'Enable click tracking functionality',
+                'sanitize_callback' => array($this, 'sanitize_checkbox'),
+                'show_in_rest' => false,
+                'default' => false,
+            )
+        );
+
+        register_setting(
+            'ga4_server_side_tagging_settings',
+            'ga4_click_tracks_config',
+            array(
+                'type' => 'string',
+                'description' => 'Click tracks configuration JSON',
+                'sanitize_callback' => array($this, 'sanitize_click_tracks_config'),
+                'show_in_rest' => false,
+                'default' => '[]',
+            )
+        );
+
     }
 
     /**
@@ -370,6 +395,56 @@ class GA4_Server_Side_Tagging_Admin
             $hours = 8760;
         }
         return $hours;
+    }
+
+    /**
+     * Sanitize Click tracks configuration.
+     *
+     * @since    1.0.0
+     * @param    mixed    $input    The input value.
+     * @return   string              The sanitized value.
+     */
+    public function sanitize_click_tracks_config($input)
+    {
+        if (empty($input)) {
+            return '[]';
+        }
+
+        $decoded = json_decode($input, true);
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            add_settings_error(
+                'ga4_click_tracks_config',
+                'invalid_json',
+                'Invalid JSON in click tracks configuration.'
+            );
+            return '[]';
+        }
+
+        if (!is_array($decoded)) {
+            return '[]';
+        }
+
+        $sanitized = array();
+        foreach ($decoded as $track) {
+            if (is_array($track) && isset($track['name']) && isset($track['selector'])) {
+                $sanitized_track = array(
+                    'name' => sanitize_text_field($track['name']),
+                    'selector' => sanitize_text_field($track['selector']),
+                    'enabled' => isset($track['enabled']) ? (bool) $track['enabled'] : true,
+                );
+                
+                // Validate event name
+                if (!empty($sanitized_track['name']) && !empty($sanitized_track['selector'])) {
+                    // Basic validation for event name (will be further validated in JS)
+                    $clean_name = preg_replace('/[^a-zA-Z0-9_]/', '_', $sanitized_track['name']);
+                    if (!empty($clean_name)) {
+                        $sanitized[] = $sanitized_track;
+                    }
+                }
+            }
+        }
+
+        return json_encode($sanitized);
     }
 
     /**
@@ -461,6 +536,14 @@ class GA4_Server_Side_Tagging_Admin
         $ab_tests_array = json_decode($ab_tests_config, true);
         if (!is_array($ab_tests_array)) {
             $ab_tests_array = array();
+        }
+
+        // Click Tracking settings
+        $click_tracks_enabled = get_option('ga4_click_tracks_enabled', false);
+        $click_tracks_config = get_option('ga4_click_tracks_config', '[]');
+        $click_tracks_array = json_decode($click_tracks_config, true);
+        if (!is_array($click_tracks_array)) {
+            $click_tracks_array = array();
         }
 
         // Include the admin view
@@ -577,6 +660,18 @@ class GA4_Server_Side_Tagging_Admin
         } else {
             // If no config provided, save empty array
             update_option('ga4_ab_tests_config', '[]');
+        }
+
+        // Click Tracking settings
+        update_option('ga4_click_tracks_enabled', isset($_POST['ga4_click_tracks_enabled']));
+        
+        // Process Click tracks configuration from the hidden field
+        if (isset($_POST['ga4_click_tracks_config'])) {
+            $click_tracks_config = wp_unslash($_POST['ga4_click_tracks_config']);
+            update_option('ga4_click_tracks_config', $this->sanitize_click_tracks_config($click_tracks_config));
+        } else {
+            // If no config provided, save empty array
+            update_option('ga4_click_tracks_config', '[]');
         }
 
         // Update logger debug mode

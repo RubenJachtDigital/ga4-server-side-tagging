@@ -219,6 +219,87 @@ if (!defined('WPINC')) {
                         <input type="hidden" id="ga4_ab_tests_config" name="ga4_ab_tests_config" value="" />
                     </div>
                 </div>
+                
+                <!-- Click Tracking Settings -->
+                <div class="ga4-server-side-tagging-admin-section">
+                    <h3>Click Tracking Configuration</h3>
+                    
+                    <table class="form-table">
+                        <tr>
+                            <th scope="row">Enable Click Tracking</th>
+                            <td>
+                                <label for="ga4_click_tracks_enabled">
+                                    <input type="checkbox" id="ga4_click_tracks_enabled" name="ga4_click_tracks_enabled" <?php checked($click_tracks_enabled); ?> />
+                                    Enable click tracking functionality
+                                </label>
+                                <p class="description">Track user clicks on specific elements using CSS selectors</p>
+                            </td>
+                        </tr>
+                    </table>
+
+                    <div id="click_tracking_config" style="<?php echo $click_tracks_enabled ? '' : 'display: none;'; ?>">
+                        <h4>Click Track Configurations</h4>
+                        <p class="description">Configure element click tracking. When users click elements matching these CSS selectors, custom events will be sent with the specified event name (e.g., "button_click", "download_pdf"). Event names will be automatically sanitized to be GA4-compliant.</p>
+                        
+                        <div id="click_tracks_container">
+                            <?php if (!empty($click_tracks_array)): ?>
+                                <?php foreach ($click_tracks_array as $index => $track): ?>
+                                    <div class="click-track-item" data-index="<?php echo $index; ?>">
+                                        <table class="form-table">
+                                            <tr>
+                                                <th scope="row">
+                                                    <label>Event Name</label>
+                                                </th>
+                                                <td>
+                                                    <input type="text" name="click_track_name[]" value="<?php echo esc_attr($track['name']); ?>" 
+                                                           placeholder="e.g., download_pdf, cta_click" class="regular-text" />
+                                                    <p class="description">This becomes the GA4 event name (automatically sanitized)</p>
+                                                </td>
+                                            </tr>
+                                            <tr>
+                                                <th scope="row">
+                                                    <label>CSS Selector</label>
+                                                </th>
+                                                <td>
+                                                    <input type="text" name="click_track_selector[]" value="<?php echo esc_attr($track['selector']); ?>" 
+                                                           placeholder="e.g., .download-btn, #cta-button, .track-click" class="regular-text" />
+                                                    <p class="description">CSS selector for elements to track (class, ID, or any valid CSS selector)</p>
+                                                </td>
+                                            </tr>
+                                            <tr>
+                                                <th scope="row">
+                                                    <label>Enabled</label>
+                                                </th>
+                                                <td>
+                                                    <input type="checkbox" name="click_track_enabled[]" value="1" <?php checked($track['enabled']); ?> />
+                                                    <span>Track is active</span>
+                                                </td>
+                                            </tr>
+                                        </table>
+                                        <button type="button" class="button remove-click-track">Remove Track</button>
+                                        <hr>
+                                    </div>
+                                <?php endforeach; ?>
+                            <?php endif; ?>
+                        </div>
+                        
+                        <button type="button" id="add_click_track" class="button">Add New Click Track</button>
+                        
+                        <input type="hidden" id="ga4_click_tracks_config" name="ga4_click_tracks_config" value="" />
+                        
+                        <div class="notice notice-info inline" style="margin-top: 15px;">
+                            <p><strong>Event Name Validation Rules:</strong></p>
+                            <ul style="margin-left: 20px;">
+                                <li>• Must be 40 characters or less</li>
+                                <li>• Can only contain letters, numbers, and underscores</li>
+                                <li>• Cannot start with a number</li>
+                                <li>• Automatically converted to lowercase</li>
+                                <li>• Invalid characters replaced with underscores</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+                
                 <!-- Tracking Options -->
                 <div class="ga4-server-side-tagging-admin-section">
                     <h3>Tracking Options</h3>

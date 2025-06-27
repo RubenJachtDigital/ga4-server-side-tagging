@@ -135,7 +135,11 @@ class GA4_Server_Side_Tagging_Public
 
             // A/B Testing settings
             'abTestsEnabled' => get_option('ga4_ab_tests_enabled', false),
-            'abTestsConfig' => get_option('ga4_ab_tests_config', '[]')
+            'abTestsConfig' => get_option('ga4_ab_tests_config', '[]'),
+
+            // Click Tracking settings
+            'clickTracksEnabled' => get_option('ga4_click_tracks_enabled', false),
+            'clickTracksConfig' => get_option('ga4_click_tracks_config', '[]')
         );
 
         // Add product data if we're on a product page

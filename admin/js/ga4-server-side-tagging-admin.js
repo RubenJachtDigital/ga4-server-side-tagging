@@ -66,6 +66,9 @@
 
         // A/B Testing functionality
         initializeABTesting();
+        
+        // Click Tracking functionality
+        initializeClickTracking();
     });
 
     // A/B Testing Functions
@@ -101,6 +104,7 @@
         // Handle form submission - make sure we update config before submit
         $('form').on('submit', function(e) {
             updateABTestsConfig();
+            updateClickTracksConfig();
             // Small delay to ensure the field is updated
             return true;
         });
@@ -180,6 +184,105 @@
         var configJson = JSON.stringify(tests);
         $('#ga4_ab_tests_config').val(configJson);
         
+    }
+
+    // Click Tracking Functions
+    function initializeClickTracking() {
+        // Toggle Click tracking configuration
+        $('#ga4_click_tracks_enabled').on('change', function() {
+            if ($(this).is(':checked')) {
+                $('#click_tracking_config').show();
+            } else {
+                $('#click_tracking_config').hide();
+            }
+        }).trigger('change');
+
+        // Add new Click track
+        $('#add_click_track').on('click', function() {
+            addClickTrack();
+        });
+
+        // Remove Click track
+        $(document).on('click', '.remove-click-track', function() {
+            $(this).closest('.click-track-item').remove();
+            updateClickTracksConfig();
+        });
+
+        // Update hidden field when form inputs change
+        $(document).on('input change', 'input[name^="click_track_"]', function() {
+            updateClickTracksConfig();
+        });
+
+        // Initialize with existing tracks
+        updateClickTracksConfig();
+    }
+
+    function addClickTrack() {
+        var index = $('.click-track-item').length;
+        var template = `
+            <div class="click-track-item" data-index="${index}">
+                <table class="form-table">
+                    <tr>
+                        <th scope="row">
+                            <label>Event Name</label>
+                        </th>
+                        <td>
+                            <input type="text" name="click_track_name[]" value="" 
+                                   placeholder="e.g., download_pdf, cta_click" class="regular-text" />
+                            <p class="description">This becomes the GA4 event name (automatically sanitized)</p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row">
+                            <label>CSS Selector</label>
+                        </th>
+                        <td>
+                            <input type="text" name="click_track_selector[]" value="" 
+                                   placeholder="e.g., .download-btn, #cta-button, .track-click" class="regular-text" />
+                            <p class="description">CSS selector for elements to track (class, ID, or any valid CSS selector)</p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row">
+                            <label>Enabled</label>
+                        </th>
+                        <td>
+                            <input type="checkbox" name="click_track_enabled[]" value="1" checked />
+                            <span>Track is active</span>
+                        </td>
+                    </tr>
+                </table>
+                <button type="button" class="button remove-click-track">Remove Track</button>
+                <hr>
+            </div>
+        `;
+        
+        $('#click_tracks_container').append(template);
+        updateClickTracksConfig();
+    }
+
+    function updateClickTracksConfig() {
+        var tracks = [];
+        
+        $('.click-track-item').each(function() {
+            var $item = $(this);
+            var name = $item.find('input[name="click_track_name[]"]').val();
+            var selector = $item.find('input[name="click_track_selector[]"]').val();
+            var enabled = $item.find('input[name="click_track_enabled[]"]').is(':checked');
+            
+            if (name && selector) {
+                tracks.push({
+                    name: name,
+                    selector: selector,
+                    enabled: enabled
+                });
+            }
+        });
+        
+        var configJson = JSON.stringify(tracks);
+        $('#ga4_click_tracks_config').val(configJson);
+        
+        console.log('Updated click tracks config:', configJson);
     }
 
 })( jQuery ); 
