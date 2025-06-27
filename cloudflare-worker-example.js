@@ -889,12 +889,6 @@ async function handleGA4Event(payload, request) {
     delete processedData.params.app_id;
   }
 
-  // Add enhanced e-commerce tracking
-  if (processedData.params.transaction_id) {
-    ga4Payload.transaction_id = processedData.params.transaction_id;
-    // Keep in params as well since it's also an event parameter
-  }
-
   // Remove client_id from params to avoid duplication, only if it exists
   if (ga4Payload.events[0].params.hasOwnProperty("client_id")) {
     delete ga4Payload.events[0].params.client_id;
