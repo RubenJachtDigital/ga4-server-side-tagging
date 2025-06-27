@@ -859,10 +859,7 @@ async function handleGA4Event(payload, request) {
     ga4Payload.ip_override = clientIP.split(',')[0].trim(); // Take first IP if multiple
   }
 
-  // Add non_personalized_ads (when ad personalization is denied)
-  if (processedData.consent && processedData.consent.ad_personalization === 'DENIED') {
-    ga4Payload.non_personalized_ads = true;
-  }
+
 
   // Keep session_id in event params only (not allowed at top level in GA4)
   // session_id should remain in the event parameters where it belongs
@@ -984,7 +981,6 @@ async function handleGA4Event(payload, request) {
       user_id: ga4Payload.user_id ? "present" : "missing",
       engaged_session: ga4Payload.engaged_session ? "true" : "false",
       ip_override: ga4Payload.ip_override ? "present" : "missing",
-      non_personalized_ads: ga4Payload.non_personalized_ads ? "true" : "false",
       validation_code: ga4Payload.validation_code ? "present" : "missing",
       app_name: ga4Payload.app_name ? "present" : "missing",
       app_version: ga4Payload.app_version ? "present" : "missing",
