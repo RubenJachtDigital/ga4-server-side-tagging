@@ -861,34 +861,6 @@ async function handleGA4Event(payload, request) {
 
 
 
-  // Keep session_id in event params only (not allowed at top level in GA4)
-  // session_id should remain in the event parameters where it belongs
-
-  // Add engagement time at session level if available
-  if (processedData.params.session_engaged === '1' || processedData.params.session_engaged === true) {
-    ga4Payload.engaged_session = true;
-  }
-
-  // Add validation_code for enhanced measurement validation (if available)
-  if (processedData.params.validation_code) {
-    ga4Payload.validation_code = processedData.params.validation_code;
-    delete processedData.params.validation_code;
-  }
-
-  // Add app information if this is from a mobile app context
-  if (processedData.params.app_name) {
-    ga4Payload.app_name = processedData.params.app_name;
-    delete processedData.params.app_name;
-  }
-  if (processedData.params.app_version) {
-    ga4Payload.app_version = processedData.params.app_version;
-    delete processedData.params.app_version;
-  }
-  if (processedData.params.app_id) {
-    ga4Payload.app_id = processedData.params.app_id;
-    delete processedData.params.app_id;
-  }
-
   // Remove client_id from params to avoid duplication, only if it exists
   if (ga4Payload.events[0].params.hasOwnProperty("client_id")) {
     delete ga4Payload.events[0].params.client_id;
