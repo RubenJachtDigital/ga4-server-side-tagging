@@ -44,7 +44,7 @@
 
       // Log initialization
       this.log(
-        "%c GA4 Server-Side Tagging initialized v4 ",
+        "%c GA4 Server-Side Tagging initialized v2 ",
         "background: #4CAF50; color: white; font-size: 16px; font-weight: bold; padding: 8px 12px; border-radius: 4px;"
       );
     },
@@ -161,7 +161,6 @@
       
       // Get current session information using utils
       var session = GA4Utils.session.get();
-      this.log("session data: " + session.start);
       var isNewSession = session.isNew;
 
       // Get user agent and device information using utils
@@ -678,38 +677,20 @@
 
     setupFormTracking: function () {
       var self = this;
-      var trackForms =
-        "form:not(.cart, .woocommerce-cart-form, .checkout, .woocommerce-checkout)";
-
-      // Build exclusion selectors for conversion forms
-      var conversionFormExclusions = "";
-      if (
-        typeof self.config.conversionFormIds !== "undefined" &&
-        self.config.conversionFormIds
-      ) {
-        var conversionIds = self.config.conversionFormIds.split(",");
-        conversionFormExclusions = conversionIds
-          .map((id) => `#gform_${id.trim()}`)
-          .join(", ");
+      var baseExclusions = ".cart, .woocommerce-cart-form, .checkout, .woocommerce-checkout";
+      var conversionExclusions = [];
+      
+      if (self.config.conversionFormIds) {
+        conversionExclusions = self.config.conversionFormIds.split(",").map(id => `#gform_${id.trim()}`);
       }
-
-      // Add YITH RAQ form exclusion if it exists
-      if (
-        typeof self.config.quoteData !== "undefined" &&
-        self.config.quoteData &&
-        self.config.yithRaqFormId
-      ) {
-        if (conversionFormExclusions) {
-          conversionFormExclusions += `, #gform_${self.config.yithRaqFormId}`;
-        } else {
-          conversionFormExclusions = `#gform_${self.config.yithRaqFormId}`;
-        }
+      
+      if (self.config.quoteData && self.config.yithRaqFormId) {
+        conversionExclusions.push(`#gform_${self.config.yithRaqFormId}`);
       }
-
-      // Update trackForms selector with all exclusions
-      if (conversionFormExclusions) {
-        trackForms = `form:not(.cart, .woocommerce-cart-form, .checkout, .woocommerce-checkout, ${conversionFormExclusions})`;
-      }
+      
+      var trackForms = conversionExclusions.length ? 
+        `form:not(${baseExclusions}, ${conversionExclusions.join(", ")})` : 
+        `form:not(${baseExclusions})`;
 
       // Track form submissions (excluding WooCommerce forms and conversion forms)
       $(document).on("submit", trackForms, function () {
@@ -740,7 +721,7 @@
 
         conversionIds.forEach(function (id) {
           var trimmedId = id.trim();
-          $(`#gform_${trimmedId}`).on("submit", function (event) {
+          $(`#gform_${trimmedId}`).on("submit", function () {
             var formId = $(this).attr("id") || "unknown";
             var formAction = $(this).attr("action") || "unknown";
             var trackingData = {
@@ -760,21 +741,16 @@
     setupFileDownloadTracking: function () {
       var self = this;
 
-      $(document).on(
-        "click",
-        'a[href*=".pdf"], a[href*=".zip"], a[href*=".doc"], a[href*=".docx"], a[href*=".xls"], a[href*=".xlsx"], a[href*=".ppt"], a[href*=".pptx"]',
-        function () {
-          var href = $(this).attr("href");
-          var fileName = href.split("/").pop().split("?")[0];
-          var fileExtension = fileName.split(".").pop().toLowerCase();
-
-          self.trackEvent("file_download", {
-            file_name: fileName,
-            file_extension: fileExtension,
-            link_url: href,
-          });
-        }
-      );
+      var fileSelector = 'a[href*=".pdf"], a[href*=".zip"], a[href*=".doc"], a[href*=".docx"], a[href*=".xls"], a[href*=".xlsx"], a[href*=".ppt"], a[href*=".pptx"]';
+      $(document).on("click", fileSelector, function () {
+        var href = $(this).attr("href");
+        var fileName = href.split("/").pop().split("?")[0];
+        self.trackEvent("file_download", {
+          file_name: fileName,
+          file_extension: fileName.split(".").pop().toLowerCase(),
+          link_url: href,
+        });
+      });
     },
 
     /**
@@ -783,22 +759,12 @@
     setupSearchTracking: function () {
       var self = this;
 
-      $(document).on(
-        "submit",
-        'form[role="search"], .search-form',
-        function () {
-          var searchQuery = $(this)
-            .find(
-              'input[type="search"], input[name*="search"], input[name="s"]'
-            )
-            .val();
-          if (searchQuery && searchQuery.trim() !== "") {
-            self.trackEvent("search", {
-              search_term: searchQuery.trim(),
-            });
-          }
+      $(document).on("submit", 'form[role="search"], .search-form', function () {
+        var searchQuery = $(this).find('input[type="search"], input[name*="search"], input[name="s"]').val();
+        if (searchQuery && searchQuery.trim() !== "") {
+          self.trackEvent("search", { search_term: searchQuery.trim() });
         }
-      );
+      });
     },
 
     /**
@@ -830,19 +796,14 @@
     setupSocialTracking: function () {
       var self = this;
 
-      $(document).on(
-        "click",
-        'a[href*="facebook.com"], a[href*="twitter.com"], a[href*="linkedin.com"], a[href*="instagram.com"], a[href*="youtube.com"], a[href*="tiktok.com"]',
-        function () {
-          var href = $(this).attr("href");
-          var platform = GA4Utils.helpers.getSocialPlatform(href);
-
-          self.trackEvent("social_click", {
-            platform: platform,
-            link_url: href,
-          });
-        }
-      );
+      var socialSelector = 'a[href*="facebook.com"], a[href*="twitter.com"], a[href*="linkedin.com"], a[href*="instagram.com"], a[href*="youtube.com"], a[href*="tiktok.com"]';
+      $(document).on("click", socialSelector, function () {
+        var href = $(this).attr("href");
+        self.trackEvent("social_click", {
+          platform: GA4Utils.helpers.getSocialPlatform(href),
+          link_url: href,
+        });
+      });
     },
 
     /**
@@ -851,33 +812,17 @@
     setupButtonTracking: function () {
       var self = this;
 
-      $(document).on(
-        "click",
-        'button, .btn, .button, input[type="submit"], input[type="button"]',
-        function () {
-          // Skip if it's a form submit (already tracked above)
-          if (
-            $(this).attr("type") === "submit" &&
-            $(this).closest("form").length
-          ) {
-            return;
-          }
-
-          var buttonText =
-            $(this).text() ||
-            $(this).val() ||
-            $(this).attr("aria-label") ||
-            "Unknown";
-          var buttonId = $(this).attr("id") || "";
-          var buttonClass = $(this).attr("class") || "";
-
-          self.trackEvent("button_click", {
-            button_text: buttonText.trim(),
-            button_id: buttonId,
-            button_class: buttonClass,
-          });
-        }
-      );
+      var buttonSelector = 'button, .btn, .button, input[type="submit"], input[type="button"]';
+      $(document).on("click", buttonSelector, function () {
+        if ($(this).attr("type") === "submit" && $(this).closest("form").length) return;
+        
+        var buttonText = $(this).text() || $(this).val() || $(this).attr("aria-label") || "Unknown";
+        self.trackEvent("button_click", {
+          button_text: buttonText.trim(),
+          button_id: $(this).attr("id") || "",
+          button_class: $(this).attr("class") || "",
+        });
+      });
     },
 
     /**
@@ -1273,11 +1218,7 @@
 
       $(document).on("click", ".woocommerce-cart-form .remove", function () {
         var $row = $(this).closest("tr");
-        var $removeLink = $(this);
-
-        // Get product data from the remove link and row
-        var productId = $removeLink.data("product_id") || "";
-        var cartItemKey = $removeLink.data("cart_item_key") || "";
+        var productId = $(this).data("product_id") || "";
 
         // Extract product information
         var productInfo = self.extractCartProductInfo($row, productId);
@@ -1623,7 +1564,7 @@
       var self = this;
 
       if (self.config.yithRaqFormId) {
-        $(`#gform_${self.config.yithRaqFormId}`).on("submit", function (event) {
+        $(`#gform_${self.config.yithRaqFormId}`).on("submit", function () {
           self.log("request a quote form fired");
 
           // Check if we have quote data from the server
@@ -2430,12 +2371,7 @@
    * Anonymize user agent string
    */
   anonymizeUserAgent: function(userAgent) {
-    if (!userAgent) return "";
-    
-    return userAgent
-      .replace(/\d+\.\d+[\.\d]*/g, "x.x") // Replace version numbers
-      .replace(/\([^)]*\)/g, "(anonymous)") // Replace system info in parentheses
-      .substring(0, 100); // Truncate to 100 characters
+    return GA4Utils.device.anonymizeUserAgent(userAgent);
   },
 
 

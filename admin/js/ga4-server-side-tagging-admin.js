@@ -180,8 +180,6 @@
         var configJson = JSON.stringify(tests);
         $('#ga4_ab_tests_config').val(configJson);
         
-        // Debug logging
-        console.log('A/B Tests Config Updated:', configJson);
     }
 
 })( jQuery ); 

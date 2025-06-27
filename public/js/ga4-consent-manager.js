@@ -30,13 +30,6 @@
       this.config = config || {};
       this.trackingInstance = trackingInstance;
       
-      this.log("🚀 Initializing GDPR Consent Manager with event queue", {
-        config: this.config,
-        defaultTimeout: this.config.defaultTimeout,
-        useIubenda: this.config.useIubenda,
-        consentModeEnabled: this.config.consentModeEnabled,
-        debugMode: this.config.debugMode
-      });
       
       // Load any existing queued events from session storage
       this.loadQueuedEventsFromSession();
@@ -45,7 +38,6 @@
       var existingConsent = this.getStoredConsent();
       
       if (existingConsent) {
-        this.log("Found existing consent", existingConsent);
         this.consentGiven = true;
         this.consentStatus = existingConsent;
         this.consentProcessed = true; // NEW: Mark as processed to prevent duplicates
@@ -72,10 +64,6 @@
         this.setupDefaultConsentTimeout();
       }
 
-      this.log("Waiting for user consent - events will be queued", {
-        timeoutEnabled: !!(this.config.defaultTimeout && this.config.defaultTimeout > 0),
-        timeoutSeconds: this.config.defaultTimeout
-      });
     },
 
     /**
@@ -100,20 +88,12 @@
      * @returns {boolean} - true if event should be sent now, false if queued
      */
     shouldSendEvent: function(eventName, eventParams, completeEventData) {
-      this.log("🤔 Checking if event should be sent", {
-        eventName: eventName,
-        consentGiven: this.consentGiven,
-        consentProcessed: this.consentProcessed,
-        consentStatus: this.consentStatus ? this.consentStatus.analytics_storage : 'none'
-      });
       
       if (this.consentGiven) {
-        this.log("✅ Consent given - sending event immediately: " + eventName);
         return true; // Send immediately
       }
 
       // Queue the event with complete data if available
-      this.log("⏳ No consent yet - queuing event: " + eventName);
       if (completeEventData) {
         this.queueEvent(eventName, completeEventData, true); // true = isCompleteData
       } else {
@@ -147,13 +127,6 @@
       // Save to session storage to persist across page navigation
       this.saveQueuedEventsToSession();
 
-      this.log("Event queued waiting for consent", { 
-        eventName: eventName, 
-        queueLength: this.eventQueue.length,
-        isCompleteData: isCompleteData,
-        originalPageUrl: isCompleteData ? eventParams.page_location : queuedEvent.pageUrl,
-        persistedInSession: true
-      });
     },
 
     /**
@@ -161,23 +134,15 @@
      */
     processQueuedEvents: function() {
       if (this.eventQueue.length === 0) {
-        this.log("No queued events to process");
         return;
       }
 
       // Prevent duplicate processing if events were already processed
       if (this.eventsProcessed) {
-        this.log("⚠️ Events already processed - clearing queue without reprocessing", {
-          queueLength: this.eventQueue.length
-        });
         this.eventQueue = []; // Clear queue
         return;
       }
 
-      this.log("📤 Processing queued events", { 
-        count: this.eventQueue.length,
-        consentStatus: this.consentStatus ? this.consentStatus.analytics_storage : 'unknown'
-      });
 
       // Mark events as being processed
       this.eventsProcessed = true;
@@ -192,15 +157,6 @@
       // Use setTimeout to ensure events are processed after consent is fully applied
       setTimeout(function() {
         eventsToProcess.forEach(function(queuedEvent, index) {
-          this.log("📤 Processing queued event", { 
-            eventName: queuedEvent.eventName, 
-            index: index + 1,
-            total: eventsToProcess.length,
-            age: Date.now() - queuedEvent.timestamp,
-            isCompleteData: queuedEvent.isCompleteData,
-            originalPageUrl: queuedEvent.isCompleteData ? queuedEvent.eventParams.page_location : queuedEvent.pageUrl,
-            currentPageUrl: window.location.href
-          });
 
           // Add small delay between events to prevent overwhelming the server
           setTimeout(async function() {
@@ -218,11 +174,6 @@
      * @param {boolean} isCompleteData - Whether eventParams contains complete enriched data
      */
     sendEventWithBypass: async function(eventName, eventParams, isCompleteData = false) {
-      this.log("Sending bypassed event", { 
-        eventName: eventName, 
-        isCompleteData: isCompleteData,
-        originalPageUrl: isCompleteData ? eventParams.page_location : 'unknown'
-      });
       
       if (isCompleteData) {
         // Event has complete data, send directly without re-enriching
@@ -234,7 +185,6 @@
           eventParams.consent = this.getConsentForServerSide();
           await this.trackingInstance.sendRawEventData(eventName, eventParams);
         } else {
-          this.log("No method available for sending complete event data", { eventName: eventName });
         }
       } else {
         // Basic event data, process normally
@@ -254,9 +204,7 @@
           // Final fallback to gtag if available
           if (typeof gtag === "function") {
             gtag("event", eventName, eventParams);
-            this.log("Sent queued event via gtag", { eventName: eventName });
           } else {
-            this.log("No tracking method available for queued event", { eventName: eventName });
           }
         }
       }
@@ -266,48 +214,36 @@
      * Enable tracking by notifying main tracking instance
      */
     enableTracking: function() {
-      this.log("🚀 Enabling tracking after consent decision");
       
       // Set global consent ready flag
       window.GA4ConsentReady = true;
       
       // Directly set the consentReady flag on the tracking instance
       if (typeof GA4ServerSideTagging !== "undefined") {
-        this.log("📍 Setting GA4ServerSideTagging.consentReady = true");
         GA4ServerSideTagging.consentReady = true;
       }
       
       // Set on tracking instance reference if available
       if (this.trackingInstance) {
-        this.log("📍 Setting trackingInstance.consentReady = true");
         this.trackingInstance.consentReady = true;
       }
       
       // Call onConsentReady methods
       if (this.trackingInstance && typeof this.trackingInstance.onConsentReady === 'function') {
-        this.log("📞 Calling onConsentReady on tracking instance");
         try {
           this.trackingInstance.onConsentReady();
         } catch (error) {
-          this.log("❌ Error calling onConsentReady on tracking instance", error);
         }
       } else if (typeof GA4ServerSideTagging !== "undefined" && typeof GA4ServerSideTagging.onConsentReady === 'function') {
-        this.log("📞 Calling onConsentReady on global GA4ServerSideTagging");
         try {
           GA4ServerSideTagging.onConsentReady();
         } catch (error) {
-          this.log("❌ Error calling onConsentReady on GA4ServerSideTagging", error);
         }
       }
       
       // Trigger a custom event that can be listened to by other scripts
       $(document).trigger('ga4TrackingEnabled', [this.consentStatus]);
       
-      this.log("✅ Tracking enabled successfully", {
-        globalConsentReady: window.GA4ConsentReady,
-        trackingInstanceReady: this.trackingInstance ? this.trackingInstance.consentReady : 'N/A',
-        globalTrackingReady: typeof GA4ServerSideTagging !== "undefined" ? GA4ServerSideTagging.consentReady : 'N/A'
-      });
     },
 
     /**
@@ -320,7 +256,6 @@
       // Also clear from session storage
       this.clearQueuedEventsFromSession();
       
-      this.log("Event queue cleared", { clearedEvents: queueLength });
     },
 
     /**
@@ -1182,12 +1117,7 @@
      * Anonymize user agent string
      */
     anonymizeUserAgent: function(userAgent) {
-      if (!userAgent) return "";
-      
-      return userAgent
-        .replace(/\d+\.\d+[\.\d]*/g, "x.x") // Replace version numbers
-        .replace(/\([^)]*\)/g, "(anonymous)") // Replace system info in parentheses
-        .substring(0, 100); // Truncate to 100 characters
+      return GA4Utils.device.anonymizeUserAgent(userAgent);
     },
 
     /**
