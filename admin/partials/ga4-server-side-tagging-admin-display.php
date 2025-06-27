@@ -82,7 +82,7 @@ if (!defined('WPINC')) {
                                 <input type="number" id="ga4_consent_default_timeout" name="ga4_consent_default_timeout"
                                     value="<?php echo esc_attr($consent_default_timeout); ?>" min="0" max="300" />
                                 <span>seconds</span>
-                                <p class="description">Time in seconds before automatically taking action (0 = disabled). User can still accept/deny manually during this time.</p>
+                                <p class="description">Time in seconds before automatically taking action (0 = disabled). User can still accept/deny manually during this time and after.</p>
                             </td>
                         </tr>
                         <tr id="timeout_action_row">

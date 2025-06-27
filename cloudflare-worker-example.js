@@ -33,10 +33,8 @@ function processGDPRConsent(payload) {
   // Extract consent data from payload, default to DENIED if no consent data
   const consent = payload.params?.consent || {};
   
-  // If no consent data is provided, default to DENIED values
+  // If no consent data is provided, default to DENIED values (only official GA4 fields)
   const processedConsent = {
-    analytics_storage: consent.analytics_storage || "DENIED",
-    ad_storage: consent.ad_storage || "DENIED",
     ad_user_data: consent.ad_user_data || "DENIED",
     ad_personalization: consent.ad_personalization || "DENIED"
   };
@@ -49,11 +47,13 @@ function processGDPRConsent(payload) {
   }
 
   // Apply consent-based data filtering based on processed consent
-  if (processedConsent.analytics_storage === "DENIED") {
+  // Use ad_user_data for analytics consent (user data collection)
+  if (processedConsent.ad_user_data === "DENIED") {
     payload = applyAnalyticsConsentDenied(payload);
   }
 
-  if (processedConsent.ad_storage === "DENIED") {
+  // Use ad_personalization for advertising consent
+  if (processedConsent.ad_personalization === "DENIED") {
     payload = applyAdvertisingConsentDenied(payload);
   }
 
@@ -731,7 +731,7 @@ async function handleRequest(request) {
           filtered: true,
           reason: "bot_detected",
           bot_score: botDetection.score,
-          bot_details: DEBUG_MODE ? botDetection : undefined,
+          bot_details: botDetection,
           gdpr_processed: true
         }),
         {
@@ -790,7 +790,6 @@ async function handleRequest(request) {
 async function handleGA4Event(payload, request) {
   // Process the event data
   const processedData = processEventData(payload, request);
-  var analytics_storage_temp;
   // Log the incoming event data
   if (DEBUG_MODE) {
     console.log("Received GA4 event:", JSON.stringify(payload));
@@ -835,6 +834,70 @@ async function handleGA4Event(payload, request) {
     ga4Payload.user_location = userLocation;
   }
 
+  // Extract and add device information following GA4 specification
+  const deviceInfo = extractDeviceInfo(processedData.params);
+  if (deviceInfo && Object.keys(deviceInfo).length > 0) {
+    ga4Payload.device = deviceInfo;
+  }
+
+  // Add user_agent at top level (always include when available)
+  const userAgent = getUserAgent(processedData, request);
+  if (userAgent) {
+    ga4Payload.user_agent = userAgent;
+  }
+
+
+  // Keep timestamp in event parameters only (not allowed at top level in GA4)
+  // event_timestamp should remain in the event parameters where it belongs
+
+  // Add IP override for geographic information derivation
+  const clientIP = request.headers.get('CF-Connecting-IP') || 
+                   request.headers.get('X-Forwarded-For') || 
+                   request.headers.get('X-Real-IP');
+  if (clientIP && processedData.consent && processedData.consent.ad_user_data === 'GRANTED') {
+    // Only include IP when analytics consent is granted
+    ga4Payload.ip_override = clientIP.split(',')[0].trim(); // Take first IP if multiple
+  }
+
+  // Add non_personalized_ads (when ad personalization is denied)
+  if (processedData.consent && processedData.consent.ad_personalization === 'DENIED') {
+    ga4Payload.non_personalized_ads = true;
+  }
+
+  // Keep session_id in event params only (not allowed at top level in GA4)
+  // session_id should remain in the event parameters where it belongs
+
+  // Add engagement time at session level if available
+  if (processedData.params.session_engaged === '1' || processedData.params.session_engaged === true) {
+    ga4Payload.engaged_session = true;
+  }
+
+  // Add validation_code for enhanced measurement validation (if available)
+  if (processedData.params.validation_code) {
+    ga4Payload.validation_code = processedData.params.validation_code;
+    delete processedData.params.validation_code;
+  }
+
+  // Add app information if this is from a mobile app context
+  if (processedData.params.app_name) {
+    ga4Payload.app_name = processedData.params.app_name;
+    delete processedData.params.app_name;
+  }
+  if (processedData.params.app_version) {
+    ga4Payload.app_version = processedData.params.app_version;
+    delete processedData.params.app_version;
+  }
+  if (processedData.params.app_id) {
+    ga4Payload.app_id = processedData.params.app_id;
+    delete processedData.params.app_id;
+  }
+
+  // Add enhanced e-commerce tracking
+  if (processedData.params.transaction_id) {
+    ga4Payload.transaction_id = processedData.params.transaction_id;
+    // Keep in params as well since it's also an event parameter
+  }
+
   // Remove client_id from params to avoid duplication, only if it exists
   if (ga4Payload.events[0].params.hasOwnProperty("client_id")) {
     delete ga4Payload.events[0].params.client_id;
@@ -844,14 +907,32 @@ async function handleGA4Event(payload, request) {
   if (ga4Payload.events[0].params.hasOwnProperty("botData")) {
     delete ga4Payload.events[0].params.botData;
   }
-  if (!ga4Payload.events[0].params.consent_mode) {
-    ga4Payload.events[0].params.consent_mode = "ad_personalization: " + ga4Payload.consent.ad_personalization + ". ad_user_data: " + ga4Payload.consent.ad_user_data
+  
+  // Remove device-related data from params since it's now at top level
+  const deviceParamsToRemove = [
+    'device_type', 'is_mobile', 'is_tablet', 'is_desktop', 
+    'browser_name', 'screen_resolution', 'user_agent'
+  ];
+  deviceParamsToRemove.forEach(param => {
+    if (ga4Payload.events[0].params.hasOwnProperty(param)) {
+      delete ga4Payload.events[0].params[param];
+    }
+  });
+  // Handle consent parameter in event params
+  if (ga4Payload.events[0].params.consent) {
+    // If consent is an object (from client), remove it - we'll create the proper string format
+    if (typeof ga4Payload.events[0].params.consent === 'object') {
+      delete ga4Payload.events[0].params.consent;
+    }
+  }
+  
+  // Create the combined consent string parameter if not already present
+  if (!ga4Payload.events[0].params.consent) {
+    var consentReason = (ga4Payload.consent && ga4Payload.consent.consent_reason) ? ga4Payload.consent.consent_reason : 'button_click';
+    ga4Payload.events[0].params.consent = "ad_personalization: " + ga4Payload.consent.ad_personalization + ". ad_user_data: " + ga4Payload.consent.ad_user_data + ". reason: " + consentReason;
   }
 
-  // Remove consent from params (it's at request level now)
-  if (ga4Payload.events[0].params.hasOwnProperty("consent")) {
-    delete ga4Payload.events[0].params.consent;
-  }
+  // Note: We keep the 'consent' parameter in event params (it contains the combined consent info)
 
   // Add user_id if available and consent allows
   if (processedData.params.user_id) {
@@ -859,28 +940,16 @@ async function handleGA4Event(payload, request) {
     // Remove from params to avoid duplication
     delete processedData.params.user_id;
   }
-  if(ga4Payload.consent.ad_storage){
-    delete ga4Payload.consent.ad_storage;
+  // Clean up consent object - only keep official GA4 fields
+  if (ga4Payload.consent) {
+    // Keep only the two official GA4 consent fields
+    const cleanConsent = {
+      ad_user_data: ga4Payload.consent.ad_user_data || "DENIED",
+      ad_personalization: ga4Payload.consent.ad_personalization || "DENIED"
+    };
+    ga4Payload.consent = cleanConsent;
   }
-  if(ga4Payload.consent.functionality_storage){
-    delete ga4Payload.consent.functionality_storage;
-  }
-  if(ga4Payload.consent.personalization_storage){
-    delete ga4Payload.consent.personalization_storage;
-  }
-  if(ga4Payload.consent.security_storage){
-    delete ga4Payload.consent.security_storage;
-  }
-    if(ga4Payload.consent.consent_mode){
-    delete ga4Payload.consent.consent_mode;
-  }
-  if(ga4Payload.consent.consent_timestamp){
-    delete ga4Payload.consent.consent_timestamp;
-  }
-  if(ga4Payload.consent.analytics_storage){
-    analytics_storage_temp = ga4Payload.consent.analytics_storage;
-    delete ga4Payload.consent.analytics_storage;
-  }
+
 
   // Check if params exceeds 25
   const payloadParamsCount = Object.keys(processedData.params).length;
@@ -910,7 +979,25 @@ async function handleGA4Event(payload, request) {
   }
   
   if (DEBUG_MODE) {
-    console.log("Finished payload:" + JSON.stringify(ga4Payload));
+    console.log("Finished payload structure:", JSON.stringify({
+      client_id: ga4Payload.client_id ? "present" : "missing",
+      user_id: ga4Payload.user_id ? "present" : "missing",
+      engaged_session: ga4Payload.engaged_session ? "true" : "false",
+      ip_override: ga4Payload.ip_override ? "present" : "missing",
+      non_personalized_ads: ga4Payload.non_personalized_ads ? "true" : "false",
+      validation_code: ga4Payload.validation_code ? "present" : "missing",
+      app_name: ga4Payload.app_name ? "present" : "missing",
+      app_version: ga4Payload.app_version ? "present" : "missing",
+      app_id: ga4Payload.app_id ? "present" : "missing",
+      transaction_id: ga4Payload.transaction_id ? "present" : "missing",
+      consent: ga4Payload.consent ? Object.keys(ga4Payload.consent) : "missing",
+      device: ga4Payload.device ? Object.keys(ga4Payload.device) : "missing",
+      user_agent: ga4Payload.user_agent ? "present" : "missing",
+      user_location: ga4Payload.user_location ? Object.keys(ga4Payload.user_location) : "missing",
+      events_count: ga4Payload.events.length,
+      event_params_count: Object.keys(ga4Payload.events[0].params).length
+    }));
+    console.log("Full payload:" + JSON.stringify(ga4Payload));
   }
     
   // Send the event to GA4
@@ -947,9 +1034,9 @@ async function handleGA4Event(payload, request) {
       "event": processedData.name,
       "ga4_status": ga4Response.status,
       "ga4_response": DEBUG_MODE ? ga4ResponseBody : undefined,
-      "debug": DEBUG_MODE ? ga4Payload : undefined,
+      "debug": ga4Payload,
       "consent_applied": ga4Payload.consent ? true : false,
-      "consent_mode": ga4Payload.consent?.analytics_storage_temp || 'unknown'
+      "consent_mode": ga4Payload.consent?.ad_user_data || 'unknown'
     }),
     {
       headers: {
@@ -965,6 +1052,153 @@ async function handleGA4Event(payload, request) {
  * UTILITY FUNCTIONS
  * =============================================================================
  */
+
+/**
+ * Extract device information following GA4 specification
+ * @param {Object} params - Event parameters
+ * @returns {Object} Device information object
+ */
+function extractDeviceInfo(params) {
+  const device = {};
+  const botData = params.botData || {};
+  
+  // Extract device category (most important field according to docs)
+  if (params.device_type) {
+    device.category = params.device_type; // mobile, desktop, tablet
+  } else if (params.is_mobile) {
+    device.category = "mobile";
+  } else if (params.is_tablet) {
+    device.category = "tablet";
+  } else if (params.is_desktop) {
+    device.category = "desktop";
+  }
+  
+  // Extract language
+  if (params.language) {
+    device.language = params.language;
+  }
+  
+  // Extract screen resolution
+  if (params.screen_resolution) {
+    device.screen_resolution = params.screen_resolution;
+  } else if (botData.screen_available_width && botData.screen_available_height) {
+    device.screen_resolution = `${botData.screen_available_width}x${botData.screen_available_height}`;
+  }
+  
+  // Extract operating system from user agent or bot data
+  if (params.browser_name || botData.browser_name) {
+    device.browser = params.browser_name || botData.browser_name;
+  }
+  
+  // Extract platform/OS information
+  if (botData.platform) {
+    // Map common platform values to GA4 format
+    const platformMap = {
+      'Win32': 'Windows',
+      'MacIntel': 'Macintosh', 
+      'Linux x86_64': 'Linux',
+      'iPhone': 'iOS',
+      'iPad': 'iOS',
+      'Android': 'Android'
+    };
+    device.operating_system = platformMap[botData.platform] || botData.platform;
+  }
+  
+  // Try to extract browser and OS from user_agent if available
+  if (params.user_agent || botData.user_agent_full) {
+    const userAgent = params.user_agent || botData.user_agent_full;
+    const browserInfo = parseUserAgentForDevice(userAgent);
+    
+    if (browserInfo.browser && !device.browser) {
+      device.browser = browserInfo.browser;
+    }
+    if (browserInfo.browser_version) {
+      device.browser_version = browserInfo.browser_version;
+    }
+    if (browserInfo.operating_system && !device.operating_system) {
+      device.operating_system = browserInfo.operating_system;
+    }
+    if (browserInfo.operating_system_version) {
+      device.operating_system_version = browserInfo.operating_system_version;
+    }
+    if (browserInfo.model) {
+      device.model = browserInfo.model;
+    }
+    if (browserInfo.brand) {
+      device.brand = browserInfo.brand;
+    }
+  }
+  
+  if (DEBUG_MODE && Object.keys(device).length > 0) {
+    console.log("Extracted device info:", JSON.stringify(device));
+  }
+  
+  return device;
+}
+
+/**
+ * Parse user agent to extract device information
+ * @param {string} userAgent - User agent string
+ * @returns {Object} Parsed device information
+ */
+function parseUserAgentForDevice(userAgent) {
+  const info = {};
+  
+  if (!userAgent) return info;
+  
+  // Extract browser information
+  if (/Chrome\/([0-9\.]+)/.test(userAgent)) {
+    info.browser = "Chrome";
+    info.browser_version = userAgent.match(/Chrome\/([0-9\.]+)/)[1];
+  } else if (/Firefox\/([0-9\.]+)/.test(userAgent)) {
+    info.browser = "Firefox";
+    info.browser_version = userAgent.match(/Firefox\/([0-9\.]+)/)[1];
+  } else if (/Safari\/([0-9\.]+)/.test(userAgent) && !/Chrome/.test(userAgent)) {
+    info.browser = "Safari";
+    info.browser_version = userAgent.match(/Version\/([0-9\.]+)/)?.[1] || "";
+  } else if (/Edge\/([0-9\.]+)/.test(userAgent)) {
+    info.browser = "Edge";
+    info.browser_version = userAgent.match(/Edge\/([0-9\.]+)/)[1];
+  }
+  
+  // Extract operating system
+  if (/Windows NT ([0-9\.]+)/.test(userAgent)) {
+    info.operating_system = "Windows";
+    info.operating_system_version = userAgent.match(/Windows NT ([0-9\.]+)/)[1];
+  } else if (/Mac OS X ([0-9_\.]+)/.test(userAgent)) {
+    info.operating_system = "Macintosh";
+    info.operating_system_version = userAgent.match(/Mac OS X ([0-9_\.]+)/)[1].replace(/_/g, '.');
+  } else if (/Android ([0-9\.]+)/.test(userAgent)) {
+    info.operating_system = "Android";
+    info.operating_system_version = userAgent.match(/Android ([0-9\.]+)/)[1];
+  } else if (/iPhone OS ([0-9_\.]+)/.test(userAgent)) {
+    info.operating_system = "iOS";
+    info.operating_system_version = userAgent.match(/iPhone OS ([0-9_\.]+)/)[1].replace(/_/g, '.');
+  } else if (/Linux/.test(userAgent)) {
+    info.operating_system = "Linux";
+  }
+  
+  // Extract device model and brand (mainly for mobile)
+  if (/iPhone/.test(userAgent)) {
+    info.brand = "Apple";
+    info.model = "iPhone";
+  } else if (/iPad/.test(userAgent)) {
+    info.brand = "Apple";
+    info.model = "iPad";
+  } else if (/Pixel ([0-9a-zA-Z\s]+)/.test(userAgent)) {
+    info.brand = "Google";
+    info.model = userAgent.match(/Pixel ([0-9a-zA-Z\s]+)/)[1].trim();
+  } else if (/Samsung/.test(userAgent)) {
+    info.brand = "Samsung";
+    const modelMatch = userAgent.match(/SM-([A-Z0-9]+)/);
+    if (modelMatch) {
+      info.model = modelMatch[1];
+    }
+  }
+  
+  return info;
+}
+
 
 /**
  * Get continent and subcontinent info based on country code

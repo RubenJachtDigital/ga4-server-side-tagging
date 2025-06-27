@@ -315,7 +315,7 @@
             // Handle our consent logic - ensure it runs
             self.log("🚀 Processing consent given...");
             setTimeout(function() {
-              self.handleConsentGiven();
+              self.handleConsentGiven('button_click');
             }, 50); // Small delay to ensure Iubenda has finished processing
           };
 
@@ -335,7 +335,7 @@
             // Handle our consent logic - ensure it runs
             self.log("🚀 Processing consent denied...");
             setTimeout(function() {
-              self.handleConsentDenied();
+              self.handleConsentDenied('button_click');
             }, 50); // Small delay to ensure Iubenda has finished processing
           };
 
@@ -355,7 +355,7 @@
             // This is triggered when consent is given for the first time
             self.log("🚀 Processing first consent given...");
             setTimeout(function() {
-              self.handleConsentGiven();
+              self.handleConsentGiven('button_click');
             }, 50);
           };
 
@@ -418,7 +418,7 @@
         setTimeout(function() {
           if (!self.consentProcessed) {
             self.log("📝 Processing accept via button fallback");
-            self.handleConsentGiven();
+            self.handleConsentGiven('button_click');
           } else {
             self.log("ℹ️ Accept already processed via callback, skipping fallback");
           }
@@ -436,7 +436,7 @@
         setTimeout(function() {
           if (!self.consentProcessed) {
             self.log("📝 Processing reject via button fallback");
-            self.handleConsentDenied();
+            self.handleConsentDenied('button_click');
           } else {
             self.log("ℹ️ Reject already processed via callback, skipping fallback");
           }
@@ -533,10 +533,10 @@
             // Process the consent status
             if (consentStatus && consentStatus.consent === true) {
               self.log("✅ Existing Iubenda consent found (granted)");
-              self.handleConsentGiven();
+              self.handleConsentGiven('button_click');
             } else if (consentStatus && consentStatus.consent === false) {
               self.log("❌ Existing Iubenda consent found (denied)");
-              self.handleConsentDenied();
+              self.handleConsentDenied('button_click');
             } else {
               self.log("⏳ No existing Iubenda consent found, waiting for user interaction");
             }
@@ -576,7 +576,7 @@
           
           // Add small delay to ensure consent UI has updated
           setTimeout(function() {
-            self.handleConsentGiven();
+            self.handleConsentGiven('button_click');
           }, 100);
         });
         
@@ -593,7 +593,7 @@
           
           // Add small delay to ensure consent UI has updated
           setTimeout(function() {
-            self.handleConsentDenied();
+            self.handleConsentDenied('button_click');
           }, 100);
         });
         
@@ -624,9 +624,9 @@
             
             setTimeout(function() {
               if (selector === self.config.acceptSelector) {
-                self.handleConsentGiven();
+                self.handleConsentGiven('button_click');
               } else {
-                self.handleConsentDenied();
+                self.handleConsentDenied('button_click');
               }
             }, 100);
           });
@@ -657,6 +657,10 @@
           self.consentGiven = true;
           self.consentStatus = storedConsent;
           self.consentProcessed = true; // NEW: Mark as processed
+          // Add consent_reason if not present
+          if (!storedConsent.consent_reason) {
+            storedConsent.consent_reason = 'button_click';
+          }
           self.applyConsent(storedConsent);
           self.enableTracking();
           self.processQueuedEvents();
@@ -697,10 +701,10 @@
           // Try to determine if it's accept or deny based on cookie value
           var normalizedValue = cookieValue.toLowerCase();
           if (normalizedValue.includes('accept') || normalizedValue.includes('true') || normalizedValue === '1' || normalizedValue === 'yes') {
-            this.handleConsentGiven();
+            this.handleConsentGiven('button_click');
             return;
           } else if (normalizedValue.includes('deny') || normalizedValue.includes('false') || normalizedValue === '0' || normalizedValue === 'no') {
-            this.handleConsentDenied();
+            this.handleConsentDenied('button_click');
             return;
           }
         }
@@ -752,10 +756,10 @@
         
         if (timeoutAction === 'accept') {
           self.log("⏰ Auto-accept timeout reached (" + self.config.defaultTimeout + "s) - accepting consent automatically");
-          self.handleConsentGiven();
+          self.handleConsentGiven('automatic_delay');
         } else {
           self.log("⏰ Auto-deny timeout reached (" + self.config.defaultTimeout + "s) - denying consent automatically");
-          self.handleConsentDenied();
+          self.handleConsentDenied('automatic_delay');
         }
       }, this.config.defaultTimeout * 1000);
       
@@ -789,8 +793,9 @@
 
     /**
      * Handle consent given - Allow updates from denied to granted, prevent duplicates
+     * @param {string} reason - How consent was obtained: 'button_click' or 'automatic_delay'
      */
-    handleConsentGiven: function () {
+    handleConsentGiven: function (reason = 'button_click') {
       // Prevent duplicate processing if consent is already GRANTED
       if (this.consentProcessed && this.consentGiven && this.consentStatus && this.consentStatus.analytics_storage === 'GRANTED') {
         this.log("⚠️ Consent already granted - ignoring duplicate consent given", {
@@ -820,6 +825,7 @@
         functionality_storage: 'GRANTED',
         personalization_storage: 'GRANTED',
         security_storage: 'GRANTED',
+        consent_reason: reason,
         timestamp: Date.now()
       };
 
@@ -843,8 +849,9 @@
 
     /**
      * Handle consent denied - Allow updates from granted to denied
+     * @param {string} reason - How consent was obtained: 'button_click' or 'automatic_delay'
      */
-    handleConsentDenied: function () {
+    handleConsentDenied: function (reason = 'button_click') {
       // Allow updates if consent was previously granted
       if (this.consentProcessed && this.consentGiven && this.consentStatus && this.consentStatus.analytics_storage === 'DENIED') {
         this.log("⚠️ Consent already denied - ignoring duplicate consent denied", {
@@ -871,6 +878,7 @@
         functionality_storage: 'DENIED',
         personalization_storage: 'DENIED',
         security_storage: 'GRANTED',
+        consent_reason: reason,
         timestamp: Date.now()
       };
 
@@ -1000,6 +1008,7 @@
           security_storage: "GRANTED",
           consent_mode: "DENIED",
           consent_timestamp: null,
+          consent_reason: "automatic_delay"
         };
       }
 
@@ -1013,6 +1022,7 @@
         security_storage: consent.security_storage || "GRANTED",
         consent_mode: this.getConsentMode(),
         consent_timestamp: consent.timestamp,
+        consent_reason: consent.consent_reason || "button_click"
       };
     },
 
@@ -1124,11 +1134,11 @@
      * Manual consent management methods
      */
     grantConsent: function () {
-      this.handleConsentGiven();
+      this.handleConsentGiven('button_click');
     },
 
     denyConsent: function () {
-      this.handleConsentDenied();
+      this.handleConsentDenied('button_click');
     },
 
     resetConsent: function () {

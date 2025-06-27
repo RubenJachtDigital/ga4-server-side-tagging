@@ -44,7 +44,7 @@
 
       // Log initialization
       this.log(
-        "%c GA4 Server-Side Tagging initialized v2 ",
+        "%c GA4 Server-Side Tagging initialized v3 ",
         "background: #4CAF50; color: white; font-size: 16px; font-weight: bold; padding: 8px 12px; border-radius: 4px;"
       );
     },
@@ -721,7 +721,7 @@
 
         conversionIds.forEach(function (id) {
           var trimmedId = id.trim();
-          $(`#gform_${trimmedId}`).on("submit", function () {
+          $(`#gform_${trimmedId}`).on("submit", function (event) {
             var formId = $(this).attr("id") || "unknown";
             var formAction = $(this).attr("action") || "unknown";
             var trackingData = {
@@ -1564,7 +1564,7 @@
       var self = this;
 
       if (self.config.yithRaqFormId) {
-        $(`#gform_${self.config.yithRaqFormId}`).on("submit", function () {
+        $(`#gform_${self.config.yithRaqFormId}`).on("submit", function (event) {
           self.log("request a quote form fired");
 
           // Check if we have quote data from the server
