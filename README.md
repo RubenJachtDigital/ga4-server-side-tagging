@@ -1,6 +1,6 @@
 # GA4 Server-Side Tagging for WordPress and WooCommerce
 
-A comprehensive WordPress plugin that provides advanced server-side tagging for Google Analytics 4 (GA4) with GDPR compliance, bot detection, A/B testing, and enterprise-level privacy features. Fully compatible with WordPress, WooCommerce, and optimized for Cloudflare hosting.
+A comprehensive WordPress plugin that provides advanced server-side tagging for Google Analytics 4 (GA4) with GDPR compliance, bot detection, A/B testing, click tracking, and enterprise-level privacy features. Fully compatible with WordPress, WooCommerce, and optimized for Cloudflare hosting.
 
 ## 🌟 Features
 
@@ -10,6 +10,7 @@ A comprehensive WordPress plugin that provides advanced server-side tagging for 
 - **Advanced attribution tracking** with UTM parameters and Google Ads integration
 - **Session management** with 30-minute timeout and automatic cleanup
 - **Real-time engagement tracking** with precise timing calculations
+- **API key authentication** for secure server-to-server communication
 
 ### Privacy & Compliance
 - **GDPR/CCPA compliant** with Google Consent Mode v2 integration
@@ -17,10 +18,12 @@ A comprehensive WordPress plugin that provides advanced server-side tagging for 
 - **Configurable data retention** (default: 24 hours, consent: 1 year)
 - **Consent withdrawal cleanup** with complete data removal
 - **IP-based location services** with privacy controls
+- **CORS security** with domain whitelisting
 
 ### Advanced Features
 - **Multi-layered bot detection** with behavioral analysis and scoring
 - **Complete A/B testing framework** with click tracking and GA4 integration
+- **Custom click tracking** with configurable CSS selectors and event naming
 - **Duplicate purchase prevention** for accurate e-commerce reporting
 - **Automatic data migration** from legacy storage systems
 - **Comprehensive debugging** and logging system
@@ -29,7 +32,16 @@ A comprehensive WordPress plugin that provides advanced server-side tagging for 
 - **Centralized storage management** with automatic expiration
 - **Multiple location API fallbacks** for reliable geolocation
 - **Event queuing system** for consent-pending events
+- **Rate limiting** and payload size validation
 - **Graceful degradation** when services are unavailable
+
+### Security Features
+- **API key authentication** with X-API-Key header support
+- **Domain origin validation** with referrer checking
+- **Rate limiting** (configurable requests per IP per minute)
+- **Payload size validation** (default: 50KB max)
+- **Bot detection and filtering** with multiple detection layers
+- **CORS protection** with explicit header allowlisting
 
 ## 📋 Requirements
 
@@ -56,40 +68,104 @@ A comprehensive WordPress plugin that provides advanced server-side tagging for 
 3. **Create API Secret**: Generate an API Secret in GA4 property settings → Data Streams → Web → Measurement Protocol API secrets
 4. **Configure Plugin**: Enter these values in the plugin settings
 
-### Advanced Backend Configuration
+### Cloudflare Worker Setup (Recommended)
 
-#### 🕐 **Data Retention Settings**
-Configure how long user data is stored:
+For optimal server-side tagging with enhanced bot protection and security:
 
-```php
-// In wp-config.php or theme functions.php
-add_filter('ga4_storage_expiration_hours', function($hours) {
-    return 48; // Store user data for 48 hours (default: 24)
-});
+1. **Create Cloudflare Worker**: Set up a new worker in your Cloudflare dashboard
+2. **Deploy Script**: Use the provided `cloudflare-worker-example.js`
+3. **Configure Credentials**: Replace placeholder values with your GA4 credentials
+4. **Set Worker URL**: Enter the worker URL in plugin settings
+5. **Generate API Key**: Click "Generate New Key" in WordPress admin and update worker
+6. **Enable Server-Side Tracking**: Toggle server-side option in admin
+
+**Worker Configuration Variables:**
+```javascript
+// In Cloudflare Worker - Update these values
+const GA4_MEASUREMENT_ID = 'G-XXXXXXXXXX'; // Your GA4 Measurement ID
+const GA4_API_SECRET = 'your-api-secret-here'; // Your GA4 API Secret
+const API_KEY = "api-key-from-wordpress-admin"; // Copy from WordPress admin
+const ALLOWED_DOMAINS = ["yourdomain.com", "www.yourdomain.com"]; // Your domains
+
+// Security Settings
+const RATE_LIMIT_REQUESTS = 100; // Max requests per IP per minute
+const RATE_LIMIT_WINDOW = 60; // Rate limit window in seconds
+const MAX_PAYLOAD_SIZE = 50000; // Max payload size in bytes (50KB)
+const REQUIRE_API_KEY = true; // Enable API key authentication
+const BOT_DETECTION_ENABLED = true; // Enable bot filtering
 ```
 
-#### 🧪 **A/B Testing Configuration**
+### A/B Testing Configuration
+
 Set up A/B tests through the admin interface:
 
 1. Navigate to **GA4 Tagging → A/B Tests**
 2. Enable A/B testing
 3. Add tests with configuration:
    - **Test Name**: Descriptive name for the test
-   - **Variant A CSS Class**: CSS selector for control group
-   - **Variant B CSS Class**: CSS selector for test group
+   - **Variant A CSS Selector**: CSS selector for control group (e.g., `.button-red`)
+   - **Variant B CSS Selector**: CSS selector for test group (e.g., `.button-blue`)
    - **Enabled**: Toggle test active/inactive
 
-**Example A/B Test Setup:**
+**Example A/B Test Configuration:**
 ```json
-{
-  "name": "Button Color Test",
-  "class_a": ".button-red",
-  "class_b": ".button-blue", 
-  "enabled": true
-}
+[
+  {
+    "name": "Button Color Test",
+    "class_a": ".button-red",
+    "class_b": ".button-blue", 
+    "enabled": true
+  },
+  {
+    "name": "CTA Position Test",
+    "class_a": ".cta-top",
+    "class_b": ".cta-bottom",
+    "enabled": true
+  }
+]
 ```
 
-#### 🛡️ **GDPR Consent Management**
+### Click Tracking Configuration
+
+Set up custom click tracking through the admin interface:
+
+1. Navigate to **GA4 Tagging → Click Tracking**
+2. Enable click tracking
+3. Add click tracks with configuration:
+   - **Event Name**: GA4 event name (automatically sanitized)
+   - **CSS Selector**: Target elements to track (e.g., `.download-btn`, `#contact-form`)
+   - **Enabled**: Toggle track active/inactive
+
+**Example Click Track Configuration:**
+```json
+[
+  {
+    "name": "PDF Download",
+    "selector": ".download-pdf",
+    "enabled": true
+  },
+  {
+    "name": "Newsletter Signup",
+    "selector": "#newsletter-form button[type='submit']",
+    "enabled": true
+  },
+  {
+    "name": "Social Share",
+    "selector": ".social-share-btn",
+    "enabled": true
+  }
+]
+```
+
+**Event Name Validation Rules:**
+- Must be 40 characters or less
+- Can only contain letters, numbers, and underscores
+- Cannot start with a number
+- Automatically converted to lowercase
+- Invalid characters replaced with underscores
+
+### GDPR Consent Management
+
 Configure consent management integration:
 
 **Iubenda Integration:**
@@ -115,53 +191,6 @@ add_filter('ga4_consent_storage_days', function($days) {
 });
 ```
 
-#### 🤖 **Bot Detection Configuration**
-Customize bot detection sensitivity:
-
-```php
-// Adjust bot detection threshold
-add_filter('ga4_bot_detection_threshold', function($threshold) {
-    return 0.7; // 70% confidence threshold (default: 0.8)
-});
-
-// Custom bot patterns
-add_filter('ga4_custom_bot_patterns', function($patterns) {
-    $patterns[] = '/custombot/i';
-    return $patterns;
-});
-```
-
-#### 🌍 **Location Services Configuration**
-Configure IP-based location detection:
-
-```php
-// Disable location services entirely
-add_filter('ga4_enable_location_services', '__return_false');
-
-// Custom location API timeout
-add_filter('ga4_location_api_timeout', function($timeout) {
-    return 5000; // 5 seconds (default: 3000ms)
-});
-```
-
-### Cloudflare Worker Setup (Recommended)
-
-For optimal server-side tagging with enhanced bot protection:
-
-1. **Create Cloudflare Worker**: Set up a new worker in your Cloudflare dashboard
-2. **Deploy Script**: Use the provided `cloudflare-worker-example.js`
-3. **Configure Credentials**: Replace placeholder values with your GA4 credentials
-4. **Set Worker URL**: Enter the worker URL in plugin settings
-5. **Enable Server-Side Tracking**: Toggle server-side option in admin
-
-**Worker Environment Variables:**
-```javascript
-// In Cloudflare Worker
-const GA4_MEASUREMENT_ID = 'G-XXXXXXXXXX';
-const GA4_API_SECRET = 'your-api-secret';
-const GA4_DEBUG_MODE = false; // Set to true for testing
-```
-
 ## 🎯 Usage & API Reference
 
 ### Automatic Tracking
@@ -172,6 +201,43 @@ The plugin automatically tracks:
 - **User interactions**: outbound links, form submissions, file downloads
 - **Engagement metrics**: scroll depth, time on page, video views
 - **A/B test interactions** with comprehensive variant tracking
+- **Custom click events** based on configured selectors
+
+### A/B Testing Events
+
+When A/B tests are configured, the plugin automatically tracks:
+- `ab_test_variant_a_click` - When variant A is clicked
+- `ab_test_variant_b_click` - When variant B is clicked
+
+**Event Parameters:**
+```javascript
+{
+  test_name: "Button Color Test",
+  variant: "A", // or "B"
+  element_selector: ".button-red",
+  element_text: "Click Me",
+  element_id: "main-cta",
+  session_duration_seconds: 45
+}
+```
+
+### Click Tracking Events
+
+Custom click events are tracked with the configured event name:
+- Event names are automatically sanitized and validated
+- Rich context data is included with each click
+
+**Event Parameters:**
+```javascript
+{
+  click_selector: ".download-pdf",
+  click_element_tag: "a",
+  click_element_text: "Download PDF",
+  click_element_id: "pdf-download-1",
+  click_element_class: "download-btn primary",
+  session_duration_seconds: 120
+}
+```
 
 ### Custom Event Tracking
 
@@ -197,6 +263,13 @@ GA4ServerSideTagging.trackEvent('add_to_cart', {
         quantity: 1,
         price: 29.99
     }]
+});
+
+// A/B test custom tracking
+GA4ServerSideTagging.trackEvent('ab_test_conversion', {
+    test_name: 'Button Color Test',
+    variant: 'A',
+    conversion_value: 99.99
 });
 ```
 
@@ -243,6 +316,32 @@ const gclid = GA4Utils.gclid.get();
 const userInfo = GA4Utils.user.getInfo(configData);
 ```
 
+#### 🧪 **A/B Testing**
+```javascript
+// A/B tests are automatically initialized from admin configuration
+// Manual test tracking (advanced usage)
+GA4ServerSideTagging.trackABTestEvent({
+    name: 'Button Color Test',
+    class_a: '.button-red',
+    class_b: '.button-blue'
+}, 'A', element);
+
+// Check if A/B testing is enabled
+console.log('A/B Testing enabled:', GA4ServerSideTagging.config.abTestsEnabled);
+console.log('A/B Tests config:', GA4ServerSideTagging.config.abTestsConfig);
+```
+
+#### 🎯 **Click Tracking**
+```javascript
+// Click tracking is automatically set up from admin configuration
+// Manual click event tracking (advanced usage)
+GA4ServerSideTagging.trackClickEvent('custom_click', '.my-selector', element);
+
+// Check if click tracking is enabled
+console.log('Click tracking enabled:', GA4ServerSideTagging.config.clickTracksEnabled);
+console.log('Click tracks config:', GA4ServerSideTagging.config.clickTracksConfig);
+```
+
 #### 🌍 **Location Services**
 ```javascript
 // Get user location (cached or fresh)
@@ -287,56 +386,6 @@ const canTrackUser = GA4Utils.consent.shouldTrackUserData();
 const canTrackAds = GA4Utils.consent.shouldTrackAdvertisingData();
 ```
 
-#### 🧪 **A/B Testing**
-```javascript
-// Initialize A/B tests (called automatically)
-GA4Utils.abTesting.init(config);
-
-// Manual test setup (advanced usage)
-GA4Utils.abTesting.setupTest({
-    name: 'Button Color Test',
-    class_a: '.button-red',
-    class_b: '.button-blue',
-    enabled: true
-});
-
-// Track custom A/B test interaction
-GA4Utils.abTesting.track(testConfig, 'variant_a', element);
-```
-
-#### 📱 **Device & Browser Detection**
-```javascript
-// Get comprehensive device information
-const deviceInfo = GA4Utils.device.parseUserAgent();
-// Returns: { browser_name, device_type, user_agent, is_mobile, is_tablet, is_desktop }
-
-// Get screen resolution
-const resolution = GA4Utils.device.getScreenResolution(); // "1920x1080"
-
-// Anonymize user agent for privacy
-const anonymized = GA4Utils.device.anonymizeUserAgent(userAgent);
-```
-
-#### 🛠️ **Utility Functions**
-```javascript
-// Generate unique IDs
-const uniqueId = GA4Utils.helpers.generateUniqueId();
-
-// Debug logging (only when debug mode enabled)
-GA4Utils.helpers.log('Debug message', data, config, '[Custom Prefix]');
-
-// Social platform detection
-const platform = GA4Utils.helpers.getSocialPlatform(url); // 'facebook', 'twitter', etc.
-
-// Performance helpers
-const debouncedFn = GA4Utils.helpers.debounce(myFunction, 300);
-const throttledFn = GA4Utils.helpers.throttle(myFunction, 100);
-
-// Timezone and location helpers
-const timezone = GA4Utils.helpers.getTimezone();
-const locationFromTz = GA4Utils.helpers.getLocationFromTimezone(timezone);
-```
-
 ### WordPress Hooks & Filters
 
 #### Action Hooks
@@ -368,24 +417,95 @@ add_filter('ga4_is_bot', function($is_bot, $user_agent, $ip) {
     return $is_bot;
 }, 10, 3);
 
-// Modify storage expiration
-add_filter('ga4_storage_expiration_hours', function($hours) {
-    return 48; // Custom expiration time
+// Modify A/B test configuration
+add_filter('ga4_ab_tests_config', function($tests) {
+    // Add or modify A/B tests programmatically
+    $tests[] = [
+        'name' => 'Programmatic Test',
+        'class_a' => '.variant-a',
+        'class_b' => '.variant-b',
+        'enabled' => true
+    ];
+    return $tests;
 });
 
-// Custom consent timeout
-add_filter('ga4_consent_timeout_seconds', function($seconds) {
-    return 30; // 30 seconds auto-accept timeout
+// Modify click tracking configuration
+add_filter('ga4_click_tracks_config', function($tracks) {
+    // Add or modify click tracks programmatically
+    $tracks[] = [
+        'name' => 'footer_link_click',
+        'selector' => 'footer a',
+        'enabled' => true
+    ];
+    return $tracks;
 });
 ```
 
 ## 🔧 Advanced Configuration Examples
 
-### Custom E-commerce Integration
+### Custom A/B Test Integration
+```php
+// Add A/B test configuration programmatically
+add_filter('ga4_ab_tests_config', function($tests) {
+    if (is_front_page()) {
+        $tests[] = [
+            'name' => 'Homepage Hero Test',
+            'class_a' => '.hero-variant-a',
+            'class_b' => '.hero-variant-b',
+            'enabled' => true
+        ];
+    }
+    return $tests;
+});
+
+// Track A/B test conversions
+add_action('woocommerce_thankyou', function($order_id) {
+    if ($order_id) {
+        // Track conversion for A/B test
+        ?>
+        <script>
+        if (typeof GA4ServerSideTagging !== 'undefined') {
+            GA4ServerSideTagging.trackEvent('ab_test_conversion', {
+                test_name: 'Checkout Button Test',
+                conversion_value: <?php echo wc_get_order($order_id)->get_total(); ?>
+            });
+        }
+        </script>
+        <?php
+    }
+});
+```
+
+### Custom Click Tracking
+```php
+// Add click tracking for specific pages
+add_filter('ga4_click_tracks_config', function($tracks) {
+    if (is_product()) {
+        $tracks[] = [
+            'name' => 'product_image_click',
+            'selector' => '.woocommerce-product-gallery img',
+            'enabled' => true
+        ];
+    }
+    
+    if (is_checkout()) {
+        $tracks[] = [
+            'name' => 'checkout_payment_method_change',
+            'selector' => 'input[name="payment_method"]',
+            'enabled' => true
+        ];
+    }
+    
+    return $tracks;
+});
+```
+
+### Enhanced E-commerce Integration
 ```php
 // Custom product data enhancement
 add_filter('ga4_product_data', function($product_data, $product) {
     $product_data['custom_attribute'] = get_post_meta($product->get_id(), 'custom_field', true);
+    $product_data['stock_level'] = $product->get_stock_quantity();
     return $product_data;
 }, 10, 2);
 
@@ -393,38 +513,34 @@ add_filter('ga4_product_data', function($product_data, $product) {
 add_filter('ga4_purchase_data', function($purchase_data, $order) {
     $purchase_data['shipping_method'] = $order->get_shipping_method();
     $purchase_data['payment_method'] = $order->get_payment_method();
+    $purchase_data['customer_type'] = $order->get_user_id() ? 'returning' : 'new';
     return $purchase_data;
 }, 10, 2);
 ```
 
-### Advanced Bot Detection
-```php
-// Custom bot detection rules
-add_filter('ga4_bot_detection_rules', function($rules) {
-    $rules['custom_bots'] = [
-        'patterns' => ['/custombot/i', '/scraperbot/i'],
-        'ips' => ['192.168.1.100', '10.0.0.50'],
-        'score_weight' => 0.9
-    ];
-    return $rules;
-});
-```
+## 🔒 Security & Privacy Features
 
-### Performance Optimization
-```php
-// Disable location services for faster loading
-add_filter('ga4_enable_location_services', '__return_false');
+### Server-Side Security (Cloudflare Worker)
+- **API Key Authentication**: Secure X-API-Key header validation
+- **Domain Whitelisting**: Only allowed domains can send events
+- **Rate Limiting**: Configurable requests per IP per time window
+- **Payload Size Validation**: Prevents oversized requests
+- **CORS Protection**: Explicit header allowlisting
+- **Bot Detection**: Multi-layered filtering with scoring
 
-// Reduce bot detection intensity
-add_filter('ga4_bot_detection_level', function() {
-    return 'basic'; // 'basic', 'standard', 'aggressive'
-});
+### Client-Side Privacy
+- **Consent Mode v2**: Google's latest consent framework
+- **Data Minimization**: Only collect necessary data
+- **Automatic Expiration**: Configurable data retention periods
+- **IP Anonymization**: Optional IP-based location disabling
+- **Session-only Tracking**: Privacy mode with session-based IDs
 
-// Custom cache durations
-add_filter('ga4_location_cache_duration', function() {
-    return HOUR_IN_SECONDS * 6; // 6 hours
-});
-```
+### GDPR Compliance Features
+- **Automatic consent detection** with major consent management platforms
+- **Data minimization** with configurable retention periods  
+- **Right to erasure** with complete data cleanup functions
+- **Consent granularity** for analytics vs advertising data
+- **Transparent data collection** with storage summary functions
 
 ## 🐛 Debugging & Troubleshooting
 
@@ -432,9 +548,36 @@ add_filter('ga4_location_cache_duration', function() {
 1. **Enable Debug Mode**: Check the debug option in plugin settings
 2. **View Console Logs**: Open browser developer tools → Console tab
 3. **Check Admin Logs**: Navigate to GA4 Tagging → Logs section
-4. **Test Configuration**: Use `GA4Utils.storage.testNewStorage()` in console
+4. **Test Configuration**: Use debug functions in console
 
 ### Common Issues
+
+**A/B Testing Not Working:**
+```javascript
+// Check if A/B testing is enabled
+console.log('A/B Testing Config:', {
+    enabled: window.ga4ServerSideTagging.abTestsEnabled,
+    config: window.ga4ServerSideTagging.abTestsConfig
+});
+
+// Check if test elements exist
+console.log('Test Elements:', {
+    variantA: document.querySelectorAll('.button-red').length,
+    variantB: document.querySelectorAll('.button-blue').length
+});
+```
+
+**Click Tracking Not Working:**
+```javascript
+// Check click tracking configuration
+console.log('Click Tracking Config:', {
+    enabled: window.ga4ServerSideTagging.clickTracksEnabled,
+    config: window.ga4ServerSideTagging.clickTracksConfig
+});
+
+// Test click tracking manually
+GA4ServerSideTagging.trackClickEvent('test_click', '.my-button', document.querySelector('.my-button'));
+```
 
 **Events Not Sending:**
 ```javascript
@@ -448,44 +591,13 @@ console.log('Client ID:', GA4Utils.clientId.get());
 console.log('Bot Detection:', GA4Utils.botDetection.isBot(userAgent, session, behavior));
 ```
 
-**Storage Issues:**
-```javascript
-// Test storage system
-GA4Utils.storage.testNewStorage();
+**Server-Side Issues:**
+- Check Cloudflare Worker logs for API key validation errors
+- Verify CORS headers include `X-API-Key`
+- Ensure worker API key matches WordPress generated key
+- Check rate limiting and domain whitelisting
 
-// Check data expiration
-console.log('User Data:', GA4Utils.storage.getUserData());
-console.log('Consent Data:', GA4Utils.storage.getConsentData());
-```
-
-**A/B Testing Not Working:**
-```javascript
-// Verify A/B test configuration
-console.log('A/B Tests Config:', window.ga4ServerSideTagging.abTestsConfig);
-
-// Check if elements exist
-console.log('Test Elements:', document.querySelectorAll('.button-red, .button-blue'));
-```
-
-### Performance Monitoring
-```javascript
-// Monitor storage usage
-const storageUsage = GA4Utils.helpers.getStoredDataSummary();
-console.log('Storage Summary:', storageUsage);
-
-// Check cache performance
-console.log('Location Cache Age:', GA4Utils.location.getCacheAge());
-console.log('Session Duration:', GA4Utils.session.get().duration);
-```
-
-## 📊 Data Privacy & Compliance
-
-### GDPR Compliance Features
-- **Automatic consent detection** with major consent management platforms
-- **Data minimization** with configurable retention periods  
-- **Right to erasure** with complete data cleanup functions
-- **Consent granularity** for analytics vs advertising data
-- **Transparent data collection** with storage summary functions
+## 📊 Data Categories & Retention
 
 ### Data Categories Tracked
 1. **Essential Data** (always collected):
@@ -498,6 +610,8 @@ console.log('Session Duration:', GA4Utils.session.get().duration);
    - Detailed device information
    - Precise location data
    - Attribution and campaign data
+   - A/B test variant assignments
+   - Click tracking data
 
 3. **Advertising Data** (requires separate consent):
    - Google Click IDs (gclid)
@@ -509,61 +623,28 @@ console.log('Session Duration:', GA4Utils.session.get().duration);
 - **Session Data**: 30 minutes after last activity
 - **Consent Data**: 1 year (with manual override)
 - **Purchase Tracking**: 30 minutes (prevents duplicates)
+- **A/B Test Data**: Same as user data retention
+- **Click Tracking Data**: Same as user data retention
 
-## 🚀 Performance Optimization
+## 📈 Performance & Analytics Enhancement
 
-### Caching Strategy
-- **Location Data**: Cached with configurable expiration
-- **User Agent Parsing**: Cached per session
-- **Attribution Data**: Persistent until session expires
-- **Bot Detection**: Results cached to avoid repeated calculations
+### A/B Testing Analytics
+- Automatic GA4 event tracking for variant interactions
+- Session-based variant assignment consistency
+- Conversion tracking with test attribution
+- Statistical significance calculations (external tools recommended)
 
-### Async Loading
-- All external API calls are asynchronous
-- Event queuing prevents blocking during consent flows
-- Graceful degradation when services are unavailable
-
-### Resource Management
-- Automatic cleanup of expired data
-- Efficient storage with minimal localStorage usage
-- Debounced and throttled event handlers
-- Lazy loading of non-essential features
-
-## 📈 Analytics Enhancement
+### Click Tracking Analytics
+- Comprehensive click context data
+- Element identification and text content
+- Session duration at time of click
+- Integration with GA4 conversion funnels
 
 ### Enhanced Attribution
 - **First-party data** prioritized over third-party cookies
 - **Session continuity** across page loads
 - **Cross-domain tracking** support
-- **Offline conversion** import capability
-
-### Custom Dimensions
-The plugin automatically sets up custom dimensions for:
-- Bot detection score
-- Consent status (granted/denied)
-- A/B test variants
-- Session type (new/returning)
-- Traffic quality score
-
-### Enhanced E-commerce
-- **Product interaction tracking** (views, clicks, add to cart)
-- **Checkout funnel analysis** with step-by-step tracking
-- **Purchase attribution** with proper source assignment
-- **Refund tracking** and inventory management integration
-
-## 🔄 Migration & Updates
-
-### Automatic Data Migration
-The plugin automatically migrates data from:
-- Legacy GA tracking plugins
-- Old storage formats within the same plugin
-- Standard Google Analytics (UA) configurations
-
-### Update Process
-1. **Backup**: Plugin automatically backs up settings before updates
-2. **Migration**: Data structures are automatically updated
-3. **Verification**: Built-in tests verify data integrity after updates
-4. **Rollback**: Previous configurations can be restored if needed
+- **A/B test attribution** for conversion analysis
 
 ## 🆘 Support & Resources
 
@@ -571,16 +652,14 @@ The plugin automatically migrates data from:
 - **API Reference**: Complete function documentation in code comments
 - **WordPress Hooks**: All available actions and filters documented
 - **Configuration Examples**: Real-world implementation samples
+- **A/B Testing Guide**: Best practices for test setup and analysis
+- **Click Tracking Guide**: Event naming and selector optimization
 
 ### Troubleshooting Tools
-- **Debug Console**: `GA4Utils.storage.testNewStorage()`
+- **Debug Console**: Built-in debug mode with comprehensive logging
 - **Data Inspector**: `GA4Utils.helpers.getStoredDataSummary()`
 - **Performance Monitor**: Built-in timing and performance metrics
-
-### Community & Support
-- **GitHub Repository**: [Link to repository for issues and contributions]
-- **Documentation Site**: [Link to comprehensive documentation]
-- **Community Forum**: [Link to support forum]
+- **Test Validation**: Automatic event name sanitization and validation
 
 ## 📄 License
 
