@@ -71,6 +71,16 @@ class GA4_Server_Side_Tagging_Admin
             GA4_SERVER_SIDE_TAGGING_VERSION,
             false
         );
+        
+        // Localize script for AJAX
+        wp_localize_script(
+            'ga4-server-side-tagging-admin',
+            'ga4AdminAjax',
+            array(
+                'ajax_url' => admin_url('admin-ajax.php'),
+                'nonce' => wp_create_nonce('ga4_generate_api_key')
+            )
+        );
     }
 
     /**
@@ -516,6 +526,14 @@ class GA4_Server_Side_Tagging_Admin
         $track_logged_in_users = get_option('ga4_track_logged_in_users', true);
         $ecommerce_tracking = get_option('ga4_ecommerce_tracking', true);
         $cloudflare_worker_url = get_option('ga4_cloudflare_worker_url', '');
+        $worker_api_key = get_option('ga4_worker_api_key', '');
+        
+        // Generate API key if not set
+        if (empty($worker_api_key)) {
+            $worker_api_key = $this->generate_api_key();
+            update_option('ga4_worker_api_key', $worker_api_key);
+        }
+        
         $yith_raq_form_id = get_option('ga4_yith_raq_form_id', '');
         $conversion_form_ids = get_option('ga4_conversion_form_ids', '');
         
@@ -597,6 +615,10 @@ class GA4_Server_Side_Tagging_Admin
 
         if (isset($_POST['ga4_cloudflare_worker_url'])) {
             update_option('ga4_cloudflare_worker_url', esc_url_raw(wp_unslash($_POST['ga4_cloudflare_worker_url'])));
+        }
+
+        if (isset($_POST['ga4_worker_api_key'])) {
+            update_option('ga4_worker_api_key', sanitize_text_field(wp_unslash($_POST['ga4_worker_api_key'])));
         }
 
         if (isset($_POST['ga4_yith_raq_form_id'])) {
@@ -781,13 +803,20 @@ class GA4_Server_Side_Tagging_Admin
                 )
             );
 
+            // Get API key for worker authentication
+            $worker_api_key = get_option('ga4_worker_api_key', '');
+            $headers = array('Content-Type' => 'application/json');
+            if (!empty($worker_api_key)) {
+                $headers['X-API-Key'] = $worker_api_key;
+            }
+
             $cloudflare_response = wp_remote_post($cloudflare_worker_url, array(
                 'method' => 'POST',
                 'timeout' => 5,
                 'redirection' => 5,
                 'httpversion' => '1.1',
                 'blocking' => true,
-                'headers' => array('Content-Type' => 'application/json'),
+                'headers' => $headers,
                 'body' => wp_json_encode($cloudflare_payload),
                 'cookies' => array(),
             ));
@@ -1072,6 +1101,15 @@ class GA4_Server_Side_Tagging_Admin
         // Log the payload
         $this->logger->log_data($payload, 'Test event payload');
 
+        // Prepare headers (add API key if using Cloudflare Worker)
+        $headers = array('Content-Type' => 'application/json');
+        if (!empty($cloudflare_worker_url)) {
+            $worker_api_key = get_option('ga4_worker_api_key', '');
+            if (!empty($worker_api_key)) {
+                $headers['X-API-Key'] = $worker_api_key;
+            }
+        }
+
         // Send the request
         $response = wp_remote_post($endpoint, array(
             'method' => 'POST',
@@ -1079,7 +1117,7 @@ class GA4_Server_Side_Tagging_Admin
             'redirection' => 5,
             'httpversion' => '1.1',
             'blocking' => true,
-            'headers' => array('Content-Type' => 'application/json'),
+            'headers' => $headers,
             'body' => wp_json_encode($payload),
             'cookies' => array(),
         ));
@@ -1113,6 +1151,58 @@ class GA4_Server_Side_Tagging_Admin
                 'message' => 'Error: Received response code ' . $response_code . '. Check the logs for details.',
                 'response' => $response_body
             ));
+        }
+    }
+
+    /**
+     * Generate a secure random API key
+     *
+     * @return string Generated API key
+     */
+    private function generate_api_key()
+    {
+        // Generate a secure 32-character API key
+        if (function_exists('random_bytes')) {
+            return bin2hex(random_bytes(16));
+        } elseif (function_exists('openssl_random_pseudo_bytes')) {
+            return bin2hex(openssl_random_pseudo_bytes(16));
+        } else {
+            // Fallback for older PHP versions
+            return substr(str_shuffle('abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'), 0, 32);
+        }
+    }
+
+    /**
+     * AJAX handler for generating a new API key
+     */
+    public function ajax_generate_api_key()
+    {
+        // Check nonce for security
+        if (!check_ajax_referer('ga4_generate_api_key', 'nonce', false)) {
+            wp_send_json_error(array('message' => 'Security check failed'));
+            return;
+        }
+
+        // Check user permissions
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error(array('message' => 'Insufficient permissions'));
+            return;
+        }
+
+        try {
+            // Generate new API key
+            $new_api_key = $this->generate_api_key();
+            
+            // Save it to options
+            update_option('ga4_worker_api_key', $new_api_key);
+            
+            // Return success response
+            wp_send_json_success(array(
+                'api_key' => $new_api_key,
+                'message' => 'New API key generated successfully!'
+            ));
+        } catch (Exception $e) {
+            wp_send_json_error(array('message' => 'Error generating API key: ' . $e->getMessage()));
         }
     }
 }

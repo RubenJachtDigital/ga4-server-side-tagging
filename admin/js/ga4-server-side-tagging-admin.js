@@ -285,4 +285,120 @@
         console.log('Updated click tracks config:', configJson);
     }
 
+    // API Key generation - Multiple approaches for reliability
+    $(document).on('click', '#generate_api_key', function(e) {
+        e.preventDefault();
+        
+        console.log('Generate API Key button clicked'); // Debug log
+        
+        var $button = $(this);
+        var $input = $('#ga4_worker_api_key');
+        
+        // Check if input field exists
+        if ($input.length === 0) {
+            console.error('API key input field not found!');
+            alert('Error: Could not find API key input field. Please refresh the page and try again.');
+            return;
+        }
+        
+        // Disable button to prevent multiple clicks
+        $button.prop('disabled', true).text('Generating...');
+        
+        // Remove any existing notice
+        $('#api-key-generated-notice').remove();
+        
+        // Try AJAX approach first (saves to database)
+        if (typeof ga4AdminAjax !== 'undefined') {
+            console.log('Using AJAX approach'); // Debug log
+            
+            $.ajax({
+                url: ga4AdminAjax.ajax_url,
+                type: 'POST',
+                data: {
+                    action: 'ga4_generate_api_key',
+                    nonce: ga4AdminAjax.nonce
+                },
+                success: function(response) {
+                    console.log('AJAX response:', response); // Debug log
+                    
+                    if (response.success) {
+                        $input.val(response.data.api_key);
+                        showSuccessNotice($button, 'New API key generated and saved! Update your Cloudflare Worker with this key.');
+                    } else {
+                        console.error('AJAX error:', response.data.message);
+                        // Fallback to client-side generation
+                        generateClientSideKey($input, $button);
+                    }
+                },
+                error: function(xhr, status, error) {
+                    console.error('AJAX request failed:', error);
+                    // Fallback to client-side generation
+                    generateClientSideKey($input, $button);
+                },
+                complete: function() {
+                    $button.prop('disabled', false).text('Generate New Key');
+                }
+            });
+        } else {
+            // Fallback to client-side generation
+            generateClientSideKey($input, $button);
+            $button.prop('disabled', false).text('Generate New Key');
+        }
+    });
+    
+    // Client-side key generation function
+    function generateClientSideKey($input, $button) {
+        try {
+            console.log('Using client-side generation'); // Debug log
+            
+            // Generate a random 32-character API key
+            var chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+            var apiKey = '';
+            for (var i = 0; i < 32; i++) {
+                apiKey += chars.charAt(Math.floor(Math.random() * chars.length));
+            }
+            
+            console.log('Generated API Key (client-side):', apiKey); // Debug log
+            
+            $input.val(apiKey);
+            showSuccessNotice($button, 'New API key generated! Remember to save settings and update your Cloudflare Worker.');
+            
+        } catch (error) {
+            console.error('Error generating API key:', error);
+            showErrorNotice($button, 'Error generating API key: ' + error.message);
+        }
+    }
+    
+    // Show success notice
+    function showSuccessNotice($button, message) {
+        var notice = '<div id="api-key-generated-notice" class="notice notice-success inline" style="margin-left: 10px; padding: 5px 10px; display: inline-block;">' +
+            '<p style="margin: 0;"><strong>✓ ' + message + '</strong></p>' +
+            '</div>';
+        
+        $button.after(notice);
+        
+        // Remove the notice after 8 seconds
+        setTimeout(function() {
+            $('#api-key-generated-notice').fadeOut(500, function() {
+                $(this).remove();
+            });
+        }, 8000);
+    }
+    
+    // Show error notice
+    function showErrorNotice($button, message) {
+        var notice = '<div id="api-key-generated-notice" class="notice notice-error inline" style="margin-left: 10px; padding: 5px 10px; display: inline-block;">' +
+            '<p style="margin: 0;"><strong>✗ ' + message + '</strong></p>' +
+            '</div>';
+        
+        $button.after(notice);
+        
+        // Remove the notice after 10 seconds
+        setTimeout(function() {
+            $('#api-key-generated-notice').fadeOut(500, function() {
+                $(this).remove();
+            });
+        }, 10000);
+    }
+
 })( jQuery ); 

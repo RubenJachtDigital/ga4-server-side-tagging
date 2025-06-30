@@ -93,6 +93,9 @@ class GA4_Server_Side_Tagging
 
         // Add AJAX handler for test event
         $this->loader->add_action('wp_ajax_ga4_test_event', $plugin_admin, 'handle_test_event');
+        
+        // Add AJAX handler for generating API key
+        $this->loader->add_action('wp_ajax_ga4_generate_api_key', $plugin_admin, 'ajax_generate_api_key');
     }
 
     /**

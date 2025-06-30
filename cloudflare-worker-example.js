@@ -18,6 +18,14 @@ const GA4_API_SECRET = "xx"; // Your GA4 API Secret
 const BOT_DETECTION_ENABLED = true; // Set to false to disable bot filtering
 const BOT_LOG_ENABLED = true; // Set to false to disable bot logging
 
+// Security Configuration
+const ALLOWED_DOMAINS = ["computertraining.nl", "www.computertraining.nl"]; // Add your allowed domains
+const RATE_LIMIT_REQUESTS = 100; // Max requests per IP per minute
+const RATE_LIMIT_WINDOW = 60; // Rate limit window in seconds
+const MAX_PAYLOAD_SIZE = 50000; // Max payload size in bytes (50KB)
+const REQUIRE_API_KEY = true; // Set to true to require API key authentication
+const API_KEY = "api-key-from-wordpress-admin"; // API key from WordPress admin
+
 /**
  * =============================================================================
  * GDPR CONSENT HANDLING
@@ -606,7 +614,7 @@ function checkEventData(payload) {
   }
 
   // Check for user agent in params and validate it
-  var userAgent = getUserAgent(payload, { headers: { get: () => '' } });
+  var userAgent = getUserAgent(payload, null);
   if (/webdriver|automation|applebot|bot|crawl|spider/i.test(userAgent)) {
     suspiciousPatterns.push('bot_user_agent_in_params');
   }
@@ -665,6 +673,172 @@ function logBotDetection(detection, request, payload) {
 
 /**
  * =============================================================================
+ * SECURITY FUNCTIONS
+ * =============================================================================
+ */
+
+/**
+ * Validate the request origin against allowed domains
+ * @param {Request} request - The incoming request
+ * @returns {Object} Validation result
+ */
+function validateOrigin(request) {
+  const origin = request.headers.get("Origin");
+  const referer = request.headers.get("Referer");
+  
+  // Check Origin header first
+  if (origin) {
+    try {
+      const originDomain = new URL(origin).hostname.toLowerCase();
+      const isAllowed = ALLOWED_DOMAINS.some(domain => 
+        originDomain === domain || originDomain.endsWith('.' + domain)
+      );
+      
+      if (isAllowed) {
+        return { valid: true, source: "origin", domain: originDomain };
+      }
+    } catch (e) {
+      return { valid: false, reason: "invalid_origin_format", value: origin };
+    }
+  }
+  
+  // Fallback to Referer header
+  if (referer) {
+    try {
+      const refererDomain = new URL(referer).hostname.toLowerCase();
+      const isAllowed = ALLOWED_DOMAINS.some(domain => 
+        refererDomain === domain || refererDomain.endsWith('.' + domain)
+      );
+      
+      if (isAllowed) {
+        return { valid: true, source: "referer", domain: refererDomain };
+      }
+    } catch (e) {
+      return { valid: false, reason: "invalid_referer_format", value: referer };
+    }
+  }
+  
+  return { valid: false, reason: "no_valid_origin_or_referer" };
+}
+
+/**
+ * Rate limiting using memory-based storage
+ * @param {Request} request - The incoming request
+ * @returns {Promise<Object>} Rate limit result
+ */
+async function checkRateLimit(request) {
+  const clientIP = request.headers.get('CF-Connecting-IP') || 
+                   request.headers.get('X-Forwarded-For') || 
+                   'unknown';
+  
+  const now = Math.floor(Date.now() / 1000);
+  const windowStart = now - RATE_LIMIT_WINDOW;
+  const key = `rate_limit:${clientIP}:${Math.floor(now / RATE_LIMIT_WINDOW)}`;
+  
+  // Memory-based rate limiting (resets on worker restart)
+  if (typeof globalThis.rateLimitMemory === 'undefined') {
+    globalThis.rateLimitMemory = new Map();
+  }
+  
+  // Clean old entries
+  for (const [mapKey, data] of globalThis.rateLimitMemory.entries()) {
+    if (data.timestamp < windowStart) {
+      globalThis.rateLimitMemory.delete(mapKey);
+    }
+  }
+  
+  const currentData = globalThis.rateLimitMemory.get(key) || { count: 0, timestamp: now };
+  currentData.count += 1;
+  currentData.timestamp = now;
+  
+  if (currentData.count > RATE_LIMIT_REQUESTS) {
+    return { allowed: false, count: currentData.count, limit: RATE_LIMIT_REQUESTS };
+  }
+  
+  globalThis.rateLimitMemory.set(key, currentData);
+  return { allowed: true, count: currentData.count, limit: RATE_LIMIT_REQUESTS };
+}
+
+/**
+ * Validate API key if required
+ * @param {Request} request - The incoming request
+ * @returns {boolean} Whether API key is valid
+ */
+function validateApiKey(request) {
+  if (!REQUIRE_API_KEY) return true;
+  
+  const apiKey = request.headers.get('X-API-Key') || 
+                 request.headers.get('Authorization')?.replace('Bearer ', '');
+  
+  return apiKey === API_KEY;
+}
+
+/**
+ * Validate request payload size
+ * @param {Request} request - The incoming request
+ * @returns {boolean} Whether payload size is acceptable
+ */
+function validatePayloadSize(request) {
+  const contentLength = request.headers.get('Content-Length');
+  if (contentLength && parseInt(contentLength) > MAX_PAYLOAD_SIZE) {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Security middleware - runs all security checks
+ * @param {Request} request - The incoming request
+ * @returns {Promise<Object>} Security check result
+ */
+async function runSecurityChecks(request) {
+  // 1. Validate payload size
+  if (!validatePayloadSize(request)) {
+    return { 
+      passed: false, 
+      reason: "payload_too_large", 
+      details: `Payload exceeds ${MAX_PAYLOAD_SIZE} bytes` 
+    };
+  }
+  
+  // 2. Validate API key if required
+  if (!validateApiKey(request)) {
+    return { 
+      passed: false, 
+      reason: "invalid_api_key", 
+      details: "Missing or invalid API key" 
+    };
+  }
+  
+  // 3. Validate origin domain
+  const originCheck = validateOrigin(request);
+  if (!originCheck.valid) {
+    return { 
+      passed: false, 
+      reason: "invalid_origin", 
+      details: `${originCheck.reason}: ${originCheck.value || 'missing'}` 
+    };
+  }
+  
+  // 4. Check rate limiting
+  const rateLimitCheck = await checkRateLimit(request);
+  if (!rateLimitCheck.allowed) {
+    return { 
+      passed: false, 
+      reason: "rate_limited", 
+      details: `${rateLimitCheck.count}/${rateLimitCheck.limit} requests in window` 
+    };
+  }
+  
+  return { 
+    passed: true, 
+    origin: originCheck,
+    rateLimit: rateLimitCheck
+  };
+}
+
+/**
+ * =============================================================================
  * MAIN REQUEST HANDLER
  * =============================================================================
  */
@@ -690,6 +864,37 @@ async function handleRequest(request) {
       status: 405,
       headers: getCORSHeaders(request),
     });
+  }
+
+  // SECURITY CHECKS - Run comprehensive security validation
+  const securityCheck = await runSecurityChecks(request);
+  if (!securityCheck.passed) {
+    if (DEBUG_MODE) {
+      console.log("Security check failed:", JSON.stringify(securityCheck));
+    }
+    
+    return new Response(
+      JSON.stringify({
+        success: false,
+        error: "Security validation failed",
+        reason: securityCheck.reason,
+        details: securityCheck.details
+      }),
+      {
+        status: securityCheck.reason === "rate_limited" ? 429 : 403,
+        headers: {
+          "Content-Type": "application/json",
+          ...getCORSHeaders(request),
+        },
+      }
+    );
+  }
+
+  if (DEBUG_MODE) {
+    console.log("Security checks passed:", JSON.stringify({
+      origin: securityCheck.origin?.domain,
+      rateLimit: `${securityCheck.rateLimit?.count}/${securityCheck.rateLimit?.limit}`
+    }));
   }
 
   try {
@@ -1751,7 +1956,7 @@ function getCORSHeaders(request) {
   return {
     "Access-Control-Allow-Origin": origin,
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization, X-API-Key",
     "Access-Control-Max-Age": "86400",
   };
 }

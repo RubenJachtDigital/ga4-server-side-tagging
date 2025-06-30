@@ -368,6 +368,18 @@ if (!defined('WPINC')) {
                                     (optional)</p>
                             </td>
                         </tr>
+                        <tr>
+                            <th scope="row">
+                                <label for="ga4_worker_api_key">Worker API Key</label>
+                            </th>
+                            <td>
+                                <input type="text" id="ga4_worker_api_key" name="ga4_worker_api_key"
+                                    value="<?php echo esc_attr($worker_api_key); ?>" class="regular-text" />
+                                <button type="button" id="generate_api_key" class="button button-secondary" style="margin-left: 10px;">Generate New Key</button>
+                                <p class="description">API key for secure communication with your Cloudflare Worker. Click "Generate New Key" to create a random secure key.</p>
+                                <p class="description"><strong>Important:</strong> Copy this API key and paste it into your Cloudflare Worker configuration.</p>
+                            </td>
+                        </tr>
                     </table>
                 </div>
 

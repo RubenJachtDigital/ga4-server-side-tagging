@@ -2462,6 +2462,16 @@
               ) {
                 xhr.setRequestHeader("X-WP-Nonce", config.nonce || "");
               }
+              
+              // Add API key for Cloudflare Worker
+              if (
+                config &&
+                config.cloudflareWorkerUrl &&
+                config.workerApiKey &&
+                endpoint === config.cloudflareWorkerUrl
+              ) {
+                xhr.setRequestHeader("X-API-Key", config.workerApiKey);
+              }
               GA4Utils.helpers.log(
                 "Sending AJAX request to: " + endpoint,
                 null,
@@ -2514,6 +2524,16 @@
         // Add nonce for WordPress REST API
         if (config && config.apiEndpoint && endpoint === config.apiEndpoint) {
           headers["X-WP-Nonce"] = config.nonce || "";
+        }
+
+        // Add API key for Cloudflare Worker
+        if (
+          config &&
+          config.cloudflareWorkerUrl &&
+          config.workerApiKey &&
+          endpoint === config.cloudflareWorkerUrl
+        ) {
+          headers["X-API-Key"] = config.workerApiKey;
         }
 
         GA4Utils.helpers.log(
