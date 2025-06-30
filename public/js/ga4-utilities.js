@@ -1645,7 +1645,7 @@
         }
 
         // Direct traffic
-        if (source === "(direct)" && medium === "none") {
+        if (source === "(direct)" && (medium === "none" || medium === "(none)")) {
           return "direct";
         }
 

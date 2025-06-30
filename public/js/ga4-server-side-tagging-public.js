@@ -625,10 +625,16 @@
         } else {
           return { source: "google", medium: "organic", campaign: "(organic)" };
         }
-      } else if (referrerDomain.indexOf("bing") > -1) {
+      } else if (referrerDomain.indexOf("bing") > -1 || referrerDomain.indexOf("msn.com") > -1) {
         return { source: "bing", medium: "organic", campaign: "(organic)" };
       } else if (referrerDomain.indexOf("yahoo") > -1) {
         return { source: "yahoo", medium: "organic", campaign: "(organic)" };
+      } else if (referrerDomain.indexOf("duckduckgo") > -1) {
+        return { source: "duckduckgo", medium: "organic", campaign: "(organic)" };
+      } else if (referrerDomain.indexOf("yandex") > -1) {
+        return { source: "yandex", medium: "organic", campaign: "(organic)" };
+      } else if (referrerDomain.indexOf("baidu") > -1) {
+        return { source: "baidu", medium: "organic", campaign: "(organic)" };
       } else if (
         referrerDomain.indexOf("facebook.com") > -1 ||
         referrerDomain.indexOf("instagram.com") > -1
@@ -651,7 +657,7 @@
         };
       }
 
-      return { source: "", medium: "", campaign: "(not set)" };
+      return { source: "(direct)", medium: "(none)", campaign: "(not set)" };
     },
 
     /**
@@ -688,7 +694,7 @@
         // Option 2: Mark as direct (default GA4 behavior)
         return {
           source: "(direct)",
-          medium: "none",
+          medium: "(none)",
           campaign: "(not set)",
           content: "",
           term: "",
@@ -699,7 +705,7 @@
       // Default to direct traffic
       return {
         source: "(direct)",
-        medium: "none",
+        medium: "(none)",
         campaign: "(not set)",
         content: "",
         term: "",
@@ -2667,6 +2673,10 @@
       delete anonymizedParams.geo_city;
       delete anonymizedParams.geo_region;
       delete anonymizedParams.geo_country;
+      
+      // Set denied consent attribution for all traffic when analytics consent is denied
+      anonymizedParams.source = "(denied consent)";
+      anonymizedParams.medium = "(denied consent)";
     }
 
     if (consentData.ad_storage === "DENIED") {
@@ -2678,14 +2688,14 @@
       // Anonymize campaign info for paid traffic
       if (anonymizedParams.campaign && 
           !["(organic)", "(direct)", "(not set)", "(referral)"].includes(anonymizedParams.campaign)) {
-        anonymizedParams.campaign = "(not provided)";
+        anonymizedParams.campaign = "(denied consent)";
       }
       
-      // Remove detailed referrer info for paid traffic
+      // Set denied consent attribution for paid traffic
       if (anonymizedParams.medium && 
           ["cpc", "ppc", "paidsearch", "display", "banner", "cpm"].includes(anonymizedParams.medium)) {
-        anonymizedParams.source = "(not provided)";
-        anonymizedParams.medium = "(not provided)";
+        anonymizedParams.source = "(denied consent)";
+        anonymizedParams.medium = "(denied consent)";
       }
     }
 

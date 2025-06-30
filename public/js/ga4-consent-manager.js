@@ -1109,14 +1109,14 @@
         // Anonymize campaign info for paid traffic
         if (anonymizedParams.campaign && 
             !["(organic)", "(direct)", "(not set)", "(referral)"].includes(anonymizedParams.campaign)) {
-          anonymizedParams.campaign = "(not provided)";
+          anonymizedParams.campaign = "(denied consent)";
         }
         
         // Remove detailed referrer info for paid traffic
         if (anonymizedParams.medium && 
             ["cpc", "ppc", "paidsearch", "display", "banner", "cpm"].includes(anonymizedParams.medium)) {
-          anonymizedParams.source = "(not provided)";
-          anonymizedParams.medium = "(not provided)";
+          anonymizedParams.source = "(denied consent)";
+          anonymizedParams.medium = "(denied consent)";
         }
       }
 

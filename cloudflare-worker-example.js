@@ -128,14 +128,14 @@ function applyAdvertisingConsentDenied(payload) {
     // Anonymize campaign data for paid traffic
     if (payload.params.campaign && 
         !["(organic)", "(direct)", "(not set)", "(referral)"].includes(payload.params.campaign)) {
-      payload.params.campaign = "(not provided)";
+      payload.params.campaign = "(denied consent)";
     }
 
     // Anonymize source/medium for paid traffic
     if (payload.params.medium && 
         ["cpc", "ppc", "paidsearch", "display", "banner", "cpm"].includes(payload.params.medium)) {
-      payload.params.source = "(not provided)";
-      payload.params.medium = "(not provided)";
+      payload.params.source = "(denied consent)";
+      payload.params.medium = "(denied consent)";
     }
   }
 
