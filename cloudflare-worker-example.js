@@ -768,20 +768,21 @@ async function checkRateLimit(request) {
  * @returns {boolean} Whether API key is valid
  */
 function validateApiKey(request) {
-  if (!REQUIRE_API_KEY) return true;
-  
   const apiKey = request.headers.get('X-API-Key') || 
-                 request.headers.get('Authorization')?.replace('Bearer ', '');
-                 
-   // Log the received API key for debugging
+  request.headers.get('Authorization')?.replace('Bearer ', '');
+  
+  // Log the received API key for debugging
   if(DEBUG_MODE){
 
     if (apiKey) {
-      console.log("Received API Key:", apiKey);
-    } else {
-      console.log("No API key was sent in the request");
+        console.log("Received API Key:", apiKey);
+      } else {
+        console.log("No API key was sent in the request");
     }
   }
+  if (!REQUIRE_API_KEY) return true;
+  
+
   
   return apiKey === API_KEY;
 }
