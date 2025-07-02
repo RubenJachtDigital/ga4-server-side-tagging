@@ -685,7 +685,10 @@ function logBotDetection(detection, request, payload) {
 function validateOrigin(request) {
   const origin = request.headers.get("Origin");
   const referer = request.headers.get("Referer");
-  
+  if(DEBUG_MODE){
+    console.log(`Send from Origin: ${origin}`);
+    console.log(`Send from Referer: ${referer}`);
+  }
   // Check Origin header first
   if (origin) {
     try {
