@@ -367,25 +367,39 @@ class GA4_Server_Side_Tagging_Endpoint {
      */
     private function check_rate_limit( $request ) {
         $client_ip = $this->get_client_ip( $request );
-        $rate_limit_key = 'ga4_api_rate_limit_' . md5( $client_ip );
         
-        // Get current request count for this IP
-        $request_count = get_transient( $rate_limit_key );
+        // Check if IP is currently blocked (1 hour block)
+        $block_key = 'ga4_api_blocked_' . md5( $client_ip );
+        $is_blocked = get_transient( $block_key );
         
-        if ( $request_count === false ) {
-            // First request in this time window
-            set_transient( $rate_limit_key, 1, 60 ); // 1 minute window
+        if ( $is_blocked !== false ) {
+            $this->logger->error( 'Blocked IP attempted access: ' . $client_ip . ' (blocked until: ' . date( 'Y-m-d H:i:s', $is_blocked ) . ')' );
+            return false;
+        }
+        
+        // Check hourly rate limit (100 requests per hour)
+        $hourly_key = 'ga4_api_hourly_' . md5( $client_ip );
+        $hourly_count = get_transient( $hourly_key );
+        
+        if ( $hourly_count === false ) {
+            // First request in this hour
+            set_transient( $hourly_key, 1, 3600 ); // 1 hour window
             return true;
         }
         
-        // Check if under limit (60 requests per minute)
-        if ( $request_count < 60 ) {
-            set_transient( $rate_limit_key, $request_count + 1, 60 );
+        // Check if under hourly limit (100 requests per hour)
+        if ( $hourly_count < 100 ) {
+            set_transient( $hourly_key, $hourly_count + 1, 3600 );
             return true;
         }
         
-        // Rate limit exceeded - log the failure
-        $this->logger->error( 'Rate limit exceeded for IP: ' . $client_ip );
+        // Hourly limit exceeded - block IP for 1 hour
+        $block_until = time() + 3600; // 1 hour from now
+        set_transient( $block_key, $block_until, 3600 );
+        
+        // Log the block
+        $this->logger->error( 'IP blocked for exceeding rate limit: ' . $client_ip . ' (' . $hourly_count . ' requests in last hour, blocked until: ' . date( 'Y-m-d H:i:s', $block_until ) . ')' );
+        
         return false;
     }
 
