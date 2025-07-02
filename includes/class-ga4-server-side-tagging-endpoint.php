@@ -49,6 +49,12 @@ class GA4_Server_Side_Tagging_Endpoint {
      * @since    1.0.0
      */
     public function register_routes() {
+        register_rest_route( 'ga4-server-side-tagging/v1', '/auth-token', array(
+            'methods'             => 'POST',
+            'callback'            => array( $this, 'generate_auth_token' ),
+            'permission_callback' => array( $this, 'check_nonce_permission' ),
+        ) );
+        
         register_rest_route( 'ga4-server-side-tagging/v1', '/secure-config', array(
             'methods'             => 'GET',
             'callback'            => array( $this, 'get_secure_config' ),
@@ -74,10 +80,17 @@ class GA4_Server_Side_Tagging_Endpoint {
             return false;
         }
 
-        // Check if the request has a valid nonce
-        $nonce = $request->get_header( 'X-WP-Nonce' );
-        if ( ! wp_verify_nonce( $nonce, 'wp_rest' ) ) {
-            $this->log_security_failure( $request, 'INVALID_NONCE', 'Invalid or missing nonce token' );
+        // JWT token validation
+        $auth_header = $request->get_header( 'Authorization' );
+        if ( empty( $auth_header ) || ! preg_match( '/Bearer\s+(.*)$/i', $auth_header, $matches ) ) {
+            $this->log_security_failure( $request, 'MISSING_JWT_TOKEN', 'Missing or invalid Authorization header' );
+            return false;
+        }
+        
+        $token = $matches[1];
+        $token_payload = $this->validate_jwt_token( $token );
+        if ( ! $token_payload ) {
+            $this->log_security_failure( $request, 'INVALID_JWT_TOKEN', 'JWT token validation failed' );
             return false;
         }
 
@@ -145,6 +158,203 @@ class GA4_Server_Side_Tagging_Endpoint {
         );
         
         $this->logger->log_data( $failure_data, 'Security Failure' );
+    }
+
+    /**
+     * Generate JWT authentication token.
+     *
+     * @since    1.0.0
+     * @param    \WP_REST_Request    $request    The request object.
+     * @return   \WP_REST_Response             The response object.
+     */
+    public function generate_auth_token( $request ) {
+        try {
+            $token = $this->create_jwt_token();
+            
+            return new \WP_REST_Response( array(
+                'token' => $token,
+                'expires_in' => 300 // 5 minutes
+            ), 200 );
+        } catch ( \Exception $e ) {
+            $this->logger->error( 'Failed to generate JWT token: ' . $e->getMessage() );
+            return new \WP_REST_Response( array( 'error' => 'Token generation failed' ), 500 );
+        }
+    }
+
+    /**
+     * Check nonce permission for token generation.
+     *
+     * @since    1.0.0
+     * @param    \WP_REST_Request    $request    The request object.
+     * @return   bool                          Whether the request has permission.
+     */
+    public function check_nonce_permission( $request ) {
+        // Basic nonce check for token generation
+        $nonce = $request->get_header( 'X-WP-Nonce' );
+        if ( ! wp_verify_nonce( $nonce, 'wp_rest' ) ) {
+            $this->logger->error( 'Invalid nonce for token generation' );
+            return false;
+        }
+
+        // Basic origin check
+        if ( ! $this->validate_request_origin( $request ) ) {
+            $this->logger->error( 'Invalid origin for token generation' );
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * Create JWT token.
+     *
+     * @since    1.0.0
+     * @return   string    The JWT token.
+     */
+    private function create_jwt_token() {
+        $secret = $this->get_jwt_secret();
+        $issued_at = time();
+        $expiration = $issued_at + 300; // 5 minutes
+        
+        $payload = array(
+            'iss' => get_site_url(),
+            'aud' => 'ga4-server-side-tagging',
+            'iat' => $issued_at,
+            'exp' => $expiration,
+            'sub' => 'api-access',
+            'jti' => wp_generate_uuid4()
+        );
+
+        return $this->encode_jwt( $payload, $secret );
+    }
+
+    /**
+     * Validate JWT token.
+     *
+     * @since    1.0.0
+     * @param    string    $token    The JWT token.
+     * @return   bool|array         Token payload if valid, false if invalid.
+     */
+    private function validate_jwt_token( $token ) {
+        try {
+            $secret = $this->get_jwt_secret();
+            $payload = $this->decode_jwt( $token, $secret );
+            
+            // Check expiration
+            if ( isset( $payload['exp'] ) && $payload['exp'] < time() ) {
+                return false;
+            }
+            
+            // Check issuer
+            if ( ! isset( $payload['iss'] ) || $payload['iss'] !== get_site_url() ) {
+                return false;
+            }
+            
+            // Check audience
+            if ( ! isset( $payload['aud'] ) || $payload['aud'] !== 'ga4-server-side-tagging' ) {
+                return false;
+            }
+            
+            return $payload;
+        } catch ( \Exception $e ) {
+            $this->logger->error( 'JWT validation failed: ' . $e->getMessage() );
+            return false;
+        }
+    }
+
+    /**
+     * Get or generate JWT secret key.
+     *
+     * @since    1.0.0
+     * @return   string    The JWT secret key.
+     */
+    private function get_jwt_secret() {
+        $secret = get_option( 'ga4_jwt_secret' );
+        
+        if ( empty( $secret ) ) {
+            $secret = wp_generate_password( 64, true, true );
+            update_option( 'ga4_jwt_secret', $secret );
+        }
+        
+        return $secret;
+    }
+
+    /**
+     * Simple JWT encode implementation.
+     *
+     * @since    1.0.0
+     * @param    array     $payload    The payload to encode.
+     * @param    string    $secret     The secret key.
+     * @return   string               The JWT token.
+     */
+    private function encode_jwt( $payload, $secret ) {
+        $header = array(
+            'typ' => 'JWT',
+            'alg' => 'HS256'
+        );
+        
+        $header_encoded = $this->base64url_encode( wp_json_encode( $header ) );
+        $payload_encoded = $this->base64url_encode( wp_json_encode( $payload ) );
+        
+        $signature = hash_hmac( 'sha256', $header_encoded . '.' . $payload_encoded, $secret, true );
+        $signature_encoded = $this->base64url_encode( $signature );
+        
+        return $header_encoded . '.' . $payload_encoded . '.' . $signature_encoded;
+    }
+
+    /**
+     * Simple JWT decode implementation.
+     *
+     * @since    1.0.0
+     * @param    string    $token     The JWT token.
+     * @param    string    $secret    The secret key.
+     * @return   array               The decoded payload.
+     */
+    private function decode_jwt( $token, $secret ) {
+        $parts = explode( '.', $token );
+        
+        if ( count( $parts ) !== 3 ) {
+            throw new \Exception( 'Invalid JWT token format' );
+        }
+        
+        list( $header_encoded, $payload_encoded, $signature_encoded ) = $parts;
+        
+        $signature = $this->base64url_decode( $signature_encoded );
+        $expected_signature = hash_hmac( 'sha256', $header_encoded . '.' . $payload_encoded, $secret, true );
+        
+        if ( ! hash_equals( $signature, $expected_signature ) ) {
+            throw new \Exception( 'JWT signature verification failed' );
+        }
+        
+        $payload = json_decode( $this->base64url_decode( $payload_encoded ), true );
+        
+        if ( json_last_error() !== JSON_ERROR_NONE ) {
+            throw new \Exception( 'Invalid JWT payload JSON' );
+        }
+        
+        return $payload;
+    }
+
+    /**
+     * Base64URL encode.
+     *
+     * @since    1.0.0
+     * @param    string    $data    The data to encode.
+     * @return   string            The encoded data.
+     */
+    private function base64url_encode( $data ) {
+        return rtrim( strtr( base64_encode( $data ), '+/', '-_' ), '=' );
+    }
+
+    /**
+     * Base64URL decode.
+     *
+     * @since    1.0.0
+     * @param    string    $data    The data to decode.
+     * @return   string            The decoded data.
+     */
+    private function base64url_decode( $data ) {
+        return base64_decode( strtr( $data, '-_', '+/' ) . str_repeat( '=', 3 - ( 3 + strlen( $data ) ) % 4 ) );
     }
 
 

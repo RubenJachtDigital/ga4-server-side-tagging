@@ -314,9 +314,16 @@
             
             // Handle our consent logic - ensure it runs
             self.log("🚀 Processing consent given...");
+            // Immediate processing for better responsiveness
+            self.handleConsentGiven('iubenda_callback');
+            
+            // Also set a small fallback in case the immediate processing has issues
             setTimeout(function() {
-              self.handleConsentGiven('button_click');
-            }, 50); // Small delay to ensure Iubenda has finished processing
+              if (!self.consentProcessed) {
+                self.log("📝 Fallback: Processing consent given after delay");
+                self.handleConsentGiven('iubenda_callback_fallback');
+              }
+            }, 25); // Reduced delay for better UX
           };
 
           // Set up consent rejected callback
@@ -334,9 +341,16 @@
             
             // Handle our consent logic - ensure it runs
             self.log("🚀 Processing consent denied...");
+            // Immediate processing for better responsiveness
+            self.handleConsentDenied('iubenda_callback');
+            
+            // Also set a small fallback in case the immediate processing has issues
             setTimeout(function() {
-              self.handleConsentDenied('button_click');
-            }, 50); // Small delay to ensure Iubenda has finished processing
+              if (!self.consentProcessed) {
+                self.log("📝 Fallback: Processing consent denied after delay");
+                self.handleConsentDenied('iubenda_callback_fallback');
+              }
+            }, 25); // Reduced delay for better UX
           };
 
           // Set up first consent callback
@@ -407,52 +421,186 @@
         rejectSelectors: iubendaRejectSelectors
       });
       
-      // Accept button listeners
+      // Accept button listeners with immediate and delayed processing
       $(document).on('click', iubendaAcceptSelectors, function(e) {
+        var clickTimestamp = Date.now();
         self.log("🟢 Iubenda ACCEPT button clicked directly (fallback)", { 
           element: this.className,
-          selector: this.tagName + '.' + this.className.split(' ').join('.')
+          selector: this.tagName + '.' + this.className.split(' ').join('.'),
+          clickTimestamp: clickTimestamp,
+          eventType: e.type,
+          target: e.target.tagName,
+          currentTarget: this.tagName,
+          consentProcessed: self.consentProcessed,
+          timestamp: new Date().toISOString()
         });
         
-        // Small delay to let Iubenda process first, then handle our consent
+        // Immediate processing attempt
+        if (!self.consentProcessed) {
+          self.log("📝 Immediate processing accept via button click", {
+            processingTimestamp: Date.now(),
+            timeSinceClick: Date.now() - clickTimestamp
+          });
+          self.handleConsentGiven('button_click_immediate');
+        } else {
+          self.log("ℹ️ Accept button clicked but consent already processed", {
+            clickTimestamp: clickTimestamp,
+            alreadyProcessed: true
+          });
+        }
+        
+        // Also set a delayed fallback in case Iubenda callbacks override our immediate processing
         setTimeout(function() {
           if (!self.consentProcessed) {
-            self.log("📝 Processing accept via button fallback");
-            self.handleConsentGiven('button_click');
+            self.log("📝 Delayed processing accept via button fallback", {
+              delayedTimestamp: Date.now(),
+              totalTimeSinceClick: Date.now() - clickTimestamp,
+              delay: '50ms'
+            });
+            self.handleConsentGiven('button_click_delayed');
           } else {
-            self.log("ℹ️ Accept already processed via callback, skipping fallback");
+            self.log("ℹ️ Accept already processed, skipping delayed fallback", {
+              delayedTimestamp: Date.now(),
+              totalTimeSinceClick: Date.now() - clickTimestamp
+            });
           }
-        }, 100);
+        }, 50); // Reduced from 100ms to 50ms
       });
       
-      // Reject button listeners  
+      // Reject button listeners with immediate and delayed processing
       $(document).on('click', iubendaRejectSelectors, function(e) {
+        var clickTimestamp = Date.now();
         self.log("🔴 Iubenda REJECT button clicked directly (fallback)", { 
           element: this.className,
-          selector: this.tagName + '.' + this.className.split(' ').join('.')
+          selector: this.tagName + '.' + this.className.split(' ').join('.'),
+          clickTimestamp: clickTimestamp,
+          eventType: e.type,
+          target: e.target.tagName,
+          currentTarget: this.tagName,
+          consentProcessed: self.consentProcessed,
+          timestamp: new Date().toISOString()
         });
         
-        // Small delay to let Iubenda process first, then handle our consent
+        // Immediate processing attempt
+        if (!self.consentProcessed) {
+          self.log("📝 Immediate processing reject via button click", {
+            processingTimestamp: Date.now(),
+            timeSinceClick: Date.now() - clickTimestamp
+          });
+          self.handleConsentDenied('button_click_immediate');
+        } else {
+          self.log("ℹ️ Reject button clicked but consent already processed", {
+            clickTimestamp: clickTimestamp,
+            alreadyProcessed: true
+          });
+        }
+        
+        // Also set a delayed fallback in case Iubenda callbacks override our immediate processing
         setTimeout(function() {
           if (!self.consentProcessed) {
-            self.log("📝 Processing reject via button fallback");
-            self.handleConsentDenied('button_click');
+            self.log("📝 Delayed processing reject via button fallback", {
+              delayedTimestamp: Date.now(),
+              totalTimeSinceClick: Date.now() - clickTimestamp,
+              delay: '50ms'
+            });
+            self.handleConsentDenied('button_click_delayed');
           } else {
-            self.log("ℹ️ Reject already processed via callback, skipping fallback");
+            self.log("ℹ️ Reject already processed, skipping delayed fallback", {
+              delayedTimestamp: Date.now(),
+              totalTimeSinceClick: Date.now() - clickTimestamp
+            });
           }
-        }, 100);
+        }, 50); // Reduced from 100ms to 50ms
       });
       
       // Also watch for buttons that appear dynamically
       this.watchForIubendaButtons();
+      
+      // Add high-priority click capture for immediate response
+      this.setupImmediateClickCapture();
     },
 
     /**
-     * Watch for Iubenda buttons that might be added dynamically
+     * Setup immediate click capture using event capture phase for maximum responsiveness
+     */
+    setupImmediateClickCapture: function() {
+      var self = this;
+      
+      // Use capture phase to catch clicks before Iubenda processes them
+      document.addEventListener('click', function(e) {
+        var target = e.target;
+        
+        // Check if clicked element or its parents match Iubenda selectors
+        var element = target;
+        var maxDepth = 5; // Check up to 5 parent levels
+        var depth = 0;
+        
+        while (element && depth < maxDepth) {
+          var className = element.className || '';
+          var isAcceptBtn = (
+            className.includes('iubenda-cs-accept') ||
+            className.includes('iub-cs-accept') ||
+            (className.includes('iubenda') && className.includes('accept')) ||
+            (className.includes('iub') && className.includes('accept'))
+          );
+          
+          var isRejectBtn = (
+            className.includes('iubenda-cs-reject') ||
+            className.includes('iub-cs-reject') ||
+            (className.includes('iubenda') && (className.includes('reject') || className.includes('deny'))) ||
+            (className.includes('iub') && (className.includes('reject') || className.includes('deny')))
+          );
+          
+          if (isAcceptBtn && !self.consentProcessed) {
+            self.log("⚡ IMMEDIATE Iubenda accept detected via capture phase", {
+              element: element.tagName,
+              className: className,
+              depth: depth
+            });
+            
+            // Process immediately without any delay
+            setTimeout(function() {
+              if (!self.consentProcessed) {
+                self.handleConsentGiven('immediate_capture');
+              }
+            }, 0);
+            break;
+          }
+          
+          if (isRejectBtn && !self.consentProcessed) {
+            self.log("⚡ IMMEDIATE Iubenda reject detected via capture phase", {
+              element: element.tagName,
+              className: className,
+              depth: depth
+            });
+            
+            // Process immediately without any delay
+            setTimeout(function() {
+              if (!self.consentProcessed) {
+                self.handleConsentDenied('immediate_capture');
+              }
+            }, 0);
+            break;
+          }
+          
+          element = element.parentElement;
+          depth++;
+        }
+      }, true); // Use capture phase for earliest detection
+    },
+
+    /**
+     * Watch for Iubenda buttons that might be added dynamically (enhanced for slow loading)
      */
     watchForIubendaButtons: function() {
       var self = this;
+      var checkCount = 0;
+      var maxChecks = 120; // 60 seconds (120 * 500ms)
+      var intervalDelay = 500;
+      
       var checkInterval = setInterval(function() {
+        checkCount++;
+        
         var acceptBtn = document.querySelector('.iubenda-cs-accept-btn, .iub-cs-accept-btn');
         var rejectBtn = document.querySelector('.iubenda-cs-reject-btn, .iub-cs-reject-btn');
         
@@ -461,16 +609,18 @@
             acceptBtn: !!acceptBtn,
             rejectBtn: !!rejectBtn,
             acceptClass: acceptBtn ? acceptBtn.className : 'none',
-            rejectClass: rejectBtn ? rejectBtn.className : 'none'
+            rejectClass: rejectBtn ? rejectBtn.className : 'none',
+            detectedAfter: (checkCount * intervalDelay) + 'ms'
           });
           clearInterval(checkInterval);
+        } else if (checkCount >= maxChecks) {
+          self.log("⏰ Stopped watching for Iubenda buttons after 60 seconds");
+          clearInterval(checkInterval);
+        } else if (checkCount % 20 === 0) {
+          // Log progress every 10 seconds for slow loading scenarios
+          self.log(`⏳ Still watching for Iubenda buttons... (${checkCount * intervalDelay / 1000}s elapsed)`);
         }
-      }, 500);
-
-      // Stop checking after 30 seconds
-      setTimeout(function() {
-        clearInterval(checkInterval);
-      }, 30000);
+      }, intervalDelay);
     },
 
     /**
@@ -479,14 +629,44 @@
     checkExistingIubendaConsent: function() {
       var self = this;
       
-      // Wait a bit for Iubenda to initialize
+      // Enhanced retry mechanism for slow loading (especially incognito mode)
+      this.checkExistingConsentWithRetry(0);
+    },
+
+    /**
+     * Enhanced retry mechanism for checking existing consent
+     */
+    checkExistingConsentWithRetry: function(attempt) {
+      var self = this;
+      var maxAttempts = 15; // Increased from implicit 1 to 15 attempts
+      var baseDelay = 500; // Base delay in ms
+      var maxDelay = 3000; // Maximum delay in ms
+      
+      // Calculate exponential backoff delay, but cap at maxDelay
+      var delay = Math.min(baseDelay * Math.pow(1.2, attempt), maxDelay);
+      
       setTimeout(function() {
-        self.log("🔍 Checking for existing Iubenda consent", {
+        self.log(`🔍 Checking for existing Iubenda consent (attempt ${attempt + 1}/${maxAttempts})`, {
           iubAvailable: typeof _iub !== 'undefined',
           hasCs: typeof _iub !== 'undefined' && _iub.cs,
           hasApi: typeof _iub !== 'undefined' && _iub.cs && _iub.cs.api,
-          apiMethods: typeof _iub !== 'undefined' && _iub.cs && _iub.cs.api ? Object.keys(_iub.cs.api) : []
+          apiMethods: typeof _iub !== 'undefined' && _iub.cs && _iub.cs.api ? Object.keys(_iub.cs.api) : [],
+          domReady: document.readyState,
+          attempt: attempt + 1
         });
+        
+        // Check if all necessary dependencies are loaded
+        var dependenciesReady = (
+          typeof _iub !== 'undefined' && 
+          _iub.cs && 
+          document.readyState !== 'loading'
+        );
+        
+        if (!dependenciesReady && attempt < maxAttempts - 1) {
+          self.log(`⏳ Dependencies not ready, retrying in ${delay}ms...`);
+          self.checkExistingConsentWithRetry(attempt + 1);
+          return;
+        }
         
         if (typeof _iub !== 'undefined' && _iub.cs) {
           try {
@@ -542,12 +722,21 @@
             }
           } catch (error) {
             self.log("❌ Error checking existing Iubenda consent", error);
-            // Continue waiting for user interaction
+            if (attempt < maxAttempts - 1) {
+              self.log(`⏳ Error occurred, retrying in ${delay}ms... (attempt ${attempt + 1}/${maxAttempts})`);
+              self.checkExistingConsentWithRetry(attempt + 1);
+              return;
+            }
+            // Continue waiting for user interaction after max attempts
           }
+        } else if (attempt < maxAttempts - 1) {
+          self.log(`⏳ Iubenda not available yet, retrying in ${delay}ms... (attempt ${attempt + 1}/${maxAttempts})`);
+          self.checkExistingConsentWithRetry(attempt + 1);
+          return;
         } else {
-          self.log("⚠️ Iubenda not fully loaded yet, waiting for user interaction");
+          self.log("⚠️ Iubenda not available after maximum attempts, proceeding without Iubenda consent detection");
         }
-      }, 1000); // Increased timeout to give Iubenda more time to load
+      }, delay);
     },
 
     /**

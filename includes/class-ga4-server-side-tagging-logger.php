@@ -87,9 +87,6 @@ class GA4_Server_Side_Tagging_Logger {
      * @param    string    $level      The log level (info, warning, error).
      */
     public function log( $message, $level = 'info' ) {
-        if ( ! $this->debug_mode ) {
-            return;
-        }
 
         $timestamp = current_time( 'mysql' );
         $formatted_message = sprintf( '[%s] [%s] %s', $timestamp, strtoupper( $level ), $message );
@@ -136,9 +133,9 @@ class GA4_Server_Side_Tagging_Logger {
      * @param    string    $level      The log level (info, warning, error).
      */
     public function log_data( $data, $label = '', $level = 'info' ) {
-        if ( ! $this->debug_mode ) {
-            return;
-        }
+        // if ( ! $this->debug_mode ) {
+        //     return;
+        // }
 
         $json = wp_json_encode( $data, JSON_PRETTY_PRINT );
         

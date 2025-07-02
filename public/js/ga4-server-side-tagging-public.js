@@ -16,6 +16,9 @@
     consentReady: false,
     trackedPageViews: new Set(), // Track URLs that have been tracked
 
+    // JWT Token Management
+    jwtToken: null,
+    jwtTokenExpiry: null,
 
 
     init: async function () {
@@ -29,10 +32,7 @@
         return;
       }
 
-      // Load secure configuration first
-      await this.loadSecureConfig();
-
-      // Check if we have the required configuration
+      // Check basic configuration first (synchronous)
       if (!this.config.measurementId) {
         this.log("Measurement ID not configured");
         return;
@@ -42,38 +42,140 @@
         return;
       }
 
-      // Initialize GDPR Consent System FIRST
-      this.initializeConsentSystem();
+      this.log("🚀 Starting immediate initialization of user-facing features...");
 
-      // Set up event listeners (these will queue events until consent is ready)
+      // Initialize GDPR Consent System with retry mechanism for slow loads (immediate)
+      await this.initializeConsentSystemWithRetry();
+
+      // Set up event listeners immediately (these will queue events until JWT is ready)
       this.setupEventListeners();
 
-      // Initialize A/B testing
+      // Initialize A/B testing immediately
       this.initializeABTesting();
       
-      // Initialize Click tracking
+      // Initialize Click tracking immediately
       this.initializeClickTracking();
 
-      // Track page view immediately (will be queued if consent not ready)
-      // Server-side tagging is always enabled
-      this.log("🚀 Triggering trackPageView immediately on page load - awaiting location data");
-      await this.trackPageView();
+      // Track page view immediately (will be queued until JWT token is ready)
+      this.log("🚀 Triggering trackPageView immediately on page load - will queue until secure config loads");
+      this.trackPageView(); // Remove await - let it queue
+
+      // Load secure configuration in background (don't block user experience)
+      this.loadSecureConfigInBackground();
 
       // Log initialization
       this.log(
-        "%c GA4 Server-Side Tagging initialized v1 ",
+        "%c GA4 Server-Side Tagging initialized v4 - Event queuing active ",
         "background: #4CAF50; color: white; font-size: 16px; font-weight: bold; padding: 8px 12px; border-radius: 4px;"
       );
     },
+
+
+
     /**
-     * Load secure configuration from REST API
+     * Request a new JWT token from the server
+     */
+    requestJWTToken: async function() {
+      try {
+        const response = await fetch(this.config.apiEndpoint + '/auth-token', {
+          method: 'POST',
+          headers: {
+            'X-WP-Nonce': this.config.nonce,
+            'Content-Type': 'application/json'
+          }
+        });
+
+        if (response.ok) {
+          const tokenData = await response.json();
+          this.jwtToken = tokenData.token;
+          this.jwtTokenExpiry = Date.now() + (tokenData.expires_in * 1000);
+          this.log("🔑 JWT token obtained successfully");
+          return true;
+        } else {
+          this.log("⚠️ Failed to obtain JWT token - status:", response.status);
+          return false;
+        }
+      } catch (error) {
+        this.log("⚠️ Error requesting JWT token:", error.message);
+        return false;
+      }
+    },
+
+    /**
+     * Check if JWT token is valid and not expired
+     */
+    isJWTTokenValid: function() {
+      return this.jwtToken && this.jwtTokenExpiry && Date.now() < this.jwtTokenExpiry;
+    },
+
+    /**
+     * Get valid JWT token, requesting new one if needed
+     */
+    getValidJWTToken: async function() {
+      if (!this.isJWTTokenValid()) {
+        const success = await this.requestJWTToken();
+        if (!success) {
+          throw new Error('Failed to obtain valid JWT token');
+        }
+      }
+      return this.jwtToken;
+    },
+
+    /**
+     * Load secure configuration in background without blocking user experience
+     */
+    loadSecureConfigInBackground: async function() {
+      this.log("🔒 Loading secure configuration in background...");
+      
+      try {
+        await this.loadSecureConfig();
+        this.log("✅ Secure configuration loaded - processing queued events");
+        
+        // Process any queued events now that we have JWT capability
+        this.processQueuedEvents();
+        
+      } catch (error) {
+        this.log("⚠️ Failed to load secure configuration in background:", error.message);
+        this.log("📦 Events will remain queued and retried periodically");
+        
+        // Set up retry mechanism for failed secure config loading
+        this.scheduleSecureConfigRetry();
+      }
+    },
+
+    /**
+     * Schedule retry for secure config loading
+     */
+    scheduleSecureConfigRetry: function() {
+      var self = this;
+      setTimeout(function() {
+        self.log("🔄 Retrying secure configuration load...");
+        self.loadSecureConfigInBackground();
+      }, 5000); // Retry after 5 seconds
+    },
+
+    /**
+     * Process any events that were queued while waiting for secure config
+     */
+    processQueuedEvents: function() {
+      this.log("🚀 Secure config ready - processing queued events immediately");
+      
+      // Trigger immediate queue processing
+      this.processEventQueue();
+    },
+
+    /**
+     * Load secure configuration from REST API with JWT authentication
      */
     loadSecureConfig: async function() {
       try {
+        // Get valid JWT token first
+        const token = await this.getValidJWTToken();
+        
         const response = await fetch(this.config.apiEndpoint + '/secure-config', {
           method: 'GET',
           headers: {
-            'X-WP-Nonce': this.config.nonce,
+            'Authorization': 'Bearer ' + token,
             'Content-Type': 'application/json'
           }
         });
@@ -97,6 +199,75 @@
         this.log("⚠️ Error loading secure configuration:", error.message);
       }
     },
+
+    /**
+     * Initialize consent system with retry mechanism for slow page loads
+     */
+    initializeConsentSystemWithRetry: async function() {
+      const maxRetries = 10;
+      const retryDelay = 500; // 500ms between retries
+      
+      for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        this.log(`🔄 Consent system initialization attempt ${attempt}/${maxRetries}`);
+        
+        // Check if all dependencies are loaded
+        if (this.isConsentSystemReady()) {
+          this.log("✅ Consent system dependencies loaded, initializing...");
+          this.initializeConsentSystem();
+          return;
+        }
+        
+        if (attempt === maxRetries) {
+          this.log("⚠️ Consent system dependencies not loaded after maximum retries, proceeding without consent management");
+          this.onConsentReady();
+          return;
+        }
+        
+        this.log(`⏳ Consent system not ready, waiting ${retryDelay}ms before retry ${attempt + 1}...`);
+        await this.delay(retryDelay);
+      }
+    },
+
+    /**
+     * Check if consent system dependencies are ready
+     */
+    isConsentSystemReady: function() {
+      // Check if jQuery is loaded (required for event handling)
+      if (typeof $ === 'undefined') {
+        this.log("🔍 jQuery not loaded yet");
+        return false;
+      }
+      
+      // Check if consent settings are available
+      if (!this.config.consentSettings) {
+        this.log("🔍 Consent settings not available");
+        return false;
+      }
+      
+      // If consent mode is enabled, check if GA4ConsentManager is available
+      if (this.config.consentSettings.consentModeEnabled) {
+        if (!window.GA4ConsentManager || typeof window.GA4ConsentManager.init !== 'function') {
+          this.log("🔍 GA4ConsentManager not loaded yet");
+          return false;
+        }
+      }
+      
+      // Check if DOM is ready for consent banner detection
+      if (document.readyState === 'loading') {
+        this.log("🔍 DOM still loading");
+        return false;
+      }
+      
+      return true;
+    },
+
+    /**
+     * Utility function to create a delay
+     */
+    delay: function(ms) {
+      return new Promise(resolve => setTimeout(resolve, ms));
+    },
+
     /**
      * Initialize consent system
      */
@@ -2480,13 +2651,16 @@
       // Remove the temporary original consent status
       delete completeEventData._originalConsentStatus;
       
-      // Use Cloudflare Worker endpoint only
+      // Use Cloudflare Worker endpoint, or queue if not available
       var endpoint = this.config.cloudflareWorkerUrl;
+      var data = this.formatEventData(eventName, completeEventData, endpoint);
+      
       if (endpoint) {
-        var data = this.formatEventData(eventName, completeEventData, endpoint);
         this.sendAjaxPayload(endpoint, data);
       } else {
-        this.log("No Cloudflare Worker URL configured");
+        this.log("Cloudflare Worker URL not loaded yet, using auto-detection");
+        // Use 'auto' to trigger endpoint detection and queuing logic
+        this.sendAjaxPayload('auto', data);
       }
     },
 
@@ -2600,23 +2774,29 @@
       // Add consent data to the payload (only essential fields)
       params.consent = this.getMinimalConsent(consentData);
 
-      // Use Cloudflare Worker endpoint only
+      // Use Cloudflare Worker endpoint, or queue if not available
       var endpoint = this.config.cloudflareWorkerUrl;
-
-      if (!endpoint) {
-        this.log("No Cloudflare Worker URL configured");
-        return;
-      }
-
-      this.log("Sending to endpoint: " + endpoint, {
-        consent: this.getMinimalConsent(consentData),
-        anonymized: consentData.analytics_storage !== "GRANTED",
-        eventName: eventName
-      });
-
+      
       // Format data based on endpoint type
       var data = this.formatEventData(eventName, params, endpoint);
-      this.sendAjaxPayload(endpoint, data);
+
+      if (endpoint) {
+        this.log("Sending to endpoint: " + endpoint, {
+          consent: this.getMinimalConsent(consentData),
+          anonymized: consentData.analytics_storage !== "GRANTED",
+          eventName: eventName
+        });
+        
+        this.sendAjaxPayload(endpoint, data);
+      } else {
+        this.log("Cloudflare Worker URL not loaded yet, queuing event", {
+          eventName: eventName,
+          consent: this.getMinimalConsent(consentData)
+        });
+        
+        // Use 'auto' to trigger endpoint detection and queuing logic
+        this.sendAjaxPayload('auto', data);
+      }
     },
 
 
@@ -2815,13 +2995,219 @@
     /**
      * Send AJAX payload to endpoint
      */
-    sendAjaxPayload: function (endpoint, payload) {
-      GA4Utils.ajax.sendPayload(
-        endpoint,
-        payload,
-        this.config,
-        "[GA4 Server-Side Tagging]"
-      );
+    sendAjaxPayload: async function (endpoint, payload) {
+      try {
+        // Check if this is a secure endpoint that requires JWT
+        var isSecureEndpoint = endpoint.includes('/secure-config') || 
+                              (this.config.apiEndpoint && endpoint.startsWith(this.config.apiEndpoint));
+        
+        // For events that don't specify an endpoint, determine the target endpoint
+        if (!endpoint || endpoint === 'auto') {
+          // Check if secure config is loaded
+          if (!this.isSecureConfigLoaded()) {
+            this.log("⏳ Secure config not loaded yet, queuing event", {
+              hasCloudflareUrl: !!this.config.cloudflareWorkerUrl,
+              hasWorkerApiKey: !!this.config.workerApiKey
+            });
+            
+            this.queueEventForRetry('auto', payload);
+            return Promise.resolve({ queued: true });
+          }
+          
+          // Use Cloudflare Worker if available
+          endpoint = this.config.cloudflareWorkerUrl;
+          
+          if (!endpoint) {
+            this.log("❌ No endpoint available for sending event", {
+              cloudflareWorkerUrl: this.config.cloudflareWorkerUrl,
+              secureConfigLoaded: this.isSecureConfigLoaded()
+            });
+            
+            this.queueEventForRetry('auto', payload);
+            return Promise.resolve({ queued: true });
+          }
+        }
+        
+        if (isSecureEndpoint) {
+          // Try to get JWT token for secure endpoints
+          try {
+            var token = await this.getValidJWTToken();
+            
+            // Add JWT token to config for this request
+            var configWithJWT = Object.assign({}, this.config);
+            configWithJWT.jwtToken = token;
+            
+            this.log("🔐 Sending request with JWT authentication", {
+              endpoint: endpoint,
+              hasToken: !!token
+            });
+            
+            return await GA4Utils.ajax.sendPayloadFetch(
+              endpoint,
+              payload,
+              configWithJWT,
+              "[GA4 Server-Side Tagging - JWT]"
+            );
+          } catch (jwtError) {
+            this.log("⚠️ JWT token not available, queuing event for later", {
+              endpoint: endpoint,
+              error: jwtError.message
+            });
+            
+            // Queue the event for later processing
+            this.queueEventForRetry(endpoint, payload);
+            return Promise.resolve({ queued: true });
+          }
+        } else {
+          // For non-secure endpoints (Cloudflare Worker), check if we have the URL and API key
+          if (!this.config.cloudflareWorkerUrl || !this.config.workerApiKey) {
+            this.log("⏳ Cloudflare Worker config not ready, queuing event", {
+              hasCloudflareUrl: !!this.config.cloudflareWorkerUrl,
+              hasWorkerApiKey: !!this.config.workerApiKey,
+              endpoint: endpoint
+            });
+            
+            this.queueEventForRetry(endpoint, payload);
+            return Promise.resolve({ queued: true });
+          }
+          
+          this.log("📤 Sending to Cloudflare Worker", {
+            endpoint: endpoint,
+            hasWorkerApiKey: !!this.config.workerApiKey
+          });
+          
+          return await GA4Utils.ajax.sendPayloadFetch(
+            endpoint,
+            payload,
+            this.config,
+            "[GA4 Server-Side Tagging]"
+          );
+        }
+      } catch (error) {
+        this.log("❌ Error sending event", {
+          endpoint: endpoint,
+          error: error.message
+        });
+        
+        // Queue for retry if sending fails
+        this.queueEventForRetry(endpoint, payload);
+        return Promise.resolve({ error: error.message });
+      }
+    },
+
+    /**
+     * Check if secure configuration has been loaded
+     */
+    isSecureConfigLoaded: function() {
+      return !!(this.config.cloudflareWorkerUrl && this.config.workerApiKey);
+    },
+
+    // Event queuing for JWT token delays
+    eventQueue: [],
+
+    /**
+     * Queue event for retry when JWT token is not available
+     */
+    queueEventForRetry: function(endpoint, payload) {
+      this.eventQueue.push({
+        endpoint: endpoint,
+        payload: payload,
+        timestamp: Date.now()
+      });
+      
+      this.log("📦 Event queued for retry", {
+        queueLength: this.eventQueue.length,
+        endpoint: endpoint
+      });
+      
+      // Try to process queue periodically
+      this.scheduleQueueProcessing();
+    },
+
+    /**
+     * Schedule periodic queue processing
+     */
+    scheduleQueueProcessing: function() {
+      var self = this;
+      
+      // Don't schedule if already scheduled
+      if (this.queueProcessingScheduled) {
+        return;
+      }
+      
+      this.queueProcessingScheduled = true;
+      
+      setTimeout(function() {
+        self.queueProcessingScheduled = false;
+        self.processEventQueue();
+      }, 2000); // Process queue every 2 seconds
+    },
+
+    /**
+     * Process queued events
+     */
+    processEventQueue: async function() {
+      if (this.eventQueue.length === 0) {
+        return;
+      }
+      
+      this.log("🔄 Processing event queue", {
+        queueLength: this.eventQueue.length
+      });
+      
+      var processedCount = 0;
+      var failedCount = 0;
+      
+      // Process events one by one
+      for (var i = this.eventQueue.length - 1; i >= 0; i--) {
+        var queuedEvent = this.eventQueue[i];
+        
+        try {
+          // For auto endpoints, resolve to actual endpoint now
+          var actualEndpoint = queuedEvent.endpoint;
+          if (actualEndpoint === 'auto') {
+            actualEndpoint = this.config.cloudflareWorkerUrl;
+            if (!actualEndpoint) {
+              this.log("⏳ Auto endpoint still not resolved, keeping in queue");
+              failedCount++;
+              continue;
+            }
+          }
+          
+          var result = await this.sendAjaxPayload(actualEndpoint, queuedEvent.payload);
+          
+          if (result && !result.queued && !result.error) {
+            // Successfully sent, remove from queue
+            this.eventQueue.splice(i, 1);
+            processedCount++;
+            
+            this.log("✅ Queued event processed successfully", {
+              originalEndpoint: queuedEvent.endpoint,
+              actualEndpoint: actualEndpoint,
+              queueTime: Date.now() - queuedEvent.timestamp + 'ms'
+            });
+          } else {
+            failedCount++;
+          }
+        } catch (error) {
+          this.log("❌ Failed to process queued event", {
+            endpoint: queuedEvent.endpoint,
+            error: error.message
+          });
+          failedCount++;
+        }
+      }
+      
+      this.log("📊 Queue processing complete", {
+        processed: processedCount,
+        failed: failedCount,
+        remaining: this.eventQueue.length
+      });
+      
+      // Schedule next processing if events remain
+      if (this.eventQueue.length > 0) {
+        this.scheduleQueueProcessing();
+      }
     },
 
     // Log messages if debug mode is enabled

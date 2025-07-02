@@ -2521,8 +2521,12 @@
           "Content-Type": "application/json",
         };
 
-        // Add nonce for WordPress REST API
-        if (config && config.apiEndpoint && endpoint === config.apiEndpoint) {
+        // Add JWT token for secure WordPress REST API endpoints
+        if (config && config.jwtToken && config.apiEndpoint && endpoint.startsWith(config.apiEndpoint)) {
+          headers["Authorization"] = "Bearer " + config.jwtToken;
+        }
+        // Add nonce for WordPress REST API (fallback/additional auth)
+        else if (config && config.apiEndpoint && endpoint.startsWith(config.apiEndpoint)) {
           headers["X-WP-Nonce"] = config.nonce || "";
         }
 
