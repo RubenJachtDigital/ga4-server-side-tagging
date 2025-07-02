@@ -112,7 +112,6 @@ class GA4_Server_Side_Tagging_Public
         // Prepare data for the script (enhanced with GDPR consent settings)
         $script_data = array(
             'measurementId' => $measurement_id,
-            'useServerSide' => get_option('ga4_use_server_side', true),
             'debugMode' => get_option('ga4_server_side_tagging_debug_mode', false),
             'anonymizeIp' => get_option('ga4_anonymize_ip', true),
             'ga4TrackLoggedInUsers' => get_option('ga4_track_logged_in_users', true),
@@ -212,23 +211,8 @@ class GA4_Server_Side_Tagging_Public
         // Only add tracking code if we have a measurement ID
         $measurement_id = get_option('ga4_measurement_id', '');
 
-        // Get settings
-        $use_server_side = get_option('ga4_use_server_side', true);
-        $debug_mode = get_option('ga4_server_side_tagging_debug_mode', false);
-        $cloudflare_worker_url = get_option('ga4_cloudflare_worker_url', '');
-
-        if (empty($measurement_id)) {
-            return;
-        }
-
-        // Check if we should track logged-in users
-        if (is_user_logged_in() && !get_option('ga4_track_logged_in_users', true)) {
-            return;
-        }
-
-        if ($use_server_side == true) {
-            return;
-        }
+        // Server-side tagging is always enabled, so no GA4 tracking code needed
+        return;
 
 
         // Log page view

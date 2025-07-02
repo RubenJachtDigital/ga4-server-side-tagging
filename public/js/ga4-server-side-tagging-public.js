@@ -17,6 +17,16 @@
     trackedPageViews: new Set(), // Track URLs that have been tracked
 
     init: async function () {
+      // Check for bots first - if bot detected, stop all tracking
+      var userAgentInfo = GA4Utils.device.parseUserAgent();
+      var clientBehavior = GA4Utils.botDetection.getClientBehaviorData();
+      var sessionParams = { page_referrer: document.referrer || '' };
+      
+      if (GA4Utils.botDetection.isBot(userAgentInfo, sessionParams, clientBehavior)) {
+        this.log("🤖 Bot detected - stopping all GA4 tracking");
+        return;
+      }
+
       // Check if we have the required configuration
       if (!this.config.measurementId) {
         this.log("Measurement ID not configured");
@@ -40,14 +50,13 @@
       this.initializeClickTracking();
 
       // Track page view immediately (will be queued if consent not ready)
-      if (this.config.useServerSide == true) {
-        this.log("🚀 Triggering trackPageView immediately on page load - awaiting location data");
-        await this.trackPageView();
-      }
+      // Server-side tagging is always enabled
+      this.log("🚀 Triggering trackPageView immediately on page load - awaiting location data");
+      await this.trackPageView();
 
       // Log initialization
       this.log(
-        "%c GA4 Server-Side Tagging initialized v4 ",
+        "%c GA4 Server-Side Tagging initialized v1 ",
         "background: #4CAF50; color: white; font-size: 16px; font-weight: bold; padding: 8px 12px; border-radius: 4px;"
       );
     },
@@ -98,7 +107,7 @@
         currentUrl: window.location.href,
         hasConsentManager: !!(window.GA4ConsentManager),
         consentReady: this.consentReady,
-        useServerSide: this.config.useServerSide,
+        useServerSide: true, // Always enabled
         source: "onConsentReady function",
         note: "trackPageView was already called on page load - queued events will now be processed"
       });
@@ -466,6 +475,16 @@
      * REPLACE the existing trackPageView function with this enhanced version
      */
     trackPageView: async function () {
+      // Check for bots before tracking
+      var userAgentInfo = GA4Utils.device.parseUserAgent();
+      var clientBehavior = GA4Utils.botDetection.getClientBehaviorData();
+      var sessionParams = { page_referrer: document.referrer || '' };
+      
+      if (GA4Utils.botDetection.isBot(userAgentInfo, sessionParams, clientBehavior)) {
+        this.log("🤖 Bot detected - skipping page view tracking");
+        return;
+      }
+
       var currentUrl = window.location.href;
       
       this.log("🎯 trackPageView called", {
@@ -2320,7 +2339,7 @@
         
         var criticalEvents = ['page_view', 'custom_session_start', 'custom_first_visit'];
         
-        if (this.config.useServerSide && criticalEvents.includes(eventName) && hasCompleteData) {
+        if (criticalEvents.includes(eventName) && hasCompleteData) {
           // eventParams already contains complete session data - queue it directly
           var shouldSend = window.GA4ConsentManager.shouldSendEvent(eventName, eventParams, eventParams);
           
@@ -2365,13 +2384,8 @@
      * Internal tracking method (bypasses consent check)
      */
     trackEventInternal: function(eventName, eventParams) {
-      // Send server-side event if enabled
-      if (this.config.useServerSide) {
-        this.sendServerSideEvent(eventName, eventParams);
-      } else if (typeof gtag === "function") {
-        gtag("event", eventName, eventParams);
-        this.log("Sent to gtag: " + eventName);
-      }
+      // Always send server-side event (server-side tagging is always enabled)
+      this.sendServerSideEvent(eventName, eventParams);
     },
 
     /**

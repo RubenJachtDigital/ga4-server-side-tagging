@@ -8,14 +8,7 @@
     'use strict';
 
     $(document).ready(function() {
-        // Toggle server-side tagging options
-        $('#ga4_use_server_side').on('change', function() {
-            if ($(this).is(':checked')) {
-                $('#ga4_cloudflare_worker_url').closest('tr').show();
-            } else {
-                $('#ga4_cloudflare_worker_url').closest('tr').hide();
-            }
-        }).trigger('change');
+        // Server-side tagging is always enabled - Cloudflare Worker URL is always visible
 
         // Toggle debug mode options
         $('#ga4_server_side_tagging_debug_mode').on('change', function() {

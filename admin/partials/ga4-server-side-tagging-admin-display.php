@@ -306,16 +306,6 @@ if (!defined('WPINC')) {
 
                     <table class="form-table">
                         <tr>
-                            <th scope="row">Server-Side Tagging</th>
-                            <td>
-                                <label for="ga4_use_server_side">
-                                    <input type="checkbox" id="ga4_use_server_side" name="ga4_use_server_side" <?php checked($use_server_side); ?> />
-                                    Enable server-side tagging
-                                </label>
-                                <p class="description">Send events to GA4 from the server instead of the browser</p>
-                            </td>
-                        </tr>
-                        <tr>
                             <th scope="row">E-Commerce Tracking</th>
                             <td>
                                 <label for="ga4_ecommerce_tracking">

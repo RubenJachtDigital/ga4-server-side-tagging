@@ -136,12 +136,10 @@ class GA4_Server_Side_Tagging_Endpoint {
      */
     public function get_config() {
         $measurement_id = get_option( 'ga4_measurement_id', '' );
-        $use_server_side = get_option( 'ga4_use_server_side', true );
         $debug_mode = get_option( 'ga4_server_side_tagging_debug_mode', false );
         
         $config = array(
             'measurement_id' => $measurement_id,
-            'use_server_side' => $use_server_side,
             'debug_mode' => $debug_mode,
             'api_endpoint' => rest_url( 'ga4-server-side-tagging/v1/collect' ),
         );
