@@ -65,7 +65,7 @@
 
       // Log initialization
       this.log(
-        "%c GA4 Server-Side Tagging initialized v4 - Event queuing active ",
+        "%c GA4 Server-Side Tagging initialized v1 - Event queuing active ",
         "background: #4CAF50; color: white; font-size: 16px; font-weight: bold; padding: 8px 12px; border-radius: 4px;"
       );
     },
@@ -136,23 +136,12 @@
         
       } catch (error) {
         this.log("⚠️ Failed to load secure configuration in background:", error.message);
-        this.log("📦 Events will remain queued and retried periodically");
+        this.log("❌ Events will not be sent - secure config required");
         
-        // Set up retry mechanism for failed secure config loading
-        this.scheduleSecureConfigRetry();
+        // No retry - secure config loading failed
       }
     },
 
-    /**
-     * Schedule retry for secure config loading
-     */
-    scheduleSecureConfigRetry: function() {
-      var self = this;
-      setTimeout(function() {
-        self.log("🔄 Retrying secure configuration load...");
-        self.loadSecureConfigInBackground();
-      }, 5000); // Retry after 5 seconds
-    },
 
     /**
      * Process any events that were queued while waiting for secure config
@@ -3010,7 +2999,7 @@
               hasWorkerApiKey: !!this.config.workerApiKey
             });
             
-            this.queueEventForRetry('auto', payload);
+            this.queueEventForLater('auto', payload);
             return Promise.resolve({ queued: true });
           }
           
@@ -3023,7 +3012,7 @@
               secureConfigLoaded: this.isSecureConfigLoaded()
             });
             
-            this.queueEventForRetry('auto', payload);
+            this.queueEventForLater('auto', payload);
             return Promise.resolve({ queued: true });
           }
         }
@@ -3055,7 +3044,7 @@
             });
             
             // Queue the event for later processing
-            this.queueEventForRetry(endpoint, payload);
+            this.queueEventForLater(endpoint, payload);
             return Promise.resolve({ queued: true });
           }
         } else {
@@ -3067,7 +3056,7 @@
               endpoint: endpoint
             });
             
-            this.queueEventForRetry(endpoint, payload);
+            this.queueEventForLater(endpoint, payload);
             return Promise.resolve({ queued: true });
           }
           
@@ -3090,7 +3079,7 @@
         });
         
         // Queue for retry if sending fails
-        this.queueEventForRetry(endpoint, payload);
+        this.queueEventForLater(endpoint, payload);
         return Promise.resolve({ error: error.message });
       }
     },
@@ -3108,39 +3097,27 @@
     /**
      * Queue event for retry when JWT token is not available
      */
-    queueEventForRetry: function(endpoint, payload) {
+    queueEventForLater: function(endpoint, payload) {
       this.eventQueue.push({
         endpoint: endpoint,
         payload: payload,
         timestamp: Date.now()
       });
       
-      this.log("📦 Event queued for retry", {
+      this.log("📦 Event queued (will process when config ready)", {
         queueLength: this.eventQueue.length,
         endpoint: endpoint
       });
       
-      // Try to process queue periodically
-      this.scheduleQueueProcessing();
+      // Queue is processed once when secure config loads
     },
 
     /**
      * Schedule periodic queue processing
      */
-    scheduleQueueProcessing: function() {
-      var self = this;
-      
-      // Don't schedule if already scheduled
-      if (this.queueProcessingScheduled) {
-        return;
-      }
-      
-      this.queueProcessingScheduled = true;
-      
-      setTimeout(function() {
-        self.queueProcessingScheduled = false;
-        self.processEventQueue();
-      }, 2000); // Process queue every 2 seconds
+    processQueuedEvents: function() {
+      this.log("🚀 Processing queued events (no retries)");
+      this.processEventQueue();
     },
 
     /**
@@ -3168,7 +3145,8 @@
           if (actualEndpoint === 'auto') {
             actualEndpoint = this.config.cloudflareWorkerUrl;
             if (!actualEndpoint) {
-              this.log("⏳ Auto endpoint still not resolved, keeping in queue");
+              this.log("⚠️ Auto endpoint not resolved, discarding event");
+              this.eventQueue.splice(i, 1);
               failedCount++;
               continue;
             }
@@ -3187,13 +3165,17 @@
               queueTime: Date.now() - queuedEvent.timestamp + 'ms'
             });
           } else {
+            // Failed - remove from queue (no retry)
+            this.eventQueue.splice(i, 1);
             failedCount++;
           }
         } catch (error) {
-          this.log("❌ Failed to process queued event", {
+          this.log("❌ Failed to process queued event - discarding", {
             endpoint: queuedEvent.endpoint,
             error: error.message
           });
+          // Remove failed event from queue (no retry)
+          this.eventQueue.splice(i, 1);
           failedCount++;
         }
       }
@@ -3204,9 +3186,11 @@
         remaining: this.eventQueue.length
       });
       
-      // Schedule next processing if events remain
-      if (this.eventQueue.length > 0) {
-        this.scheduleQueueProcessing();
+      // No retry scheduling - failed events are discarded
+      if (failedCount > 0) {
+        this.log("⚠️ Some events failed and were discarded (no retries)", {
+          discarded: failedCount
+        });
       }
     },
 
