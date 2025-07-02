@@ -457,10 +457,6 @@ class GA4_Server_Side_Tagging_Public
         }
         $cart_items = \CompuactEudonetAPI\Functions\CustomFunctions::get_raq_cart_data();
 
-        // Log cart items for debugging
-        $this->logger->info('Quote cart items retrieved', [
-            'cart_items_count' => count($cart_items)
-        ]);
 
         if (empty($cart_items)) {
             $this->logger->warning('No cart items found for quote tracking');
@@ -548,7 +544,6 @@ class GA4_Server_Side_Tagging_Public
             return [];
         }
 
-        $this->logger->info('Getting product data for view_item event: ' . $product->get_name());
 
         // Use the enhanced build_product_data_array function
         $product_data = $this->build_product_data_array($product, null, 'product_page', 0);
