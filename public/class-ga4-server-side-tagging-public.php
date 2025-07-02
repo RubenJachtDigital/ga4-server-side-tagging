@@ -1,5 +1,9 @@
 <?php
 
+namespace GA4ServerSideTagging\Frontend;
+
+use GA4ServerSideTagging\Core\GA4_Server_Side_Tagging_Logger;
+
 /**
  * The public-facing functionality of the plugin.
  *
@@ -37,7 +41,7 @@ class GA4_Server_Side_Tagging_Public
      * @since    1.0.0
      * @param    GA4_Server_Side_Tagging_Logger    $logger    The logger instance.
      */
-    public function __construct($logger)
+    public function __construct(GA4_Server_Side_Tagging_Logger $logger)
     {
         $this->logger = $logger;
     }
@@ -656,7 +660,7 @@ class GA4_Server_Side_Tagging_Public
 
                 if (!empty($variation_attributes)) {
                     // Find matching variation
-                    $data_store = WC_Data_Store::load('product');
+                    $data_store = \WC_Data_Store::load('product');
                     $variation_id = $data_store->find_matching_product_variation($product, $variation_attributes);
 
                     if ($variation_id) {

@@ -1,4 +1,9 @@
 <?php
+
+namespace GA4ServerSideTagging\API;
+
+use GA4ServerSideTagging\Core\GA4_Server_Side_Tagging_Logger;
+
 /**
  * REST API endpoint for GA4 Server-Side Tagging.
  *
@@ -34,7 +39,7 @@ class GA4_Server_Side_Tagging_Endpoint {
      * @since    1.0.0
      * @param    GA4_Server_Side_Tagging_Logger    $logger    The logger instance.
      */
-    public function __construct( $logger ) {
+    public function __construct( GA4_Server_Side_Tagging_Logger $logger ) {
         $this->logger = $logger;
     }
 

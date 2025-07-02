@@ -1,4 +1,7 @@
 <?php
+
+namespace GA4ServerSideTagging\Core;
+
 /**
  * Handles logging for the plugin.
  *

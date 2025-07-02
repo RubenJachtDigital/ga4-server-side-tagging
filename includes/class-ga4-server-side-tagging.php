@@ -1,5 +1,13 @@
 <?php
 
+namespace GA4ServerSideTagging\Core;
+
+use GA4ServerSideTagging\Core\GA4_Server_Side_Tagging_Loader;
+use GA4ServerSideTagging\Core\GA4_Server_Side_Tagging_Logger;
+use GA4ServerSideTagging\Admin\GA4_Server_Side_Tagging_Admin;
+use GA4ServerSideTagging\Frontend\GA4_Server_Side_Tagging_Public;
+use GA4ServerSideTagging\API\GA4_Server_Side_Tagging_Endpoint;
+
 /**
  * The core plugin class.
  *

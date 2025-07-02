@@ -37,6 +37,9 @@ require_once GA4_SERVER_SIDE_TAGGING_PLUGIN_DIR . 'includes/class-ga4-server-sid
 require_once GA4_SERVER_SIDE_TAGGING_PLUGIN_DIR . 'includes/class-ga4-server-side-tagging-loader.php';
 require_once GA4_SERVER_SIDE_TAGGING_PLUGIN_DIR . 'includes/class-ga4-server-side-tagging-logger.php';
 
+// Use the namespaced classes
+use GA4ServerSideTagging\Core\GA4_Server_Side_Tagging;
+
 // Activation and deactivation hooks
 register_activation_hook( __FILE__, 'ga4_server_side_tagging_activate' );
 register_deactivation_hook( __FILE__, 'ga4_server_side_tagging_deactivate' );

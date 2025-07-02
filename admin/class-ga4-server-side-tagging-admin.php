@@ -1,4 +1,9 @@
 <?php
+
+namespace GA4ServerSideTagging\Admin;
+
+use GA4ServerSideTagging\Core\GA4_Server_Side_Tagging_Logger;
+
 /**
  * The admin-specific functionality of the plugin.
  *
@@ -36,7 +41,7 @@ class GA4_Server_Side_Tagging_Admin
      * @since    1.0.0
      * @param    GA4_Server_Side_Tagging_Logger    $logger    The logger instance.
      */
-    public function __construct($logger)
+    public function __construct(GA4_Server_Side_Tagging_Logger $logger)
     {
         $this->logger = $logger;
     }

@@ -1,4 +1,7 @@
 <?php
+
+namespace GA4ServerSideTagging\Core;
+
 /**
  * Register all actions and filters for the plugin.
  *
