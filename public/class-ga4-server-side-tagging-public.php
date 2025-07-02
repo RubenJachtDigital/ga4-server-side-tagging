@@ -115,11 +115,9 @@ class GA4_Server_Side_Tagging_Public
             'debugMode' => get_option('ga4_server_side_tagging_debug_mode', false),
             'anonymizeIp' => get_option('ga4_anonymize_ip', true),
             'ga4TrackLoggedInUsers' => get_option('ga4_track_logged_in_users', true),
-            'apiEndpoint' => rest_url('ga4-server-side-tagging/v1/collect'),
+            'apiEndpoint' => rest_url('ga4-server-side-tagging/v1'),
             'nonce' => wp_create_nonce('wp_rest'),
             'isEcommerceEnabled' => get_option('ga4_ecommerce_tracking', true),
-            'cloudflareWorkerUrl' => get_option('ga4_cloudflare_worker_url', ''),
-            'workerApiKey' => get_option('ga4_worker_api_key', ''),
             'yithRaqFormId' => get_option('ga4_yith_raq_form_id', ''),
             'conversionFormIds' => get_option('ga4_conversion_form_ids', ''),
             'currency' => function_exists('get_woocommerce_currency') ? get_woocommerce_currency() : 'EUR',
@@ -199,54 +197,6 @@ class GA4_Server_Side_Tagging_Public
 
         // NOTE: Consent manager initialization is now handled by the main tracking script
         // to ensure proper tracking instance reference is passed
-    }
-
-    /**
-     * Add GA4 tracking code to the site header.
-     *
-     * @since    1.0.0
-     */
-    public function add_ga4_tracking_code()
-    {
-        // Only add tracking code if we have a measurement ID
-        $measurement_id = get_option('ga4_measurement_id', '');
-
-        // Server-side tagging is always enabled, so no GA4 tracking code needed
-        return;
-
-
-        // Log page view
-        $this->logger->info('Page view: ' . get_the_title() . ' (' . get_permalink() . ')');
-
-        // Output the GA4 tracking code
-        ?>
-        <!-- GA4 Server-Side Tagging -->
-        <script async src="https://www.googletagmanager.com/gtag/js?id=<?php echo esc_attr($measurement_id); ?>"></script>
-
-        <script>
-            window.dataLayer = window.dataLayer || [];
-
-            function gtag() {
-                dataLayer.push(arguments);
-            }
-            gtag('js', new Date());
-
-
-            <?php if ($debug_mode): ?>
-                gtag('config', '<?php echo esc_js($measurement_id); ?>', {
-                    'debug_mode': true
-                });
-            <?php else: ?>
-                gtag('config', '<?php echo esc_js($measurement_id); ?>');
-            <?php endif; ?>
-
-            <?php if (is_user_logged_in()): ?>
-                // Set user ID for logged-in users
-                gtag('set', 'user_id', '<?php echo esc_js(get_current_user_id()); ?>');
-            <?php endif; ?>
-        </script>
-        <!-- End GA4 Server-Side Tagging -->
-        <?php
     }
 
 
@@ -400,7 +350,7 @@ class GA4_Server_Side_Tagging_Public
      * Get order data formatted for GA4 purchase event tracking.
      *
      * @since    1.0.0
-     * @param    WC_Order    $order    The WooCommerce order.
+     * @param    \WC_Order    $order    The WooCommerce order.
      * @return   array       The formatted order data.
      */
     private function get_order_data_for_tracking($order)

@@ -1193,7 +1193,7 @@ class GA4_Server_Side_Tagging_Admin
                 'api_key' => $new_api_key,
                 'message' => 'New API key generated successfully!'
             ));
-        } catch (Exception $e) {
+        } catch (\Exception $e) {
             wp_send_json_error(array('message' => 'Error generating API key: ' . $e->getMessage()));
         }
     }

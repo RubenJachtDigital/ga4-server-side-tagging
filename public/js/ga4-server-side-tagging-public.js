@@ -16,6 +16,8 @@
     consentReady: false,
     trackedPageViews: new Set(), // Track URLs that have been tracked
 
+
+
     init: async function () {
       // Check for bots first - if bot detected, stop all tracking
       var userAgentInfo = GA4Utils.device.parseUserAgent();
@@ -26,6 +28,9 @@
         this.log("🤖 Bot detected - stopping all GA4 tracking");
         return;
       }
+
+      // Load secure configuration first
+      await this.loadSecureConfig();
 
       // Check if we have the required configuration
       if (!this.config.measurementId) {
@@ -60,7 +65,38 @@
         "background: #4CAF50; color: white; font-size: 16px; font-weight: bold; padding: 8px 12px; border-radius: 4px;"
       );
     },
+    /**
+     * Load secure configuration from REST API
+     */
+    loadSecureConfig: async function() {
+      try {
+        const response = await fetch(this.config.apiEndpoint + '/secure-config', {
+          method: 'GET',
+          headers: {
+            'X-WP-Nonce': this.config.nonce,
+            'Content-Type': 'application/json'
+          }
+        });
 
+        if (response.ok) {
+          const secureConfig = await response.json();
+          this.log("🔒 Secure config response:", secureConfig);
+          
+          // Merge secure config into main config
+          this.config.cloudflareWorkerUrl = secureConfig.cloudflareWorkerUrl || '';
+          this.config.workerApiKey = secureConfig.workerApiKey || '';
+          
+          this.log("🔒 Secure configuration loaded successfully", {
+            cloudflareWorkerUrl: this.config.cloudflareWorkerUrl,
+            hasWorkerApiKey: !!this.config.workerApiKey
+          });
+        } else {
+          this.log("⚠️ Failed to load secure configuration - status:", response.status, response.statusText);
+        }
+      } catch (error) {
+        this.log("⚠️ Error loading secure configuration:", error.message);
+      }
+    },
     /**
      * Initialize consent system
      */
@@ -2398,13 +2434,15 @@
         sessionId: completeEventData.session_id
       });
       
-      // Update consent data to current status since original was DENIED
-      completeEventData.consent = window.GA4ConsentManager ? 
+      // Update consent data to current status since original was DENIED (minimal fields only)
+      var currentConsent = window.GA4ConsentManager ? 
         window.GA4ConsentManager.getConsentForServerSide() : 
         GA4Utils.consent.getForServerSide();
+      completeEventData.consent = this.getMinimalConsent(currentConsent);
       
       // If consent is now granted, refresh location data for better accuracy
-      if (completeEventData.consent && completeEventData.consent.analytics_storage === "GRANTED") {
+      // Use ad_user_data as the basis for location data collection
+      if (currentConsent && currentConsent.analytics_storage === "GRANTED") {
         // Check if IP geolocation is disabled by admin
         if (this.config.consentSettings && this.config.consentSettings.disableAllIP) {
           this.log("IP geolocation disabled by admin - keeping timezone fallback for queued event");
@@ -2442,13 +2480,13 @@
       // Remove the temporary original consent status
       delete completeEventData._originalConsentStatus;
       
-      // Determine endpoint and send
-      var endpoint = this.config.cloudflareWorkerUrl || this.config.apiEndpoint;
+      // Use Cloudflare Worker endpoint only
+      var endpoint = this.config.cloudflareWorkerUrl;
       if (endpoint) {
         var data = this.formatEventData(eventName, completeEventData, endpoint);
         this.sendAjaxPayload(endpoint, data);
       } else {
-        this.log("No server-side endpoint configured for raw event data");
+        this.log("No Cloudflare Worker URL configured");
       }
     },
 
@@ -2559,19 +2597,19 @@
         params = this.applyGDPRAnonymization(params, consentData);
       }
 
-      // Add consent data to the payload
-      params.consent = consentData;
+      // Add consent data to the payload (only essential fields)
+      params.consent = this.getMinimalConsent(consentData);
 
-      // Determine endpoint
-      var endpoint = this.config.cloudflareWorkerUrl || this.config.apiEndpoint;
+      // Use Cloudflare Worker endpoint only
+      var endpoint = this.config.cloudflareWorkerUrl;
 
       if (!endpoint) {
-        this.log("No server-side endpoint configured");
+        this.log("No Cloudflare Worker URL configured");
         return;
       }
 
       this.log("Sending to endpoint: " + endpoint, {
-        consent: consentData,
+        consent: this.getMinimalConsent(consentData),
         anonymized: consentData.analytics_storage !== "GRANTED",
         eventName: eventName
       });
@@ -2597,6 +2635,23 @@
       var sessionId = GA4Utils.session.get().id;
       return "session_" + sessionId;
     }
+  },
+
+  /**
+   * Get minimal consent object with only essential fields for payload optimization
+   */
+  getMinimalConsent: function(consentData) {
+    if (!consentData) {
+      return {
+        ad_personalization: "DENIED",
+        ad_user_data: "DENIED"
+      };
+    }
+    
+    return {
+      ad_personalization: consentData.ad_personalization || "DENIED",
+      ad_user_data: consentData.ad_user_data || "DENIED"
+    };
   },
 
   /**
@@ -2725,23 +2780,13 @@
 
 
   formatEventData: function (eventName, params, endpoint) {
-    if (endpoint === this.config.cloudflareWorkerUrl) {
-      // Direct format for Cloudflare Worker
-      var data = {
-        name: eventName,
-        params: params,
-      };
-      this.log("Using Cloudflare Worker format", data);
-      return data;
-    } else {
-      // Legacy format for WordPress REST API
-      var data = {
-        event_name: eventName,
-        event_data: params,
-      };
-      this.log("Using WordPress REST API format", data);
-      return data;
-    }
+    // Always use Cloudflare Worker format
+    var data = {
+      name: eventName,
+      params: params,
+    };
+    this.log("Using Cloudflare Worker format", data);
+    return data;
   },
     /**
      * Add location data to event parameters

@@ -60,13 +60,19 @@ class GA4_Server_Side_Tagging_Endpoint {
             'callback'            => array( $this, 'get_config' ),
             'permission_callback' => '__return_true',
         ) );
+
+        register_rest_route( 'ga4-server-side-tagging/v1', '/secure-config', array(
+            'methods'             => 'GET',
+            'callback'            => array( $this, 'get_secure_config' ),
+            'permission_callback' => array( $this, 'check_permission' ),
+        ) );
     }
 
     /**
      * Check permission for the endpoint.
      *
      * @since    1.0.0
-     * @param    WP_REST_Request    $request    The request object.
+     * @param    \WP_REST_Request    $request    The request object.
      * @return   bool                           Whether the request has permission.
      */
     public function check_permission( $request ) {
@@ -79,6 +85,15 @@ class GA4_Server_Side_Tagging_Endpoint {
 
         // Check if the request is from a valid origin
         $referer = $request->get_header( 'referer' );
+        
+        // Get origin from payload if referer header is not present
+        if ( ! $referer ) {
+            $params = $request->get_json_params();
+            if ( isset( $params['page_origin'] ) ) {
+                $referer = $params['page_origin'];
+            }
+        }
+        
         if ( ! $referer || ! wp_http_validate_url( $referer ) ) {
             $this->logger->warning( 'Invalid referer in API request' );
             return false;
@@ -100,15 +115,15 @@ class GA4_Server_Side_Tagging_Endpoint {
      * Handle the collect event endpoint.
      *
      * @since    1.0.0
-     * @param    WP_REST_Request    $request    The request object.
-     * @return   WP_REST_Response                The response object.
+     * @param    \WP_REST_Request    $request    The request object.
+     * @return   \WP_REST_Response                The response object.
      */
     public function collect_event( $request ) {
         $params = $request->get_json_params();
         
         if ( empty( $params ) || ! isset( $params['event_name'] ) || ! isset( $params['event_data'] ) ) {
             $this->logger->warning( 'Invalid event data in API request' );
-            return new WP_REST_Response( array( 'success' => false, 'message' => 'Invalid event data' ), 400 );
+            return new \WP_REST_Response( array( 'success' => false, 'message' => 'Invalid event data' ), 400 );
         }
 
         $event_name = sanitize_text_field( $params['event_name'] );
@@ -122,17 +137,17 @@ class GA4_Server_Side_Tagging_Endpoint {
         
         if ( is_wp_error( $result ) ) {
             $this->logger->error( 'Error forwarding event to GA4: ' . $result->get_error_message() );
-            return new WP_REST_Response( array( 'success' => false, 'message' => $result->get_error_message() ), 500 );
+            return new \WP_REST_Response( array( 'success' => false, 'message' => $result->get_error_message() ), 500 );
         }
 
-        return new WP_REST_Response( array( 'success' => true ), 200 );
+        return new \WP_REST_Response( array( 'success' => true ), 200 );
     }
 
     /**
      * Get the GA4 configuration.
      *
      * @since    1.0.0
-     * @return   WP_REST_Response    The response object.
+     * @return   \WP_REST_Response    The response object.
      */
     public function get_config() {
         $measurement_id = get_option( 'ga4_measurement_id', '' );
@@ -144,7 +159,22 @@ class GA4_Server_Side_Tagging_Endpoint {
             'api_endpoint' => rest_url( 'ga4-server-side-tagging/v1/collect' ),
         );
 
-        return new WP_REST_Response( $config, 200 );
+        return new \WP_REST_Response( $config, 200 );
+    }
+
+    /**
+     * Get the secure GA4 configuration (sensitive data).
+     *
+     * @since    1.0.0
+     * @return   \WP_REST_Response    The response object.
+     */
+    public function get_secure_config() {
+        $secure_config = array(
+            'cloudflareWorkerUrl' => get_option( 'ga4_cloudflare_worker_url', '' ),
+            'workerApiKey' => get_option( 'ga4_worker_api_key', '' ),
+        );
+
+        return new \WP_REST_Response( $secure_config, 200 );
     }
 
     /**
@@ -153,14 +183,14 @@ class GA4_Server_Side_Tagging_Endpoint {
      * @since    1.0.0
      * @param    string    $event_name    The event name.
      * @param    array     $event_data    The event data.
-     * @return   mixed                    The response or WP_Error.
+     * @return   mixed                    The response or \WP_Error.
      */
     private function forward_to_ga4( $event_name, $event_data ) {
         $measurement_id = get_option( 'ga4_measurement_id' );
         $api_secret = get_option( 'ga4_api_secret' );
         
         if ( empty( $measurement_id ) || empty( $api_secret ) ) {
-            return new WP_Error( 'missing_config', 'Missing measurement ID or API secret' );
+            return new \WP_Error( 'missing_config', 'Missing measurement ID or API secret' );
         }
 
         // Get client ID from request or generate one
@@ -206,7 +236,7 @@ class GA4_Server_Side_Tagging_Endpoint {
         
         if ( $response_code < 200 || $response_code >= 300 ) {
             $body = wp_remote_retrieve_body( $response );
-            return new WP_Error( 'ga4_error', 'GA4 API error: ' . $response_code . ' ' . $body );
+            return new \WP_Error( 'ga4_error', 'GA4 API error: ' . $response_code . ' ' . $body );
         }
 
         return $response;
