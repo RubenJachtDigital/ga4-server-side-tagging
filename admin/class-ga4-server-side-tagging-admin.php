@@ -526,6 +526,10 @@ class GA4_Server_Side_Tagging_Admin
             $worker_api_key = $this->generate_api_key();
             update_option('ga4_worker_api_key', $worker_api_key);
         }
+
+        // JWT Encryption settings
+        $jwt_encryption_enabled = get_option('ga4_jwt_encryption_enabled', false);
+        $jwt_encryption_key = get_option('ga4_jwt_encryption_key', '');
         
         $yith_raq_form_id = get_option('ga4_yith_raq_form_id', '');
         $conversion_form_ids = get_option('ga4_conversion_form_ids', '');
@@ -612,6 +616,24 @@ class GA4_Server_Side_Tagging_Admin
 
         if (isset($_POST['ga4_worker_api_key'])) {
             update_option('ga4_worker_api_key', sanitize_text_field(wp_unslash($_POST['ga4_worker_api_key'])));
+        }
+
+        // JWT Encryption settings
+        update_option('ga4_jwt_encryption_enabled', isset($_POST['ga4_jwt_encryption_enabled']));
+        
+        if (isset($_POST['ga4_jwt_encryption_key'])) {
+            $encryption_key = sanitize_text_field(wp_unslash($_POST['ga4_jwt_encryption_key']));
+            // Validate encryption key (should be 64 hex characters for 256-bit key)
+            if (empty($encryption_key) || (strlen($encryption_key) === 64 && ctype_xdigit($encryption_key))) {
+                update_option('ga4_jwt_encryption_key', $encryption_key);
+            } else {
+                add_settings_error(
+                    'ga4_server_side_tagging_settings',
+                    'invalid_encryption_key',
+                    'Invalid encryption key format. Must be 64 hexadecimal characters (256-bit key).',
+                    'error'
+                );
+            }
         }
 
         if (isset($_POST['ga4_yith_raq_form_id'])) {
@@ -1165,6 +1187,24 @@ class GA4_Server_Side_Tagging_Admin
     }
 
     /**
+     * Generate a secure random encryption key (256-bit)
+     *
+     * @return string Generated encryption key (64 hex characters)
+     */
+    private function generate_encryption_key()
+    {
+        // Generate a secure 256-bit encryption key (64 hex characters)
+        if (function_exists('random_bytes')) {
+            return bin2hex(random_bytes(32));
+        } elseif (function_exists('openssl_random_pseudo_bytes')) {
+            return bin2hex(openssl_random_pseudo_bytes(32));
+        } else {
+            // Fallback for older PHP versions
+            return substr(str_shuffle('abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'), 0, 64);
+        }
+    }
+
+    /**
      * AJAX handler for generating a new API key
      */
     public function ajax_generate_api_key()
@@ -1195,6 +1235,40 @@ class GA4_Server_Side_Tagging_Admin
             ));
         } catch (\Exception $e) {
             wp_send_json_error(array('message' => 'Error generating API key: ' . $e->getMessage()));
+        }
+    }
+
+    /**
+     * AJAX handler for generating a new encryption key
+     */
+    public function ajax_generate_encryption_key()
+    {
+        // Check nonce for security
+        if (!check_ajax_referer('ga4_generate_api_key', 'nonce', false)) {
+            wp_send_json_error(array('message' => 'Security check failed'));
+            return;
+        }
+
+        // Check user permissions
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error(array('message' => 'Insufficient permissions'));
+            return;
+        }
+
+        try {
+            // Generate new encryption key (256-bit = 64 hex characters)
+            $new_encryption_key = $this->generate_encryption_key();
+            
+            // Save it to options
+            update_option('ga4_jwt_encryption_key', $new_encryption_key);
+            
+            // Return success response
+            wp_send_json_success(array(
+                'encryption_key' => $new_encryption_key,
+                'message' => 'New encryption key generated successfully!'
+            ));
+        } catch (\Exception $e) {
+            wp_send_json_error(array('message' => 'Error generating encryption key: ' . $e->getMessage()));
         }
     }
 }

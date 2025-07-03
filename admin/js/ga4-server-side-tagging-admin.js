@@ -394,4 +394,120 @@
         }, 10000);
     }
 
+    // Encryption Key generation
+    $(document).on('click', '#generate_encryption_key', function(e) {
+        e.preventDefault();
+        
+        console.log('Generate Encryption Key button clicked'); // Debug log
+        
+        var $button = $(this);
+        var $input = $('#ga4_jwt_encryption_key');
+        
+        // Check if input field exists
+        if ($input.length === 0) {
+            console.error('Encryption key input field not found!');
+            alert('Error: Could not find encryption key input field. Please refresh the page and try again.');
+            return;
+        }
+        
+        // Disable button to prevent multiple clicks
+        $button.prop('disabled', true).text('Generating...');
+        
+        // Remove any existing notice
+        $('#encryption-key-generated-notice').remove();
+        
+        // Try AJAX approach first (saves to database)
+        if (typeof ga4AdminAjax !== 'undefined') {
+            console.log('Using AJAX approach for encryption key'); // Debug log
+            
+            $.ajax({
+                url: ga4AdminAjax.ajax_url,
+                type: 'POST',
+                data: {
+                    action: 'ga4_generate_encryption_key',
+                    nonce: ga4AdminAjax.nonce
+                },
+                success: function(response) {
+                    console.log('AJAX response:', response); // Debug log
+                    
+                    if (response.success) {
+                        $input.val(response.data.encryption_key);
+                        showEncryptionSuccessNotice($button, 'New encryption key generated and saved! Update your Cloudflare Worker with this key.');
+                    } else {
+                        console.error('AJAX error:', response.data.message);
+                        // Fallback to client-side generation
+                        generateClientSideEncryptionKey($input, $button);
+                    }
+                },
+                error: function(xhr, status, error) {
+                    console.error('AJAX request failed:', error);
+                    // Fallback to client-side generation
+                    generateClientSideEncryptionKey($input, $button);
+                },
+                complete: function() {
+                    $button.prop('disabled', false).text('Generate New Encryption Key');
+                }
+            });
+        } else {
+            // Fallback to client-side generation
+            generateClientSideEncryptionKey($input, $button);
+            $button.prop('disabled', false).text('Generate New Encryption Key');
+        }
+    });
+    
+    // Client-side encryption key generation function
+    function generateClientSideEncryptionKey($input, $button) {
+        try {
+            console.log('Using client-side generation for encryption key'); // Debug log
+            
+            // Generate a random 64-character hex encryption key (256-bit)
+            var chars = '0123456789abcdef';
+            var encryptionKey = '';
+            for (var i = 0; i < 64; i++) {
+                encryptionKey += chars.charAt(Math.floor(Math.random() * chars.length));
+            }
+            
+            console.log('Generated Encryption Key (client-side):', encryptionKey); // Debug log
+            
+            $input.val(encryptionKey);
+            showEncryptionSuccessNotice($button, 'New encryption key generated! Remember to save settings and update your Cloudflare Worker.');
+            
+        } catch (error) {
+            console.error('Error generating encryption key:', error);
+            showEncryptionErrorNotice($button, 'Error generating encryption key: ' + error.message);
+        }
+    }
+    
+    // Show encryption success notice
+    function showEncryptionSuccessNotice($button, message) {
+        var notice = '<div id="encryption-key-generated-notice" class="notice notice-success inline" style="margin-left: 10px; padding: 5px 10px; display: inline-block;">' +
+            '<p style="margin: 0;"><strong>✓ ' + message + '</strong></p>' +
+            '</div>';
+        
+        $button.after(notice);
+        
+        // Remove the notice after 8 seconds
+        setTimeout(function() {
+            $('#encryption-key-generated-notice').fadeOut(500, function() {
+                $(this).remove();
+            });
+        }, 8000);
+    }
+    
+    // Show encryption error notice
+    function showEncryptionErrorNotice($button, message) {
+        var notice = '<div id="encryption-key-generated-notice" class="notice notice-error inline" style="margin-left: 10px; padding: 5px 10px; display: inline-block;">' +
+            '<p style="margin: 0;"><strong>✗ ' + message + '</strong></p>' +
+            '</div>';
+        
+        $button.after(notice);
+        
+        // Remove the notice after 10 seconds
+        setTimeout(function() {
+            $('#encryption-key-generated-notice').fadeOut(500, function() {
+                $(this).remove();
+            });
+        }, 10000);
+    }
+
 })( jQuery ); 

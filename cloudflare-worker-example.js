@@ -26,6 +26,187 @@ const MAX_PAYLOAD_SIZE = 50000; // Max payload size in bytes (50KB)
 const REQUIRE_API_KEY = true; // Set to true to require API key authentication
 const API_KEY = "api-key-from-wordpress-admin"; // API key from WordPress admin
 
+// JWT Encryption Configuration
+const JWT_ENCRYPTION_ENABLED = false; // Set to true to enable JWT encryption
+const ENCRYPTION_KEY = "your-256-bit-encryption-key-here"; // 64-character hex key from WordPress admin
+
+/**
+ * =============================================================================
+ * JWT ENCRYPTION UTILITIES
+ * =============================================================================
+ */
+
+/**
+ * Encrypt data using AES-GCM (if crypto.subtle is available) or XOR fallback
+ * @param {string} plaintext - Text to encrypt
+ * @param {string} keyHex - Encryption key as hex string
+ * @returns {Promise<string>} - Encrypted text as hex string
+ */
+async function encrypt(plaintext, keyHex) {
+  try {
+    if (crypto && crypto.subtle && keyHex.length === 64) {
+      return await encryptWithWebCrypto(plaintext, keyHex);
+    } else {
+      return encryptWithXOR(plaintext, keyHex);
+    }
+  } catch (error) {
+    console.warn('Encryption failed, falling back to XOR:', error);
+    return encryptWithXOR(plaintext, keyHex);
+  }
+}
+
+/**
+ * Decrypt data using AES-GCM (if crypto.subtle is available) or XOR fallback
+ * @param {string} encryptedHex - Encrypted text as hex string
+ * @param {string} keyHex - Encryption key as hex string
+ * @returns {Promise<string>} - Decrypted plaintext
+ */
+async function decrypt(encryptedHex, keyHex) {
+  try {
+    if (crypto && crypto.subtle && keyHex.length === 64) {
+      return await decryptWithWebCrypto(encryptedHex, keyHex);
+    } else {
+      return decryptWithXOR(encryptedHex, keyHex);
+    }
+  } catch (error) {
+    console.warn('Decryption failed, falling back to XOR:', error);
+    return decryptWithXOR(encryptedHex, keyHex);
+  }
+}
+
+/**
+ * Encrypt using Web Crypto API (AES-GCM)
+ */
+async function encryptWithWebCrypto(plaintext, keyHex) {
+  const keyBytes = hexToBytes(keyHex);
+  const plaintextBytes = new TextEncoder().encode(plaintext);
+  
+  // Generate random IV (12 bytes for GCM)
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  
+  // Import key
+  const cryptoKey = await crypto.subtle.importKey(
+    'raw',
+    keyBytes,
+    { name: 'AES-GCM' },
+    false,
+    ['encrypt']
+  );
+  
+  // Encrypt using AES-256-GCM
+  const encryptResult = await crypto.subtle.encrypt(
+    { name: 'AES-GCM', iv: iv },
+    cryptoKey,
+    plaintextBytes
+  );
+  
+  // Extract encrypted data and auth tag (last 16 bytes)
+  const encryptedArray = new Uint8Array(encryptResult);
+  const encrypted = encryptedArray.slice(0, -16);
+  const tag = encryptedArray.slice(-16);
+  
+  // Combine IV + encrypted data + tag (to match PHP implementation)
+  const combined = new Uint8Array(iv.length + encrypted.length + tag.length);
+  combined.set(iv);
+  combined.set(encrypted, iv.length);
+  combined.set(tag, iv.length + encrypted.length);
+  
+  return bytesToHex(combined);
+}
+
+/**
+ * Decrypt using Web Crypto API (AES-GCM)
+ */
+async function decryptWithWebCrypto(encryptedHex, keyHex) {
+  const keyBytes = hexToBytes(keyHex);
+  const encryptedBytes = hexToBytes(encryptedHex);
+  
+  // Extract IV, encrypted data, and tag (to match PHP implementation)
+  const ivLength = 12; // GCM IV length
+  const tagLength = 16; // GCM tag length
+  
+  if (encryptedBytes.length < ivLength + tagLength) {
+    throw new Error('Invalid encrypted data length');
+  }
+
+  const iv = encryptedBytes.slice(0, ivLength);
+  const tag = encryptedBytes.slice(-tagLength);
+  const encrypted = encryptedBytes.slice(ivLength, -tagLength);
+  
+  // Import key
+  const cryptoKey = await crypto.subtle.importKey(
+    'raw',
+    keyBytes,
+    { name: 'AES-GCM' },
+    false,
+    ['decrypt']
+  );
+  
+  // Combine encrypted data and tag for decryption
+  const encryptedWithTag = new Uint8Array(encrypted.length + tag.length);
+  encryptedWithTag.set(encrypted);
+  encryptedWithTag.set(tag, encrypted.length);
+  
+  // Decrypt using AES-256-GCM
+  const decrypted = await crypto.subtle.decrypt(
+    { name: 'AES-GCM', iv: iv },
+    cryptoKey,
+    encryptedWithTag
+  );
+  
+  return new TextDecoder().decode(decrypted);
+}
+
+/**
+ * Fallback XOR encryption
+ */
+function encryptWithXOR(plaintext, keyHex) {
+  const keyBytes = hexToBytes(keyHex);
+  const plaintextBytes = new TextEncoder().encode(plaintext);
+  const encrypted = new Uint8Array(plaintextBytes.length);
+  
+  for (let i = 0; i < plaintextBytes.length; i++) {
+    encrypted[i] = plaintextBytes[i] ^ keyBytes[i % keyBytes.length];
+  }
+  
+  return bytesToHex(encrypted);
+}
+
+/**
+ * Fallback XOR decryption
+ */
+function decryptWithXOR(encryptedHex, keyHex) {
+  const keyBytes = hexToBytes(keyHex);
+  const encryptedBytes = hexToBytes(encryptedHex);
+  const decrypted = new Uint8Array(encryptedBytes.length);
+  
+  for (let i = 0; i < encryptedBytes.length; i++) {
+    decrypted[i] = encryptedBytes[i] ^ keyBytes[i % keyBytes.length];
+  }
+  
+  return new TextDecoder().decode(decrypted);
+}
+
+/**
+ * Convert hex string to bytes
+ */
+function hexToBytes(hex) {
+  const bytes = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < hex.length; i += 2) {
+    bytes[i / 2] = parseInt(hex.substr(i, 2), 16);
+  }
+  return bytes;
+}
+
+/**
+ * Convert bytes to hex string
+ */
+function bytesToHex(bytes) {
+  return Array.from(bytes)
+    .map(byte => byte.toString(16).padStart(2, '0'))
+    .join('');
+}
+
 /**
  * =============================================================================
  * GDPR CONSENT HANDLING
@@ -913,7 +1094,45 @@ async function handleRequest(request) {
 
   try {
     // Parse the request body
-    const payload = await request.json();
+    let payload = await request.json();
+
+    // Check if the request is encrypted
+    const isEncrypted = request.headers.get('X-Encrypted') === 'true';
+    console.log("Is encrypted: " + isEncrypted);
+    if (isEncrypted && JWT_ENCRYPTION_ENABLED && ENCRYPTION_KEY) {
+      if (DEBUG_MODE) {
+        console.log("🔒 Processing encrypted request");
+      }
+      
+      try {
+        if (payload.encrypted) {
+          const decryptedData = await decrypt(payload.encrypted, ENCRYPTION_KEY);
+          payload = JSON.parse(decryptedData);
+          
+          if (DEBUG_MODE) {
+            console.log("🔓 Request successfully decrypted");
+          }
+        } else {
+          console.warn("Request marked as encrypted but no encrypted data found");
+        }
+      } catch (decryptError) {
+        console.error("Failed to decrypt request:", decryptError);
+        return new Response(
+          JSON.stringify({
+            success: false,
+            error: "Decryption failed",
+            details: decryptError.message
+          }),
+          {
+            status: 400,
+            headers: {
+              "Content-Type": "application/json",
+              ...getCORSHeaders(request),
+            },
+          }
+        );
+      }
+    }
 
     if (DEBUG_MODE) {
       console.log("Received payload:", JSON.stringify(payload));
@@ -944,23 +1163,16 @@ async function handleRequest(request) {
       logBotDetection(botDetection, request, consentProcessedPayload);
       
       // Return success response but don't process the event
-      return new Response(
-        JSON.stringify({
-          success: true,
-          filtered: true,
-          reason: "bot_detected",
-          bot_score: botDetection.score,
-          bot_details: botDetection,
-          gdpr_processed: true
-        }),
-        {
-          status: 200,
-          headers: {
-            "Content-Type": "application/json",
-            ...getCORSHeaders(request),
-          },
-        }
-      );
+      const botResponseData = {
+        success: true,
+        filtered: true,
+        reason: "bot_detected",
+        bot_score: botDetection.score,
+        bot_details: botDetection,
+        gdpr_processed: true
+      };
+      
+      return await createResponse(botResponseData, request);
     }
 
     // Log legitimate traffic (optional, for monitoring)
@@ -983,21 +1195,32 @@ async function handleRequest(request) {
     // Log the error
     console.error("Error processing request:", error);
 
-    // Return error response
-    return new Response(
-      JSON.stringify({
-        success: false,
-        error: error.message,
-        gdpr_processed: false
-      }),
-      {
+    // Return error response (encrypted if supported)
+    const errorResponseData = {
+      success: false,
+      error: error.message,
+      gdpr_processed: false
+    };
+    
+    try {
+      const errorResponse = await createResponse(errorResponseData, request);
+      return new Response(errorResponse.body, {
         status: 500,
-        headers: {
-          "Content-Type": "application/json",
-          ...getCORSHeaders(request),
-        },
-      }
-    );
+        headers: errorResponse.headers
+      });
+    } catch (encryptError) {
+      // Fallback to unencrypted response if encryption fails
+      return new Response(
+        JSON.stringify(errorResponseData),
+        {
+          status: 500,
+          headers: {
+            "Content-Type": "application/json",
+            ...getCORSHeaders(request),
+          },
+        }
+      );
+    }
   }
 }
 
@@ -1229,24 +1452,51 @@ async function handleGA4Event(payload, request) {
     console.log("GA4 API Response Body:", ga4ResponseBody);
   }
 
-  // Return success response with consent information
-  return new Response(
-    JSON.stringify({
-      "success": true,
-      "event": processedData.name,
-      "ga4_status": ga4Response.status,
-      "ga4_response": DEBUG_MODE ? ga4ResponseBody : undefined,
-      "debug": ga4Payload,
-      "consent_applied": ga4Payload.consent ? true : false,
-      "consent_mode": ga4Payload.consent?.ad_user_data || 'unknown'
-    }),
-    {
-      headers: {
-        "Content-Type": "application/json",
-        ...getCORSHeaders(request),
-      },
+  // Prepare response data
+  const responseData = {
+    "success": true,
+    "event": processedData.name,
+    "ga4_status": ga4Response.status,
+    "ga4_response": DEBUG_MODE ? ga4ResponseBody : undefined,
+    "debug": ga4Payload,
+    "consent_applied": ga4Payload.consent ? true : false,
+    "consent_mode": ga4Payload.consent?.ad_user_data || 'unknown'
+  };
+
+  // Return encrypted response if requested
+  return await createResponse(responseData, request);
+}
+
+/**
+ * Create response with optional encryption
+ * @param {Object} responseData - Data to send in response
+ * @param {Request} request - Original request to check encryption headers
+ * @returns {Promise<Response>} - Response object
+ */
+async function createResponse(responseData, request) {
+  let responseBody = JSON.stringify(responseData);
+  const headers = {
+    "Content-Type": "application/json",
+    ...getCORSHeaders(request),
+  };
+
+  // Check if client supports encryption and encryption is enabled
+  const isEncrypted = request.headers.get('X-Encrypted') === 'true';
+  
+  if (isEncrypted && JWT_ENCRYPTION_ENABLED && ENCRYPTION_KEY) {
+    try {
+      const encryptedData = await encrypt(responseBody, ENCRYPTION_KEY);
+      responseBody = JSON.stringify({ encrypted: encryptedData });
+      
+      if (DEBUG_MODE) {
+        console.log("🔐 Response encrypted");
+      }
+    } catch (encryptError) {
+      console.warn("Failed to encrypt response, sending unencrypted:", encryptError);
     }
-  );
+  }
+
+  return new Response(responseBody, { headers });
 }
 
 /**

@@ -81,6 +81,9 @@ class GA4_Server_Side_Tagging
 
         // API endpoint for server-side tagging
         require_once GA4_SERVER_SIDE_TAGGING_PLUGIN_DIR . 'includes/class-ga4-server-side-tagging-endpoint.php';
+        
+        // Encryption utilities
+        require_once GA4_SERVER_SIDE_TAGGING_PLUGIN_DIR . 'includes/class-ga4-encryption-util.php';
     }
 
     /**
@@ -104,6 +107,9 @@ class GA4_Server_Side_Tagging
         
         // Add AJAX handler for generating API key
         $this->loader->add_action('wp_ajax_ga4_generate_api_key', $plugin_admin, 'ajax_generate_api_key');
+        
+        // Add AJAX handler for generating encryption key
+        $this->loader->add_action('wp_ajax_ga4_generate_encryption_key', $plugin_admin, 'ajax_generate_encryption_key');
     }
 
     /**

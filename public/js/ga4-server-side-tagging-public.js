@@ -77,16 +77,50 @@
      */
     requestJWTToken: async function() {
       try {
+        let requestData = {
+          timestamp: Date.now(),
+          userAgent: navigator.userAgent.substring(0, 100) // Truncate for security
+        };
+
+        let requestBody = JSON.stringify(requestData);
+        let headers = {
+          'X-WP-Nonce': this.config.nonce,
+          'Content-Type': 'application/json'
+        };
+
+        // Apply encryption if enabled
+        if (this.config.jwtEncryptionEnabled && this.config.jwtEncryptionKey) {
+          try {
+            const encryptedData = await GA4Utils.encryption.encrypt(requestBody, this.config.jwtEncryptionKey);
+            requestBody = JSON.stringify({ encrypted: encryptedData });
+            headers['X-Encrypted'] = 'true';
+            this.log("🔐 JWT token request encrypted");
+          } catch (encError) {
+            this.log("⚠️ Failed to encrypt JWT token request, falling back to unencrypted:", encError.message);
+          }
+        }
+
         const response = await fetch(this.config.apiEndpoint + '/auth-token', {
           method: 'POST',
-          headers: {
-            'X-WP-Nonce': this.config.nonce,
-            'Content-Type': 'application/json'
-          }
+          headers: headers,
+          body: requestBody
         });
 
         if (response.ok) {
-          const tokenData = await response.json();
+          let tokenData = await response.json();
+          
+          // Decrypt response if it was encrypted
+          if (tokenData.encrypted && this.config.jwtEncryptionEnabled && this.config.jwtEncryptionKey) {
+            try {
+              const decryptedData = await GA4Utils.encryption.decrypt(tokenData.encrypted, this.config.jwtEncryptionKey);
+              tokenData = JSON.parse(decryptedData);
+              this.log("🔓 JWT token response decrypted");
+            } catch (decError) {
+              this.log("⚠️ Failed to decrypt JWT token response:", decError.message);
+              return false;
+            }
+          }
+
           this.jwtToken = tokenData.token;
           this.jwtTokenExpiry = Date.now() + (tokenData.expires_in * 1000);
           this.log("🔑 JWT token obtained successfully");
@@ -161,25 +195,54 @@
         // Get valid JWT token first
         const token = await this.getValidJWTToken();
         
+        let headers = {
+          'Authorization': 'Bearer ' + token,
+          'Content-Type': 'application/json'
+        };
+
+        // Add encryption header if encryption is enabled
+        if (this.config.jwtEncryptionEnabled && this.config.jwtEncryptionKey) {
+          headers['X-Encrypted'] = 'true';
+        }
+        
         const response = await fetch(this.config.apiEndpoint + '/secure-config', {
           method: 'GET',
-          headers: {
-            'Authorization': 'Bearer ' + token,
-            'Content-Type': 'application/json'
-          }
+          headers: headers
         });
 
         if (response.ok) {
-          const secureConfig = await response.json();
+          let secureConfig = await response.json();
+          
+          // Decrypt response if it was encrypted
+          if (secureConfig.encrypted && this.config.jwtEncryptionEnabled && this.config.jwtEncryptionKey) {
+            try {
+              const decryptedData = await GA4Utils.encryption.decrypt(secureConfig.encrypted, this.config.jwtEncryptionKey);
+              secureConfig = JSON.parse(decryptedData);
+              this.log("🔓 Secure config response decrypted");
+            } catch (decError) {
+              this.log("⚠️ Failed to decrypt secure config response:", decError.message);
+              return;
+            }
+          }
+          
           this.log("🔒 Secure config response:", secureConfig);
           
           // Merge secure config into main config
           this.config.cloudflareWorkerUrl = secureConfig.cloudflareWorkerUrl || '';
           this.config.workerApiKey = secureConfig.workerApiKey || '';
           
+          // Load encryption settings from secure config if not already present
+          if (secureConfig.jwtEncryptionEnabled !== undefined) {
+            this.config.jwtEncryptionEnabled = secureConfig.jwtEncryptionEnabled;
+          }
+          if (secureConfig.jwtEncryptionKey && !this.config.jwtEncryptionKey) {
+            this.config.jwtEncryptionKey = secureConfig.jwtEncryptionKey;
+          }
+          
           this.log("🔒 Secure configuration loaded successfully", {
             cloudflareWorkerUrl: this.config.cloudflareWorkerUrl,
-            hasWorkerApiKey: !!this.config.workerApiKey
+            hasWorkerApiKey: !!this.config.workerApiKey,
+            encryptionEnabled: !!this.config.jwtEncryptionEnabled
           });
         } else {
           this.log("⚠️ Failed to load secure configuration - status:", response.status, response.statusText);

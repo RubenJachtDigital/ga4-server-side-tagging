@@ -370,6 +370,30 @@ if (!defined('WPINC')) {
                                 <p class="description"><strong>Important:</strong> Copy this API key and paste it into your Cloudflare Worker configuration.</p>
                             </td>
                         </tr>
+                        <tr>
+                            <th scope="row">
+                                <label for="ga4_jwt_encryption_enabled">JWT Encryption</label>
+                            </th>
+                            <td>
+                                <label for="ga4_jwt_encryption_enabled">
+                                    <input type="checkbox" id="ga4_jwt_encryption_enabled" name="ga4_jwt_encryption_enabled" <?php checked($jwt_encryption_enabled ?? false); ?> />
+                                    Enable JWT encryption for secure requests
+                                </label>
+                                <p class="description">Encrypt JWT tokens and API calls for enhanced security</p>
+                            </td>
+                        </tr>
+                        <tr id="encryption_key_row" style="<?php echo ($jwt_encryption_enabled ?? false) ? '' : 'display: none;'; ?>">
+                            <th scope="row">
+                                <label for="ga4_jwt_encryption_key">JWT Encryption Key</label>
+                            </th>
+                            <td>
+                                <input type="text" id="ga4_jwt_encryption_key" name="ga4_jwt_encryption_key"
+                                    value="<?php echo esc_attr($jwt_encryption_key ?? ''); ?>" class="regular-text" />
+                                <button type="button" id="generate_encryption_key" class="button button-secondary" style="margin-left: 10px;">Generate New Encryption Key</button>
+                                <p class="description">256-bit encryption key for JWT token encryption. Click "Generate New Encryption Key" to create a secure key.</p>
+                                <p class="description"><strong>Important:</strong> Copy this encryption key and paste it into your Cloudflare Worker configuration as the ENCRYPTION_KEY constant.</p>
+                            </td>
+                        </tr>
                     </table>
                 </div>
 
@@ -515,6 +539,15 @@ jQuery(document).ready(function($) {
     // Listen for changes to the timeout input
     $('#ga4_consent_default_timeout').on('input change keyup', function() {
         toggleTimeoutActionVisibility();
+    });
+    
+    // Toggle encryption key visibility based on JWT encryption checkbox
+    $('#ga4_jwt_encryption_enabled').on('change', function() {
+        if ($(this).is(':checked')) {
+            $('#encryption_key_row').show();
+        } else {
+            $('#encryption_key_row').hide();
+        }
     });
 });
 </script>

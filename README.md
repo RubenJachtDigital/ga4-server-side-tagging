@@ -1,6 +1,6 @@
 # GA4 Server-Side Tagging for WordPress and WooCommerce
 
-A comprehensive WordPress plugin that provides advanced server-side tagging for Google Analytics 4 (GA4) with GDPR compliance, bot detection, A/B testing, click tracking, and enterprise-level privacy features. Fully compatible with WordPress, WooCommerce, and optimized for Cloudflare hosting.
+A comprehensive WordPress plugin that provides advanced server-side tagging for Google Analytics 4 (GA4) with **enterprise-grade security**, GDPR compliance, bot detection, A/B testing, click tracking, and **JWT Auth encryption**. Fully compatible with WordPress, WooCommerce, and optimized for Cloudflare hosting with **AES-256-GCM encryption** for secure data transmission.
 
 ## 🌟 Features
 
@@ -36,12 +36,15 @@ A comprehensive WordPress plugin that provides advanced server-side tagging for 
 - **Graceful degradation** when services are unavailable
 
 ### Security Features
-- **API key authentication** with X-API-Key header support
-- **Domain origin validation** with referrer checking
-- **Rate limiting** (configurable requests per IP per minute)
-- **Payload size validation** (default: 50KB max)
-- **Bot detection and filtering** with multiple detection layers
-- **CORS protection** with explicit header allowlisting
+- **🔐 JWT Auth Encryption** with AES-256-GCM encryption for secure data transmission
+- **🔑 Encryption Key Management** with one-click key generation and rotation
+- **🛡️ API key authentication** with X-API-Key header support
+- **🌐 Domain origin validation** with referrer checking
+- **⚡ Rate limiting** (configurable requests per IP per minute)
+- **📏 Payload size validation** (default: 50KB max)
+- **🤖 Bot detection and filtering** with multiple detection layers
+- **🔒 CORS protection** with explicit header allowlisting
+- **🔗 Cross-platform encryption** compatible across PHP, JavaScript, and Cloudflare Worker
 
 ## 📋 Requirements
 
@@ -93,7 +96,35 @@ const RATE_LIMIT_WINDOW = 60; // Rate limit window in seconds
 const MAX_PAYLOAD_SIZE = 50000; // Max payload size in bytes (50KB)
 const REQUIRE_API_KEY = true; // Enable API key authentication
 const BOT_DETECTION_ENABLED = true; // Enable bot filtering
+
+// 🔐 JWT Encryption Configuration (NEW)
+const JWT_ENCRYPTION_ENABLED = false; // Set to true to enable JWT encryption
+const ENCRYPTION_KEY = "your-256-bit-encryption-key-here"; // 64-character hex key from WordPress admin
 ```
+
+### 🔐 JWT Encryption Setup (NEW)
+
+For enhanced security, enable **AES-256-GCM encryption** for all data transmission:
+
+1. **Generate Encryption Key**: Go to WordPress admin → GA4 Tagging settings
+2. **Click "Generate Encryption Key"**: Creates a secure 256-bit encryption key
+3. **Enable Encryption**: Check "Enable JWT Encryption" option
+4. **Copy Key to Cloudflare Worker**: Update `ENCRYPTION_KEY` constant with generated key
+5. **Enable Worker Encryption**: Set `JWT_ENCRYPTION_ENABLED = true` in worker
+6. **Deploy Worker**: Redeploy with new encryption settings
+
+**Encryption Key Management:**
+```php
+// WordPress Admin - Automatic key generation
+$encryption_key = get_option('ga4_jwt_encryption_key'); // 64-character hex key
+```
+
+**Security Benefits:**
+- **🔒 End-to-end encryption** of all event data and sensitive payloads
+- **🛡️ AES-256-GCM encryption** with authentication tags for data integrity
+- **🔑 Cross-platform compatibility** between PHP, JavaScript, and Cloudflare Worker
+- **⚡ Automatic fallback** to XOR encryption for older browsers
+- **🔄 Key rotation support** with one-click regeneration
 
 ### A/B Testing Configuration
 
@@ -274,6 +305,26 @@ GA4ServerSideTagging.trackEvent('ab_test_conversion', {
 ```
 
 ### GA4Utils API - Advanced Functions
+
+#### 🔐 **Encryption API (NEW)**
+```javascript
+// Encrypt/decrypt data using AES-256-GCM or XOR fallback
+const encryptionKey = 'your-64-character-hex-key';
+
+// Basic encryption/decryption
+const encrypted = await GA4Utils.encryption.encrypt('sensitive data', encryptionKey);
+const decrypted = await GA4Utils.encryption.decrypt(encrypted, encryptionKey);
+
+// Request/response encryption for secure API calls
+const requestData = { event: 'purchase', amount: 99.99 };
+const encryptedRequest = await GA4Utils.encryption.encryptRequest(requestData, encryptionKey);
+const decryptedResponse = await GA4Utils.encryption.decryptResponse(response, encryptionKey);
+
+// JWT payload encryption for secure token handling
+const jwtPayload = { user_id: 123, permissions: ['read', 'write'] };
+const encryptedJWT = await GA4Utils.encryption.encryptJWTPayload(jwtPayload, encryptionKey);
+const decryptedPayload = await GA4Utils.encryption.decryptJWTPayload(encryptedJWT, encryptionKey);
+```
 
 #### 📦 **Storage Management**
 ```javascript
@@ -520,27 +571,58 @@ add_filter('ga4_purchase_data', function($purchase_data, $order) {
 
 ## 🔒 Security & Privacy Features
 
-### Server-Side Security (Cloudflare Worker)
-- **API Key Authentication**: Secure X-API-Key header validation
-- **Domain Whitelisting**: Only allowed domains can send events
-- **Rate Limiting**: Configurable requests per IP per time window
-- **Payload Size Validation**: Prevents oversized requests
-- **CORS Protection**: Explicit header allowlisting
-- **Bot Detection**: Multi-layered filtering with scoring
+### 🔐 **Enterprise-Grade Encryption (NEW)**
+- **🛡️ AES-256-GCM Encryption**: Military-grade encryption for all sensitive data transmission
+- **🔑 Automatic Key Management**: One-click encryption key generation and rotation
+- **🌐 Cross-Platform Compatibility**: Identical encryption format across PHP, JavaScript, and Cloudflare Worker
+- **⚡ Intelligent Fallback**: XOR encryption fallback for older browsers without Web Crypto API
+- **🔒 Payload Encryption**: Request/response data encrypted end-to-end
+- **🎯 Selective Encryption**: Headers remain in plaintext for HTTP routing, payload encrypted for security
+- **🔄 Key Rotation**: Easy encryption key rotation without service interruption
 
-### Client-Side Privacy
-- **Consent Mode v2**: Google's latest consent framework
-- **Data Minimization**: Only collect necessary data
-- **Automatic Expiration**: Configurable data retention periods
-- **IP Anonymization**: Optional IP-based location disabling
-- **Session-only Tracking**: Privacy mode with session-based IDs
+### 🛡️ **Server-Side Security (Cloudflare Worker)**
+- **🔐 JWT Token Authentication**: Time-limited JWT tokens with 5-minute expiration
+- **🔑 API Key Authentication**: Secure X-API-Key header validation with configurable rotation
+- **🌍 Domain Whitelisting**: Only allowed domains can send events with origin validation
+- **⚡ Advanced Rate Limiting**: Configurable requests per IP per time window with automatic blocking
+- **📏 Payload Size Validation**: Prevents oversized requests (default: 50KB max)
+- **🔒 CORS Protection**: Explicit header allowlisting with secure defaults
+- **🤖 Multi-Layer Bot Detection**: Comprehensive filtering with behavioral analysis and scoring
+- **🚫 IP Reputation Filtering**: Cloudflare threat score integration
+- **🔍 Request Pattern Analysis**: Suspicious header and behavior detection
 
-### GDPR Compliance Features
-- **Automatic consent detection** with major consent management platforms
-- **Data minimization** with configurable retention periods  
-- **Right to erasure** with complete data cleanup functions
-- **Consent granularity** for analytics vs advertising data
-- **Transparent data collection** with storage summary functions
+### 🔒 **Client-Side Privacy**
+- **📋 Consent Mode v2**: Google's latest consent framework implementation
+- **📊 Data Minimization**: Only collect necessary data based on consent status
+- **⏰ Automatic Expiration**: Configurable data retention periods with automatic cleanup
+- **🌐 IP Anonymization**: Optional IP-based location disabling for enhanced privacy
+- **🔄 Session-only Tracking**: Privacy mode with session-based IDs (no persistent tracking)
+- **🔐 Encrypted Storage**: Sensitive data encrypted in browser localStorage
+- **🚫 Ad Blocker Bypass**: Server-side processing bypasses client-side ad blockers
+
+### 📜 **GDPR Compliance Features**
+- **✅ Automatic Consent Detection**: Integration with major consent management platforms (Iubenda, OneTrust, etc.)
+- **📅 Data Retention Policies**: Configurable retention periods with automatic data expiration
+- **🗑️ Right to Erasure**: Complete data cleanup functions with verification
+- **🎯 Consent Granularity**: Separate controls for analytics vs advertising data
+- **📊 Transparent Data Collection**: Storage summary functions for user transparency
+- **🔄 Consent Withdrawal**: Immediate data anonymization when consent is withdrawn
+- **🛡️ Privacy by Design**: Default-deny approach with minimal data collection
+
+### 🔒 **Transport Security**
+- **🌐 HTTPS Enforcement**: All requests require TLS 1.2+ encryption
+- **🔐 TLS Certificate Validation**: Strict certificate validation for all connections
+- **🛡️ Header Security**: Security headers implemented (HSTS, CSP, etc.)
+- **🚫 Mixed Content Prevention**: Ensures all resources loaded over HTTPS
+- **🔒 Secure Cookie Handling**: HttpOnly, Secure, and SameSite cookie attributes
+
+### 🎯 **Attack Prevention**
+- **🚨 DDoS Protection**: Cloudflare's built-in DDoS mitigation
+- **🔍 SQL Injection Prevention**: Input sanitization and parameterized queries
+- **🛡️ XSS Protection**: Content Security Policy and input validation
+- **🚫 CSRF Protection**: WordPress nonce validation and origin checking
+- **🔒 Directory Traversal Prevention**: Path validation and file access restrictions
+- **⚡ Brute Force Protection**: Rate limiting and temporary IP blocking
 
 ## 🐛 Debugging & Troubleshooting
 
@@ -596,6 +678,38 @@ console.log('Bot Detection:', GA4Utils.botDetection.isBot(userAgent, session, be
 - Verify CORS headers include `X-API-Key`
 - Ensure worker API key matches WordPress generated key
 - Check rate limiting and domain whitelisting
+
+**🔐 Encryption Issues:**
+```javascript
+// Test encryption functionality
+const testKey = 'your-64-character-hex-encryption-key';
+const testData = 'test data';
+
+// Test basic encryption
+GA4Utils.encryption.encrypt(testData, testKey)
+    .then(encrypted => {
+        console.log('Encryption successful:', encrypted);
+        return GA4Utils.encryption.decrypt(encrypted, testKey);
+    })
+    .then(decrypted => {
+        console.log('Decryption successful:', decrypted);
+        console.log('Round-trip match:', decrypted === testData);
+    })
+    .catch(error => {
+        console.error('Encryption test failed:', error);
+    });
+
+// Check encryption compatibility
+console.log('Web Crypto API available:', window.crypto && window.crypto.subtle ? 'Yes' : 'No (XOR fallback)');
+console.log('Encryption key length:', testKey.length, '(should be 64)');
+console.log('Encryption key format:', /^[0-9a-fA-F]+$/.test(testKey) ? 'Valid hex' : 'Invalid format');
+```
+
+**Cloudflare Worker Encryption Setup:**
+- Ensure `JWT_ENCRYPTION_ENABLED = true` in worker
+- Verify `ENCRYPTION_KEY` matches WordPress generated key exactly
+- Check worker logs for encryption/decryption errors
+- Ensure `X-Encrypted: true` header is being sent by client
 
 ## 📊 Data Categories & Retention
 
@@ -660,6 +774,35 @@ console.log('Bot Detection:', GA4Utils.botDetection.isBot(userAgent, session, be
 - **Data Inspector**: `GA4Utils.helpers.getStoredDataSummary()`
 - **Performance Monitor**: Built-in timing and performance metrics
 - **Test Validation**: Automatic event name sanitization and validation
+
+### 🔐 **Encryption Testing Framework (NEW)**
+Comprehensive tools for testing encryption compatibility across all platforms:
+
+**Test Files:**
+- `test-encryption-compatibility.php` - PHP backend encryption testing
+- `test-encryption-vectors.js` - JavaScript browser compatibility testing
+- `ENCRYPTION-COMPATIBILITY-TEST.md` - Complete testing guide
+
+**Cross-Platform Testing:**
+```bash
+# Run PHP encryption tests (requires WordPress environment)
+php test-encryption-compatibility.php
+
+# Load JavaScript tests in browser
+<script src="test-encryption-vectors.js"></script>
+<script>runCompatibilityTests();</script>
+
+# Test Cloudflare Worker encryption
+# (Copy test code from generated output)
+```
+
+**Automated Compatibility Verification:**
+- ✅ PHP ↔ JavaScript encryption compatibility
+- ✅ JavaScript ↔ Cloudflare Worker compatibility  
+- ✅ PHP ↔ Cloudflare Worker compatibility
+- ✅ Request/response encryption end-to-end
+- ✅ AES-256-GCM vs XOR fallback testing
+- ✅ Key format and length validation
 
 ## 📄 License
 

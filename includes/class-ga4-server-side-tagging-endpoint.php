@@ -3,6 +3,7 @@
 namespace GA4ServerSideTagging\API;
 
 use GA4ServerSideTagging\Core\GA4_Server_Side_Tagging_Logger;
+use GA4ServerSideTagging\Utilities\GA4_Encryption_Util;
 
 /**
  * REST API endpoint for GA4 Server-Side Tagging.
@@ -118,14 +119,27 @@ class GA4_Server_Side_Tagging_Endpoint {
      * @since    1.0.0
      * @return   \WP_REST_Response    The response object.
      */
-    public function get_secure_config() {
+    public function get_secure_config( $request ) {
         try {
+            // Handle encrypted request if present (not needed for GET, but for consistency)
+            $request_data = $this->handle_encrypted_request( $request );
+            
             $secure_config = array(
                 'cloudflareWorkerUrl' => get_option( 'ga4_cloudflare_worker_url', '' ),
                 'workerApiKey' => get_option( 'ga4_worker_api_key', '' ),
+                'jwtEncryptionEnabled' => (bool) get_option( 'ga4_jwt_encryption_enabled', false ),
+                'jwtEncryptionKey' => get_option( 'ga4_jwt_encryption_key', '' ),
             );
 
-            return new \WP_REST_Response( $secure_config, 200 );
+            // Log secure config access for security audit
+            $this->logger->info( 'Secure config accessed', array(
+                'ip' => $this->get_client_ip( $request ),
+                'encrypted' => GA4_Encryption_Util::is_encrypted_request( $request )
+            ) );
+
+            // Return encrypted response if requested
+            return $this->create_response( $secure_config, $request );
+            
         } catch ( \Exception $e ) {
             $this->logger->error( 'Failed to get secure config: ' . $e->getMessage() );
             return new \WP_REST_Response( array( 'error' => 'Configuration error' ), 500 );
@@ -169,12 +183,26 @@ class GA4_Server_Side_Tagging_Endpoint {
      */
     public function generate_auth_token( $request ) {
         try {
+            // Handle encrypted request if present
+            $request_data = $this->handle_encrypted_request( $request );
+            
+            // Log request details for security audit
+            $this->logger->info( 'JWT token requested', array(
+                'ip' => $this->get_client_ip( $request ),
+                'user_agent' => $request->get_header( 'User-Agent' ),
+                'encrypted' => GA4_Encryption_Util::is_encrypted_request( $request )
+            ) );
+            
             $token = $this->create_jwt_token();
             
-            return new \WP_REST_Response( array(
+            $response_data = array(
                 'token' => $token,
                 'expires_in' => 300 // 5 minutes
-            ), 200 );
+            );
+            
+            // Return encrypted response if requested
+            return $this->create_response( $response_data, $request );
+            
         } catch ( \Exception $e ) {
             $this->logger->error( 'Failed to generate JWT token: ' . $e->getMessage() );
             return new \WP_REST_Response( array( 'error' => 'Token generation failed' ), 500 );
@@ -546,5 +574,87 @@ class GA4_Server_Side_Tagging_Endpoint {
         }
         
         return false;
+    }
+
+    /**
+     * Handle encrypted request data
+     * 
+     * @param \WP_REST_Request $request Request object
+     * @return array|null Decrypted request data or original data
+     */
+    private function handle_encrypted_request( $request ) {
+        // Check if encryption is enabled and request is encrypted
+        $encryption_enabled = get_option( 'ga4_jwt_encryption_enabled', false );
+        $is_encrypted = GA4_Encryption_Util::is_encrypted_request( $request );
+        
+        if ( ! $encryption_enabled || ! $is_encrypted ) {
+            // Return original request body if not encrypted
+            return $request->get_json_params();
+        }
+        
+        $encryption_key = get_option( 'ga4_jwt_encryption_key', '' );
+        if ( empty( $encryption_key ) ) {
+            throw new \Exception( 'Encryption key not configured' );
+        }
+        
+        try {
+            $request_body = $request->get_json_params();
+            $decrypted_data = GA4_Encryption_Util::parse_encrypted_request( $request_body, $encryption_key );
+            
+            $this->logger->info( 'Request decrypted successfully', array(
+                'ip' => $this->get_client_ip( $request )
+            ) );
+            
+            return $decrypted_data;
+            
+        } catch ( \Exception $e ) {
+            $this->logger->error( 'Failed to decrypt request: ' . $e->getMessage(), array(
+                'ip' => $this->get_client_ip( $request )
+            ) );
+            throw new \Exception( 'Request decryption failed' );
+        }
+    }
+
+    /**
+     * Create response with optional encryption
+     * 
+     * @param array $data Response data
+     * @param \WP_REST_Request $request Original request
+     * @return \WP_REST_Response Response object
+     */
+    private function create_response( $data, $request ) {
+        // Check if encryption is enabled and client supports it
+        $encryption_enabled = get_option( 'ga4_jwt_encryption_enabled', false );
+        $is_encrypted_request = GA4_Encryption_Util::is_encrypted_request( $request );
+        
+        if ( ! $encryption_enabled || ! $is_encrypted_request ) {
+            // Return normal response
+            return new \WP_REST_Response( $data, 200 );
+        }
+        
+        $encryption_key = get_option( 'ga4_jwt_encryption_key', '' );
+        if ( empty( $encryption_key ) ) {
+            // Fallback to unencrypted response if no key
+            $this->logger->warning( 'Encryption requested but no key configured' );
+            return new \WP_REST_Response( $data, 200 );
+        }
+        
+        try {
+            $encrypted_data = GA4_Encryption_Util::create_encrypted_response( $data, $encryption_key );
+            
+            $this->logger->info( 'Response encrypted successfully', array(
+                'ip' => $this->get_client_ip( $request )
+            ) );
+            
+            return new \WP_REST_Response( $encrypted_data, 200 );
+            
+        } catch ( \Exception $e ) {
+            $this->logger->error( 'Failed to encrypt response: ' . $e->getMessage(), array(
+                'ip' => $this->get_client_ip( $request )
+            ) );
+            
+            // Fallback to unencrypted response
+            return new \WP_REST_Response( $data, 200 );
+        }
     }
 } 

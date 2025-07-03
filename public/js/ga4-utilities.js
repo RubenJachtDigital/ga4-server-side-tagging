@@ -2514,12 +2514,15 @@
        * @param {string} logPrefix Prefix for log messages
        * @returns {Promise}
        */
-      sendPayloadFetch: function (endpoint, payload, config, logPrefix) {
+      sendPayloadFetch: async function (endpoint, payload, config, logPrefix) {
         logPrefix = logPrefix || "[GA4Utils Fetch]";
 
         var headers = {
           "Content-Type": "application/json",
         };
+
+        var requestBody = JSON.stringify(payload);
+        var isCloudflareWorker = config && config.cloudflareWorkerUrl && endpoint === config.cloudflareWorkerUrl;
 
         // Add JWT token for secure WordPress REST API endpoints
         if (config && config.jwtToken && config.apiEndpoint && endpoint.startsWith(config.apiEndpoint)) {
@@ -2531,54 +2534,77 @@
         }
 
         // Add API key for Cloudflare Worker
-        if (
-          config &&
-          config.cloudflareWorkerUrl &&
-          config.workerApiKey &&
-          endpoint === config.cloudflareWorkerUrl
-        ) {
+        if (isCloudflareWorker && config.workerApiKey) {
           headers["X-API-Key"] = config.workerApiKey;
+        }
+
+        // Apply encryption for Cloudflare Worker if enabled
+        if (isCloudflareWorker && config.jwtEncryptionEnabled && config.jwtEncryptionKey) {
+          try {
+            var encryptedData = await GA4Utils.encryption.encrypt(requestBody, config.jwtEncryptionKey);
+            requestBody = JSON.stringify({ encrypted: encryptedData });
+            headers["X-Encrypted"] = "true";
+            GA4Utils.helpers.log("🔐 Payload encrypted for Cloudflare Worker", null, config, logPrefix);
+          } catch (encError) {
+            GA4Utils.helpers.log("⚠️ Failed to encrypt payload, sending unencrypted", encError, config, logPrefix);
+          }
         }
 
         GA4Utils.helpers.log(
           "Sending Fetch request to: " + endpoint,
-          null,
+          {
+            encrypted: !!(isCloudflareWorker && config.jwtEncryptionEnabled),
+            hasApiKey: !!headers["X-API-Key"],
+            hasJWT: !!headers["Authorization"]
+          },
           config,
           logPrefix
         );
 
-        return fetch(endpoint, {
-          method: "POST",
-          headers: headers,
-          body: JSON.stringify(payload),
-        })
-          .then(function (response) {
-            if (!response.ok) {
-              throw new Error(
-                "Network response was not ok: " + response.status
-              );
-            }
-            return response.json();
-          })
-          .then(function (data) {
-            GA4Utils.helpers.log(
-              "Fetch request sent successfully",
-              data,
-              config,
-              logPrefix
-            );
-            return data;
-          })
-          .catch(function (error) {
-            GA4Utils.helpers.log(
-              "Error sending Fetch request",
-              error,
-              config,
-              logPrefix
-            );
-            console.error(logPrefix + " Error sending request:", error);
-            throw error;
+        try {
+          const response = await fetch(endpoint, {
+            method: "POST",
+            headers: headers,
+            body: requestBody,
           });
+
+          if (!response.ok) {
+            throw new Error(
+              "Network response was not ok: " + response.status
+            );
+          }
+
+          let data = await response.json();
+
+          // Decrypt response from Cloudflare Worker if it was encrypted
+          if (data.encrypted && isCloudflareWorker && config.jwtEncryptionEnabled && config.jwtEncryptionKey) {
+            try {
+              var decryptedData = await GA4Utils.encryption.decrypt(data.encrypted, config.jwtEncryptionKey);
+              data = JSON.parse(decryptedData);
+              GA4Utils.helpers.log("🔓 Response decrypted from Cloudflare Worker", null, config, logPrefix);
+            } catch (decError) {
+              GA4Utils.helpers.log("⚠️ Failed to decrypt response", decError, config, logPrefix);
+              // Continue with encrypted data - might still be valid
+            }
+          }
+
+          GA4Utils.helpers.log(
+            "Fetch request sent successfully",
+            data,
+            config,
+            logPrefix
+          );
+          return data;
+        } catch (error) {
+          GA4Utils.helpers.log(
+            "Error sending Fetch request",
+            error,
+            config,
+            logPrefix
+          );
+          console.error(logPrefix + " Error sending request:", error);
+          throw error;
+        }
       },
     },
 
@@ -3261,6 +3287,302 @@
         
         return summary;
       },
+    },
+
+    /**
+     * JWT Encryption utilities for secure communication
+     */
+    encryption: {
+      /**
+       * Simple AES-like encryption using Web Crypto API (when available) or fallback XOR
+       * @param {string} plaintext - Text to encrypt
+       * @param {string} key - Encryption key (hex string)
+       * @returns {Promise<string>} - Encrypted text as hex string
+       */
+      encrypt: async function(plaintext, key) {
+        try {
+          // Try Web Crypto API first (modern browsers)
+          if (window.crypto && window.crypto.subtle && key.length === 64) {
+            return await this.encryptWithWebCrypto(plaintext, key);
+          } else {
+            // Fallback to XOR encryption for compatibility
+            return this.encryptWithXOR(plaintext, key);
+          }
+        } catch (error) {
+          console.warn('Encryption failed, falling back to XOR:', error);
+          return this.encryptWithXOR(plaintext, key);
+        }
+      },
+
+      /**
+       * Simple AES-like decryption using Web Crypto API (when available) or fallback XOR
+       * @param {string} encryptedHex - Encrypted text as hex string
+       * @param {string} key - Encryption key (hex string)
+       * @returns {Promise<string>} - Decrypted plaintext
+       */
+      decrypt: async function(encryptedHex, key) {
+        try {
+          // Try Web Crypto API first (modern browsers)
+          if (window.crypto && window.crypto.subtle && key.length === 64) {
+            return await this.decryptWithWebCrypto(encryptedHex, key);
+          } else {
+            // Fallback to XOR decryption for compatibility
+            return this.decryptWithXOR(encryptedHex, key);
+          }
+        } catch (error) {
+          console.warn('Decryption failed, falling back to XOR:', error);
+          return this.decryptWithXOR(encryptedHex, key);
+        }
+      },
+
+      /**
+       * Encrypt using Web Crypto API (AES-GCM)
+       * @param {string} plaintext - Text to encrypt
+       * @param {string} keyHex - Encryption key as hex string
+       * @returns {Promise<string>} - Encrypted text as hex string
+       */
+      encryptWithWebCrypto: async function(plaintext, keyHex) {
+        const keyBytes = this.hexToBytes(keyHex);
+        const plaintextBytes = new TextEncoder().encode(plaintext);
+        
+        // Generate random IV (12 bytes for GCM)
+        const iv = window.crypto.getRandomValues(new Uint8Array(12));
+        
+        // Import key
+        const cryptoKey = await window.crypto.subtle.importKey(
+          'raw',
+          keyBytes,
+          { name: 'AES-GCM' },
+          false,
+          ['encrypt']
+        );
+        
+        // Encrypt using AES-256-GCM
+        const encryptResult = await window.crypto.subtle.encrypt(
+          { name: 'AES-GCM', iv: iv },
+          cryptoKey,
+          plaintextBytes
+        );
+        
+        // Extract encrypted data and auth tag (last 16 bytes)
+        const encryptedArray = new Uint8Array(encryptResult);
+        const encrypted = encryptedArray.slice(0, -16);
+        const tag = encryptedArray.slice(-16);
+        
+        // Combine IV + encrypted data + tag (to match PHP/Cloudflare implementation)
+        const combined = new Uint8Array(iv.length + encrypted.length + tag.length);
+        combined.set(iv);
+        combined.set(encrypted, iv.length);
+        combined.set(tag, iv.length + encrypted.length);
+        
+        return this.bytesToHex(combined);
+      },
+
+      /**
+       * Decrypt using Web Crypto API (AES-GCM)
+       * @param {string} encryptedHex - Encrypted text as hex string
+       * @param {string} keyHex - Encryption key as hex string
+       * @returns {Promise<string>} - Decrypted plaintext
+       */
+      decryptWithWebCrypto: async function(encryptedHex, keyHex) {
+        const keyBytes = this.hexToBytes(keyHex);
+        const encryptedBytes = this.hexToBytes(encryptedHex);
+        
+        // Extract IV, encrypted data, and tag (to match PHP/Cloudflare implementation)
+        const ivLength = 12; // GCM IV length
+        const tagLength = 16; // GCM tag length
+        
+        if (encryptedBytes.length < ivLength + tagLength) {
+          throw new Error('Invalid encrypted data length');
+        }
+
+        const iv = encryptedBytes.slice(0, ivLength);
+        const tag = encryptedBytes.slice(-tagLength);
+        const encrypted = encryptedBytes.slice(ivLength, -tagLength);
+        
+        // Import key
+        const cryptoKey = await window.crypto.subtle.importKey(
+          'raw',
+          keyBytes,
+          { name: 'AES-GCM' },
+          false,
+          ['decrypt']
+        );
+        
+        // Combine encrypted data and tag for decryption
+        const encryptedWithTag = new Uint8Array(encrypted.length + tag.length);
+        encryptedWithTag.set(encrypted);
+        encryptedWithTag.set(tag, encrypted.length);
+        
+        // Decrypt using AES-256-GCM
+        const decrypted = await window.crypto.subtle.decrypt(
+          { name: 'AES-GCM', iv: iv },
+          cryptoKey,
+          encryptedWithTag
+        );
+        
+        return new TextDecoder().decode(decrypted);
+      },
+
+      /**
+       * Fallback XOR encryption for compatibility
+       * @param {string} plaintext - Text to encrypt
+       * @param {string} keyHex - Encryption key as hex string
+       * @returns {string} - Encrypted text as hex string
+       */
+      encryptWithXOR: function(plaintext, keyHex) {
+        const keyBytes = this.hexToBytes(keyHex);
+        const plaintextBytes = new TextEncoder().encode(plaintext);
+        const encrypted = new Uint8Array(plaintextBytes.length);
+        
+        for (let i = 0; i < plaintextBytes.length; i++) {
+          encrypted[i] = plaintextBytes[i] ^ keyBytes[i % keyBytes.length];
+        }
+        
+        return this.bytesToHex(encrypted);
+      },
+
+      /**
+       * Fallback XOR decryption for compatibility
+       * @param {string} encryptedHex - Encrypted text as hex string
+       * @param {string} keyHex - Encryption key as hex string
+       * @returns {string} - Decrypted plaintext
+       */
+      decryptWithXOR: function(encryptedHex, keyHex) {
+        const keyBytes = this.hexToBytes(keyHex);
+        const encryptedBytes = this.hexToBytes(encryptedHex);
+        const decrypted = new Uint8Array(encryptedBytes.length);
+        
+        for (let i = 0; i < encryptedBytes.length; i++) {
+          decrypted[i] = encryptedBytes[i] ^ keyBytes[i % keyBytes.length];
+        }
+        
+        return new TextDecoder().decode(decrypted);
+      },
+
+      /**
+       * Convert hex string to bytes
+       * @param {string} hex - Hex string
+       * @returns {Uint8Array} - Byte array
+       */
+      hexToBytes: function(hex) {
+        const bytes = new Uint8Array(hex.length / 2);
+        for (let i = 0; i < hex.length; i += 2) {
+          bytes[i / 2] = parseInt(hex.substr(i, 2), 16);
+        }
+        return bytes;
+      },
+
+      /**
+       * Convert bytes to hex string
+       * @param {Uint8Array} bytes - Byte array
+       * @returns {string} - Hex string
+       */
+      bytesToHex: function(bytes) {
+        return Array.from(bytes)
+          .map(byte => byte.toString(16).padStart(2, '0'))
+          .join('');
+      },
+
+      /**
+       * Encrypt a JWT token payload for secure transmission
+       * @param {Object} payload - JWT payload object
+       * @param {string} encryptionKey - Encryption key (hex string)
+       * @returns {Promise<string>} - Encrypted JWT-like token
+       */
+      encryptJWTPayload: async function(payload, encryptionKey) {
+        if (!encryptionKey) {
+          throw new Error('Encryption key is required');
+        }
+        
+        const payloadJson = JSON.stringify(payload);
+        const encrypted = await this.encrypt(payloadJson, encryptionKey);
+        
+        // Create a JWT-like structure: header.encrypted_payload.signature
+        const header = btoa(JSON.stringify({ alg: 'GA4-ENC', typ: 'JWT' }));
+        const signature = btoa('encrypted'); // Simple signature for format consistency
+        
+        return `${header}.${encrypted}.${signature}`;
+      },
+
+      /**
+       * Decrypt a JWT token payload
+       * @param {string} encryptedJWT - Encrypted JWT-like token
+       * @param {string} encryptionKey - Encryption key (hex string)
+       * @returns {Promise<Object>} - Decrypted payload object
+       */
+      decryptJWTPayload: async function(encryptedJWT, encryptionKey) {
+        if (!encryptionKey) {
+          throw new Error('Encryption key is required');
+        }
+        
+        const parts = encryptedJWT.split('.');
+        if (parts.length !== 3) {
+          throw new Error('Invalid encrypted JWT format');
+        }
+        
+        const encryptedPayload = parts[1];
+        const decryptedJson = await this.decrypt(encryptedPayload, encryptionKey);
+        
+        return JSON.parse(decryptedJson);
+      },
+
+      /**
+       * Encrypt request data for secure transmission
+       * @param {Object} requestData - Request data object
+       * @param {string} encryptionKey - Encryption key (hex string)
+       * @returns {Promise<Object>} - Encrypted request structure
+       */
+      encryptRequest: async function(requestData, encryptionKey) {
+        if (!encryptionKey) {
+          throw new Error('Encryption key is required');
+        }
+        
+        const jsonData = JSON.stringify(requestData);
+        const encrypted = await this.encrypt(jsonData, encryptionKey);
+        
+        return {
+          encrypted: encrypted
+        };
+      },
+
+      /**
+       * Decrypt request data from secure transmission
+       * @param {Object} encryptedRequest - Encrypted request structure
+       * @param {string} encryptionKey - Encryption key (hex string)
+       * @returns {Promise<Object>} - Decrypted request data
+       */
+      decryptRequest: async function(encryptedRequest, encryptionKey) {
+        if (!encryptionKey) {
+          throw new Error('Encryption key is required');
+        }
+        
+        if (!encryptedRequest.encrypted) {
+          throw new Error('No encrypted data found in request');
+        }
+        
+        const decryptedJson = await this.decrypt(encryptedRequest.encrypted, encryptionKey);
+        return JSON.parse(decryptedJson);
+      },
+
+      /**
+       * Decrypt response data from secure transmission
+       * @param {Object} encryptedResponse - Encrypted response structure
+       * @param {string} encryptionKey - Encryption key (hex string)
+       * @returns {Promise<Object>} - Decrypted response data
+       */
+      decryptResponse: async function(encryptedResponse, encryptionKey) {
+        if (!encryptionKey) {
+          throw new Error('Encryption key is required');
+        }
+        
+        if (!encryptedResponse.encrypted) {
+          throw new Error('No encrypted data found in response');
+        }
+        
+        const decryptedJson = await this.decrypt(encryptedResponse.encrypted, encryptionKey);
+        return JSON.parse(decryptedJson);
+      }
     },
 
   };
