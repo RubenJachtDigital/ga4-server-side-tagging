@@ -2447,6 +2447,14 @@
       sendPayload: function (endpoint, payload, config, logPrefix) {
         logPrefix = logPrefix || "[GA4Utils AJAX]";
 
+        // SECURITY VALIDATION - Do not send request if security checks fail
+        const securityValidation = GA4Utils.ajax.validateRequestSecurity(endpoint, payload, config);
+        if (!securityValidation.valid) {
+          const error = new Error("Security validation failed: " + securityValidation.reason);
+          GA4Utils.helpers.log("🚫 Request blocked by security validation: " + securityValidation.reason, error, config, logPrefix);
+          return Promise.reject(error);
+        }
+
         return new Promise(function (resolve, reject) {
           $.ajax({
             url: endpoint,
@@ -2516,6 +2524,14 @@
        */
       sendPayloadFetch: async function (endpoint, payload, config, logPrefix) {
         logPrefix = logPrefix || "[GA4Utils Fetch]";
+
+        // SECURITY VALIDATION - Do not send request if security checks fail
+        const securityValidation = this.validateRequestSecurity(endpoint, payload, config);
+        if (!securityValidation.valid) {
+          const error = new Error("Security validation failed: " + securityValidation.reason);
+          GA4Utils.helpers.log("🚫 Request blocked by security validation: " + securityValidation.reason, error, config, logPrefix);
+          throw error;
+        }
 
         var headers = {
           "Content-Type": "application/json",
@@ -2604,6 +2620,132 @@
           );
           console.error(logPrefix + " Error sending request:", error);
           throw error;
+        }
+      },
+
+      /**
+       * Validate request security before sending
+       * @param {string} endpoint URL to send to
+       * @param {Object} payload Data to send
+       * @param {Object} config Configuration object
+       * @returns {Object} Validation result with valid boolean and reason
+       */
+      validateRequestSecurity: function(endpoint, payload, config) {
+        // Check if endpoint is provided
+        if (!endpoint || typeof endpoint !== 'string') {
+          return { valid: false, reason: "invalid_endpoint" };
+        }
+
+        // Check if endpoint uses HTTPS (security requirement)
+        if (!endpoint.startsWith('https://')) {
+          return { valid: false, reason: "insecure_endpoint_protocol" };
+        }
+
+        // Validate Cloudflare Worker endpoint
+        var isCloudflareWorker = config && config.cloudflareWorkerUrl && endpoint === config.cloudflareWorkerUrl;
+        if (isCloudflareWorker) {
+          // Check API key is present for Cloudflare Worker
+          if (config.requireApiKey && !config.workerApiKey) {
+            return { valid: false, reason: "missing_api_key" };
+          }
+
+          // Check encryption key is present if encryption is enabled
+          if (config.jwtEncryptionEnabled && !config.jwtEncryptionKey) {
+            return { valid: false, reason: "missing_encryption_key" };
+          }
+
+          // Validate Cloudflare Worker URL format
+          if (!this.isValidCloudflareWorkerUrl(endpoint)) {
+            return { valid: false, reason: "invalid_cloudflare_worker_url" };
+          }
+        }
+
+        // Validate WordPress API endpoint
+        var isWordPressAPI = config && config.apiEndpoint && endpoint.startsWith(config.apiEndpoint);
+        if (isWordPressAPI) {
+          // Check nonce or JWT token is present for WordPress API
+          if (!config.nonce && !config.jwtToken) {
+            return { valid: false, reason: "missing_wordpress_auth" };
+          }
+        }
+
+        // Check payload is valid JSON-serializable object
+        if (!payload || typeof payload !== 'object') {
+          return { valid: false, reason: "invalid_payload" };
+        }
+
+        // Check payload size (prevent oversized requests)
+        try {
+          var payloadSize = JSON.stringify(payload).length;
+          if (payloadSize > 50000) { // 50KB limit
+            return { valid: false, reason: "payload_too_large" };
+          }
+        } catch (e) {
+          return { valid: false, reason: "payload_not_serializable" };
+        }
+
+        // Check for suspicious payload content
+        var payloadStr = JSON.stringify(payload).toLowerCase();
+        if (payloadStr.includes('<script') || payloadStr.includes('javascript:') || payloadStr.includes('onclick')) {
+          return { valid: false, reason: "suspicious_payload_content" };
+        }
+
+        // Rate limiting check (basic client-side protection)
+        if (!this.checkClientRateLimit(endpoint)) {
+          return { valid: false, reason: "rate_limit_exceeded" };
+        }
+
+        return { valid: true, reason: "security_checks_passed" };
+      },
+
+      /**
+       * Validate Cloudflare Worker URL format
+       * @param {string} url URL to validate
+       * @returns {boolean} True if valid Cloudflare Worker URL
+       */
+      isValidCloudflareWorkerUrl: function(url) {
+        // Basic pattern for Cloudflare Worker URLs
+        var cloudflarePatterns = [
+          /^https:\/\/[a-zA-Z0-9-]+\.workers\.dev\//,
+          /^https:\/\/[a-zA-Z0-9.-]+\/[a-zA-Z0-9-_]+/, // Custom domain workers
+        ];
+        
+        return cloudflarePatterns.some(function(pattern) {
+          return pattern.test(url);
+        });
+      },
+
+      /**
+       * Basic client-side rate limiting
+       * @param {string} endpoint URL endpoint
+       * @returns {boolean} True if within rate limits
+       */
+      checkClientRateLimit: function(endpoint) {
+        var now = Date.now();
+        var rateLimitKey = 'ga4_rate_limit_' + btoa(endpoint).substr(0, 10);
+        
+        try {
+          var stored = localStorage.getItem(rateLimitKey);
+          var requests = stored ? JSON.parse(stored) : [];
+          
+          // Remove requests older than 1 minute
+          requests = requests.filter(function(timestamp) {
+            return now - timestamp < 60000;
+          });
+          
+          // Check if we've exceeded 100 requests per minute
+          if (requests.length >= 100) {
+            return false;
+          }
+          
+          // Add current request
+          requests.push(now);
+          localStorage.setItem(rateLimitKey, JSON.stringify(requests));
+          
+          return true;
+        } catch (e) {
+          // If localStorage fails, allow the request
+          return true;
         }
       },
     },
