@@ -5,7 +5,7 @@ namespace GA4ServerSideTagging\Utilities;
 /**
  * JWT Encryption Utilities for GA4 Server-Side Tagging
  * 
- * Provides AES-256-GCM encryption/decryption that matches the Cloudflare Worker implementation
+ * Provides JWT encryption using HMACSHA256 with the backend key for secure request transmission
  *
  * @since      1.0.0
  * @package    GA4_Server_Side_Tagging
@@ -18,11 +18,11 @@ if (!defined('WPINC')) {
 class GA4_Encryption_Util
 {
     /**
-     * Encrypt data using AES-256-GCM
+     * Create JWT token with encrypted payload
      * 
-     * @param string $plaintext Data to encrypt
-     * @param string $key_hex Encryption key as hex string (64 characters for 256-bit)
-     * @return string|false Encrypted data as hex string, or false on failure
+     * @param string $plaintext Data to encrypt as JWT payload
+     * @param string $key_hex Backend key as hex string (64 characters for 256-bit)
+     * @return string|false JWT token, or false on failure
      */
     public static function encrypt($plaintext, $key_hex)
     {
@@ -32,55 +32,29 @@ class GA4_Encryption_Util
                 throw new \Exception('Invalid encryption key format. Must be 64 hex characters.');
             }
 
-            // Convert hex key to binary
+            // Convert hex key to binary for JWT signing
             $key = hex2bin($key_hex);
             if ($key === false) {
                 throw new \Exception('Invalid hex key format.');
             }
 
-            // Check if OpenSSL extension is available
-            if (!extension_loaded('openssl')) {
-                return self::encrypt_xor($plaintext, $key_hex);
-            }
-
-            // Generate random IV (12 bytes for GCM)
-            $iv = random_bytes(12);
-            
-            // Encrypt using AES-256-GCM
-            $encrypted = openssl_encrypt(
-                $plaintext,
-                'aes-256-gcm',
-                $key,
-                OPENSSL_RAW_DATA,
-                $iv,
-                $tag
-            );
-
-            if ($encrypted === false) {
-                throw new \Exception('Encryption failed: ' . openssl_error_string());
-            }
-
-            // Combine IV + encrypted data + tag
-            $combined = $iv . $encrypted . $tag;
-            
-            return bin2hex($combined);
+            // Create JWT token with the plaintext as payload
+            return self::create_jwt_token($plaintext, $key);
             
         } catch (\Exception $e) {
-            error_log('GA4 Encryption Error: ' . $e->getMessage());
-            
-            // Fallback to XOR encryption
-            return self::encrypt_xor($plaintext, $key_hex);
+            error_log('GA4 JWT Creation Error: ' . $e->getMessage());
+            return false;
         }
     }
 
     /**
-     * Decrypt data using AES-256-GCM
+     * Verify and decrypt JWT token
      * 
-     * @param string $encrypted_hex Encrypted data as hex string
-     * @param string $key_hex Encryption key as hex string (64 characters for 256-bit)
+     * @param string $jwt_token JWT token to verify and decrypt
+     * @param string $key_hex Backend key as hex string (64 characters for 256-bit)
      * @return string|false Decrypted plaintext, or false on failure
      */
-    public static function decrypt($encrypted_hex, $key_hex)
+    public static function decrypt($jwt_token, $key_hex)
     {
         try {
             // Validate key
@@ -94,133 +68,149 @@ class GA4_Encryption_Util
                 throw new \Exception('Invalid hex key format.');
             }
 
-            // Convert hex data to binary
-            $encrypted_data = hex2bin($encrypted_hex);
-            if ($encrypted_data === false) {
-                throw new \Exception('Invalid hex data format.');
-            }
-
-            // Check if OpenSSL extension is available
-            if (!extension_loaded('openssl')) {
-                return self::decrypt_xor($encrypted_hex, $key_hex);
-            }
-
-            // Extract IV, encrypted data, and tag
-            $iv_length = 12; // GCM IV length
-            $tag_length = 16; // GCM tag length
-            
-            if (strlen($encrypted_data) < $iv_length + $tag_length) {
-                throw new \Exception('Invalid encrypted data length.');
-            }
-
-            $iv = substr($encrypted_data, 0, $iv_length);
-            $tag = substr($encrypted_data, -$tag_length);
-            $encrypted = substr($encrypted_data, $iv_length, -$tag_length);
-            
-            // Decrypt using AES-256-GCM
-            $decrypted = openssl_decrypt(
-                $encrypted,
-                'aes-256-gcm',
-                $key,
-                OPENSSL_RAW_DATA,
-                $iv,
-                $tag
-            );
-
-            if ($decrypted === false) {
-                throw new \Exception('Decryption failed: ' . openssl_error_string());
-            }
-
-            return $decrypted;
+            // Verify and decode JWT token
+            return self::verify_jwt_token($jwt_token, $key);
             
         } catch (\Exception $e) {
-            error_log('GA4 Decryption Error: ' . $e->getMessage());
-            
-            // Fallback to XOR decryption
-            return self::decrypt_xor($encrypted_hex, $key_hex);
+            error_log('GA4 JWT Verification Error: ' . $e->getMessage());
+            return false;
         }
     }
 
     /**
-     * Fallback XOR encryption (for compatibility)
+     * Create JWT token using HMACSHA256
      * 
-     * @param string $plaintext Data to encrypt
-     * @param string $key_hex Encryption key as hex string
-     * @return string Encrypted data as hex string
+     * @param string $payload Data to encrypt as JWT payload
+     * @param string $key Binary signing key
+     * @return string JWT token
      */
-    private static function encrypt_xor($plaintext, $key_hex)
+    private static function create_jwt_token($payload, $key)
     {
-        $key_bytes = hex2bin($key_hex);
-        $key_length = strlen($key_bytes);
-        $plaintext_bytes = $plaintext;
-        $encrypted = '';
+        // JWT Header
+        $header = array(
+            'typ' => 'JWT',
+            'alg' => 'HS256'
+        );
         
-        for ($i = 0; $i < strlen($plaintext_bytes); $i++) {
-            $encrypted .= chr(ord($plaintext_bytes[$i]) ^ ord($key_bytes[$i % $key_length]));
-        }
+        // JWT Payload - wrap the data
+        $jwt_payload = array(
+            'data' => $payload,
+            'iat' => time(),
+            'exp' => time() + 300 // 5 minutes expiry
+        );
         
-        return bin2hex($encrypted);
+        // Base64URL encode header and payload
+        $header_encoded = self::base64url_encode(wp_json_encode($header));
+        $payload_encoded = self::base64url_encode(wp_json_encode($jwt_payload));
+        
+        // Create signature using HMACSHA256
+        $signature = hash_hmac('sha256', $header_encoded . '.' . $payload_encoded, $key, true);
+        $signature_encoded = self::base64url_encode($signature);
+        
+        // Return complete JWT token
+        return $header_encoded . '.' . $payload_encoded . '.' . $signature_encoded;
     }
 
     /**
-     * Fallback XOR decryption (for compatibility)
+     * Verify JWT token and extract payload
      * 
-     * @param string $encrypted_hex Encrypted data as hex string
-     * @param string $key_hex Encryption key as hex string
-     * @return string Decrypted plaintext
+     * @param string $jwt_token JWT token to verify
+     * @param string $key Binary signing key
+     * @return string|false Decrypted payload or false on failure
      */
-    private static function decrypt_xor($encrypted_hex, $key_hex)
+    private static function verify_jwt_token($jwt_token, $key)
     {
-        $key_bytes = hex2bin($key_hex);
-        $key_length = strlen($key_bytes);
-        $encrypted_bytes = hex2bin($encrypted_hex);
-        $decrypted = '';
-        
-        for ($i = 0; $i < strlen($encrypted_bytes); $i++) {
-            $decrypted .= chr(ord($encrypted_bytes[$i]) ^ ord($key_bytes[$i % $key_length]));
+        // Split JWT token into parts
+        $parts = explode('.', $jwt_token);
+        if (count($parts) !== 3) {
+            throw new \Exception('Invalid JWT token format');
         }
         
-        return $decrypted;
+        list($header_encoded, $payload_encoded, $signature_encoded) = $parts;
+        
+        // Verify signature
+        $expected_signature = hash_hmac('sha256', $header_encoded . '.' . $payload_encoded, $key, true);
+        $provided_signature = self::base64url_decode($signature_encoded);
+        
+        if (!hash_equals($expected_signature, $provided_signature)) {
+            throw new \Exception('JWT signature verification failed');
+        }
+        
+        // Decode and validate payload
+        $payload = json_decode(self::base64url_decode($payload_encoded), true);
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            throw new \Exception('Invalid JWT payload JSON');
+        }
+        
+        // Check expiration
+        if (isset($payload['exp']) && $payload['exp'] < time()) {
+            throw new \Exception('JWT token has expired');
+        }
+        
+        // Return the original data
+        return isset($payload['data']) ? $payload['data'] : '';
     }
 
     /**
-     * Create encrypted request payload
+     * Base64URL encode
+     * 
+     * @param string $data Data to encode
+     * @return string Encoded data
+     */
+    private static function base64url_encode($data)
+    {
+        return rtrim(strtr(base64_encode($data), '+/', '-_'), '=');
+    }
+
+    /**
+     * Base64URL decode
+     * 
+     * @param string $data Data to decode
+     * @return string Decoded data
+     */
+    private static function base64url_decode($data)
+    {
+        return base64_decode(strtr($data, '-_', '+/') . str_repeat('=', 3 - (3 + strlen($data)) % 4));
+    }
+
+    /**
+     * Create JWT encrypted request payload
      * 
      * @param array $data Request data
-     * @param string $encryption_key Encryption key (hex)
-     * @return array Encrypted payload structure
+     * @param string $encryption_key Backend encryption key (hex)
+     * @return array JWT payload structure
      */
     public static function create_encrypted_request($data, $encryption_key)
     {
         $json_data = wp_json_encode($data);
-        $encrypted = self::encrypt($json_data, $encryption_key);
+        $jwt_token = self::encrypt($json_data, $encryption_key);
         
-        if ($encrypted === false) {
-            throw new \Exception('Failed to encrypt request data');
+        if ($jwt_token === false) {
+            throw new \Exception('Failed to create JWT token for request data');
         }
         
         return array(
-            'encrypted' => $encrypted
+            'jwt' => $jwt_token
         );
     }
 
     /**
-     * Parse encrypted request payload
+     * Parse JWT encrypted request payload
      * 
-     * @param array $request_data Request data containing encrypted field
-     * @param string $encryption_key Encryption key (hex)
+     * @param array $request_data Request data containing JWT field
+     * @param string $encryption_key Backend encryption key (hex)
      * @return array|false Decrypted data array, or false on failure
      */
     public static function parse_encrypted_request($request_data, $encryption_key)
     {
-        if (!isset($request_data['encrypted'])) {
-            throw new \Exception('No encrypted data found in request');
+        if (!isset($request_data['jwt'])) {
+            throw new \Exception('No JWT token found in request');
         }
         
-        $decrypted_json = self::decrypt($request_data['encrypted'], $encryption_key);
+        $decrypted_json = self::decrypt($request_data['jwt'], $encryption_key);
         
         if ($decrypted_json === false) {
-            throw new \Exception('Failed to decrypt request data');
+            throw new \Exception('Failed to verify JWT token');
         }
         
         $decrypted_data = json_decode($decrypted_json, true);
@@ -233,35 +223,35 @@ class GA4_Encryption_Util
     }
 
     /**
-     * Create encrypted response payload
+     * Create JWT encrypted response payload
      * 
      * @param array $data Response data
-     * @param string $encryption_key Encryption key (hex)
-     * @return array Encrypted response structure
+     * @param string $encryption_key Backend encryption key (hex)
+     * @return array JWT response structure
      */
     public static function create_encrypted_response($data, $encryption_key)
     {
         $json_data = wp_json_encode($data);
-        $encrypted = self::encrypt($json_data, $encryption_key);
+        $jwt_token = self::encrypt($json_data, $encryption_key);
         
-        if ($encrypted === false) {
-            throw new \Exception('Failed to encrypt response data');
+        if ($jwt_token === false) {
+            throw new \Exception('Failed to create JWT token for response data');
         }
         
         return array(
-            'encrypted' => $encrypted
+            'jwt' => $jwt_token
         );
     }
 
     /**
-     * Check if request is encrypted
+     * Check if request uses JWT encryption
      * 
      * @param \WP_REST_Request $request Request object
-     * @return bool True if request has encryption header
+     * @return bool True if request has JWT encryption header
      */
     public static function is_encrypted_request($request)
     {
-        return $request->get_header('X-Encrypted') === 'true';
+        return $request->get_header('X-JWT-Encrypted') === 'true';
     }
 
     /**

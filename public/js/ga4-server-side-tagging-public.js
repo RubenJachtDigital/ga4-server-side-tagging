@@ -92,8 +92,8 @@
         if (this.config.jwtEncryptionEnabled && this.config.jwtEncryptionKey) {
           try {
             const encryptedData = await GA4Utils.encryption.encrypt(requestBody, this.config.jwtEncryptionKey);
-            requestBody = JSON.stringify({ encrypted: encryptedData });
-            headers['X-Encrypted'] = 'true';
+            requestBody = JSON.stringify({ jwt: encryptedData });
+            headers['X-JWT-Encrypted'] = 'true';
             this.log("🔐 JWT token request encrypted");
           } catch (encError) {
             this.log("⚠️ Failed to encrypt JWT token request, falling back to unencrypted:", encError.message);

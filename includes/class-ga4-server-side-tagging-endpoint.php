@@ -134,7 +134,7 @@ class GA4_Server_Side_Tagging_Endpoint {
             // Log secure config access for security audit
             $this->logger->info( 'Secure config accessed', array(
                 'ip' => $this->get_client_ip( $request ),
-                'encrypted' => GA4_Encryption_Util::is_encrypted_request( $request )
+                'jwt_encrypted' => GA4_Encryption_Util::is_encrypted_request( $request )
             ) );
 
             // Return encrypted response if requested
@@ -190,7 +190,7 @@ class GA4_Server_Side_Tagging_Endpoint {
             $this->logger->info( 'JWT token requested', array(
                 'ip' => $this->get_client_ip( $request ),
                 'user_agent' => $request->get_header( 'User-Agent' ),
-                'encrypted' => GA4_Encryption_Util::is_encrypted_request( $request )
+                'jwt_encrypted' => GA4_Encryption_Util::is_encrypted_request( $request )
             ) );
             
             $token = $this->create_jwt_token();
@@ -601,17 +601,17 @@ class GA4_Server_Side_Tagging_Endpoint {
             $request_body = $request->get_json_params();
             $decrypted_data = GA4_Encryption_Util::parse_encrypted_request( $request_body, $encryption_key );
             
-            $this->logger->info( 'Request decrypted successfully', array(
+            $this->logger->info( 'JWT request verified successfully', array(
                 'ip' => $this->get_client_ip( $request )
             ) );
             
             return $decrypted_data;
             
         } catch ( \Exception $e ) {
-            $this->logger->error( 'Failed to decrypt request: ' . $e->getMessage(), array(
+            $this->logger->error( 'Failed to verify JWT request: ' . $e->getMessage(), array(
                 'ip' => $this->get_client_ip( $request )
             ) );
-            throw new \Exception( 'Request decryption failed' );
+            throw new \Exception( 'JWT request verification failed' );
         }
     }
 
@@ -635,21 +635,21 @@ class GA4_Server_Side_Tagging_Endpoint {
         $encryption_key = get_option( 'ga4_jwt_encryption_key', '' );
         if ( empty( $encryption_key ) ) {
             // Fallback to unencrypted response if no key
-            $this->logger->warning( 'Encryption requested but no key configured' );
+            $this->logger->warning( 'JWT encryption requested but no key configured' );
             return new \WP_REST_Response( $data, 200 );
         }
         
         try {
             $encrypted_data = GA4_Encryption_Util::create_encrypted_response( $data, $encryption_key );
             
-            $this->logger->info( 'Response encrypted successfully', array(
+            $this->logger->info( 'JWT response created successfully', array(
                 'ip' => $this->get_client_ip( $request )
             ) );
             
             return new \WP_REST_Response( $encrypted_data, 200 );
             
         } catch ( \Exception $e ) {
-            $this->logger->error( 'Failed to encrypt response: ' . $e->getMessage(), array(
+            $this->logger->error( 'Failed to create JWT response: ' . $e->getMessage(), array(
                 'ip' => $this->get_client_ip( $request )
             ) );
             
