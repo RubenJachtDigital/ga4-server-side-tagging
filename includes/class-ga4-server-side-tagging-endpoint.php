@@ -321,46 +321,37 @@ class GA4_Server_Side_Tagging_Endpoint {
     }
 
     /**
-     * Create response with optional encryption
+     * Create response with mandatory encryption for secure config endpoint
      * 
      * @param array $data Response data
      * @param \WP_REST_Request $request Original request
      * @return \WP_REST_Response Response object
      */
     private function create_response( $data, $request ) {
-        // Check if encryption is enabled and client supports it
-        $encryption_enabled = get_option( 'ga4_jwt_encryption_enabled', false );
-        $is_encrypted_request = GA4_Encryption_Util::is_encrypted_request( $request );
-        
-        if ( ! $encryption_enabled || ! $is_encrypted_request ) {
-            // Return normal response
-            return new \WP_REST_Response( $data, 200 );
-        }
-        
-        // Use temporary key for secure config encryption (changes every 5 minutes)
+        // Always encrypt secure config responses - no exceptions
         $temp_encryption_key = $this->get_temporary_encryption_key();
         if ( empty( $temp_encryption_key ) ) {
-            // Fallback to unencrypted response if no key
-            $this->logger->warning( 'JWT encryption requested but no temporary key could be generated' );
-            return new \WP_REST_Response( $data, 200 );
+            // Return error if encryption fails - secure config must be encrypted
+            $this->logger->error( 'Secure config encryption failed: no temporary key could be generated' );
+            return new \WP_REST_Response( array( 'error' => 'Encryption required but unavailable' ), 500 );
         }
         
         try {
             $encrypted_data = GA4_Encryption_Util::create_encrypted_response( $data, $temp_encryption_key );
             
-            $this->logger->info( 'JWT response created successfully with temporary key', array(
+            $this->logger->info( 'Secure config encrypted successfully with temporary key', array(
                 'ip' => $this->get_client_ip( $request )
             ) );
             
             return new \WP_REST_Response( $encrypted_data, 200 );
             
         } catch ( \Exception $e ) {
-            $this->logger->error( 'Failed to create JWT response: ' . $e->getMessage(), array(
+            $this->logger->error( 'Failed to encrypt secure config: ' . $e->getMessage(), array(
                 'ip' => $this->get_client_ip( $request )
             ) );
             
-            // Fallback to unencrypted response
-            return new \WP_REST_Response( $data, 200 );
+            // Return error instead of unencrypted fallback
+            return new \WP_REST_Response( array( 'error' => 'Encryption failed' ), 500 );
         }
     }
 

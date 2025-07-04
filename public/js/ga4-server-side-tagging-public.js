@@ -63,7 +63,7 @@
 
       // Log initialization
       this.log(
-        "%c GA4 Server-Side Tagging initialized v1 ",
+        "%c GA4 Server-Side Tagging initialized v2 ",
         "background: #4CAF50; color: white; font-size: 16px; font-weight: bold; padding: 8px 12px; border-radius: 4px;"
       );
     },
@@ -134,8 +134,9 @@
 
         if (response.ok) {
           let secureConfig = await response.json();
-          // Decrypt response if it was encrypted
-          if (secureConfig.jwt && this.config.encryptionEnabled) {
+          
+          // All secure config responses are encrypted - always decrypt
+          if (secureConfig.jwt) {
             try {
               const tempKey = await this.getTemporaryEncryptionKey();
               if (!tempKey) {
@@ -150,6 +151,9 @@
               this.log("⚠️ Failed to decrypt secure config response:", decError.message);
               return;
             }
+          } else {
+            this.log("⚠️ Expected encrypted response but received unencrypted data");
+            return;
           }
                     
           // Derive the original keys from secured transmission
