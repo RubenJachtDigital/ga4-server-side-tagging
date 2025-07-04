@@ -1123,8 +1123,8 @@ async function handleRequest(request, env) {
     // Parse the request body
     let payload = await request.json();
 
-    // Check if the request uses JWT encryption (check both header variants)
-    const isJWTEncrypted = request.headers.get('X-JWT-Encrypted') === 'true' || request.headers.get('X-Encrypted') === 'true';
+    // Check if the request uses JWT encryption
+    const isJWTEncrypted = request.headers.get('X-Encrypted') === 'true';
     console.log("Is JWT encrypted: " + isJWTEncrypted);
     if (isJWTEncrypted && JWT_ENCRYPTION_ENABLED && ENCRYPTION_KEY) {
       if (DEBUG_MODE) {
@@ -2246,7 +2246,7 @@ function getCORSHeaders(request) {
   return {
     "Access-Control-Allow-Origin": origin,
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization, X-API-Key, X-JWT-Encrypted, X-Encrypted",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization, X-API-Key, X-Encrypted",
     "Access-Control-Max-Age": "86400",
   };
 }

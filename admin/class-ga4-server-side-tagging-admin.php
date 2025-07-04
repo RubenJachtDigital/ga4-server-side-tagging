@@ -840,7 +840,7 @@ class GA4_Server_Side_Tagging_Admin
                     $encrypted_data = \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::encrypt($request_body, $jwt_encryption_key);
                     if ($encrypted_data !== false) {
                         $request_body = wp_json_encode(array('jwt' => $encrypted_data));
-                        $headers['X-JWT-Encrypted'] = 'true';
+                        $headers['X-Encrypted'] = 'true';
                     }
                 } catch (\Exception $e) {
                     // Continue with unencrypted payload if encryption fails
