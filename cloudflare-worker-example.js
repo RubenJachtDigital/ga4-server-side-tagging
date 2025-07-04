@@ -957,28 +957,115 @@ async function checkRateLimit(request) {
 }
 
 /**
- * Validate API key if required
- * @param {Request} request - The incoming request
- * @returns {boolean} Whether API key is valid
+ * Detect API key format and decode accordingly
+ * @param {string} apiKey - The raw API key from headers
+ * @returns {Promise<{key: string, format: string}>} Decoded key and detected format
  */
-function validateApiKey(request) {
-  const apiKey = request.headers.get('X-API-Key') || 
-  request.headers.get('Authorization')?.replace('Bearer ', '');
+async function detectAndDecodeApiKey(apiKey) {
+  const originalKey = apiKey;
   
-  // Log the received API key for debugging
-  if(DEBUG_MODE){
-
-    if (apiKey) {
-        console.log("Received API Key:", apiKey);
-      } else {
-        console.log("No API key was sent in the request");
+  // 1. Check if it's a JWT token (3 parts separated by dots)
+  if (apiKey.includes('.') && apiKey.split('.').length === 3) {
+    if (JWT_ENCRYPTION_ENABLED && ENCRYPTION_KEY) {
+      try {
+        const decryptedKey = await decrypt(apiKey, ENCRYPTION_KEY);
+        return { key: decryptedKey, format: 'JWT' };
+      } catch (jwtError) {
+        if (DEBUG_MODE) {
+          console.log("JWT decryption failed:", jwtError.message);
+        }
+      }
     }
   }
+  
+  // 2. Check if it's base64 encoded (common pattern: alphanumeric + / + = padding)
+  if (/^[A-Za-z0-9+/]*={0,2}$/.test(apiKey) && apiKey.length > 8) {
+    try {
+      const decodedKey = atob(apiKey);
+      // Verify the decoded result looks like a reasonable API key
+      if (decodedKey.length >= 8 && /^[A-Za-z0-9_-]+$/.test(decodedKey)) {
+        return { key: decodedKey, format: 'Base64' };
+      }
+    } catch (base64Error) {
+      if (DEBUG_MODE) {
+        console.log("Base64 decoding failed:", base64Error.message);
+      }
+    }
+  }
+  
+  // 3. Check if it matches the expected API key directly (plain text)
+  if (apiKey === API_KEY) {
+    return { key: apiKey, format: 'Plain Text' };
+  }
+  
+  // 4. Last attempt: try base64 decode anyway (some keys might not match the pattern)
+  if (apiKey.length > 8) {
+    try {
+      const decodedKey = atob(apiKey);
+      if (decodedKey === API_KEY) {
+        return { key: decodedKey, format: 'Base64 (Fallback)' };
+      }
+    } catch (e) {
+      // Ignore error and continue
+    }
+  }
+  
+  // 5. Return original key as last resort
+  return { key: originalKey, format: 'Unknown/Plain Text' };
+}
+
+/**
+ * Validate API key if required
+ * @param {Request} request - The incoming request
+ * @returns {Promise<boolean>} Whether API key is valid
+ */
+async function validateApiKey(request) {
+  let receivedApiKey = request.headers.get('X-API-Key') || 
+  request.headers.get('Authorization')?.replace('Bearer ', '');
+  
   if (!REQUIRE_API_KEY) return true;
   
-
+  if (!receivedApiKey) {
+    if (DEBUG_MODE) {
+      console.log("❌ No API key was sent in the request");
+    }
+    return false;
+  }
   
-  return apiKey === API_KEY;
+  if (DEBUG_MODE) {
+    console.log("🔍 Received API key format analysis...");
+  }
+  
+  try {
+    // Detect format and decode the API key
+    const { key: decodedKey, format } = await detectAndDecodeApiKey(receivedApiKey);
+    
+    if (DEBUG_MODE) {
+      console.log(`📋 API key format detected: ${format}`);
+      console.log(`🔑 Decoded API key: ${decodedKey.substring(0, 8)}...`);
+    }
+    
+    // Compare with expected API key
+    const isValid = decodedKey === API_KEY;
+    
+    if (DEBUG_MODE) {
+      if (isValid) {
+        console.log(`✅ API key validation successful (${format})`);
+      } else {
+        console.log(`❌ API key validation failed (${format})`);
+        console.log(`Expected: ${API_KEY?.substring(0, 8)}...`);
+        console.log(`Received: ${decodedKey?.substring(0, 8)}...`);
+      }
+    }
+    
+    return isValid;
+    
+  } catch (error) {
+    if (DEBUG_MODE) {
+      console.log("⚠️ Error during API key validation:", error.message);
+    }
+    return false;
+  }
 }
 
 /**
@@ -1010,7 +1097,7 @@ async function runSecurityChecks(request) {
   }
   
   // 2. Validate API key if required
-  if (!validateApiKey(request)) {
+  if (!(await validateApiKey(request))) {
     return { 
       passed: false, 
       reason: "invalid_api_key", 

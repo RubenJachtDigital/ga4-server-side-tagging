@@ -2437,6 +2437,46 @@
      */
     ajax: {
       /**
+       * Set API key header with smart encoding (JWT -> Base64 -> Plain text fallback)
+       * @param {Object} headers Headers object to modify
+       * @param {Object} config Configuration object
+       * @param {string} logPrefix Prefix for log messages
+       * @returns {Promise<void>}
+       */
+      setApiKeyHeader: async function(headers, config, logPrefix) {
+        logPrefix = logPrefix || "[GA4Utils API]";
+        
+        if (!config.workerApiKey) {
+          return;
+        }
+        
+        // Strategy 1: Try JWT encryption if enabled and available
+        if (config.encryptionEnabled && config.encryptionKey) {
+          try {
+            const encryptedApiKey = await GA4Utils.encryption.encrypt(config.workerApiKey, config.encryptionKey);
+            headers["X-API-Key"] = encryptedApiKey;
+            GA4Utils.helpers.log("🔐 API key encrypted with JWT", null, config, logPrefix);
+            return;
+          } catch (encError) {
+            GA4Utils.helpers.log("⚠️ JWT encryption failed for API key, falling back to base64", encError, config, logPrefix);
+          }
+        }
+        
+        // Strategy 2: Use base64 encoding as reliable fallback
+        try {
+          headers["X-API-Key"] = btoa(config.workerApiKey);
+          GA4Utils.helpers.log("🔑 API key encoded with base64", null, config, logPrefix);
+          return;
+        } catch (base64Error) {
+          GA4Utils.helpers.log("⚠️ Base64 encoding failed for API key, using plain text", base64Error, config, logPrefix);
+        }
+        
+        // Strategy 3: Plain text as last resort (for development/legacy)
+        headers["X-API-Key"] = config.workerApiKey;
+        GA4Utils.helpers.log("⚠️ API key sent as plain text - consider enabling encryption", null, config, logPrefix);
+      },
+
+      /**
        * Send AJAX payload to endpoint
        * @param {string} endpoint URL to send to
        * @param {Object} payload Data to send
@@ -2471,14 +2511,23 @@
                 xhr.setRequestHeader("X-WP-Nonce", config.nonce || "");
               }
               
-              // Add API key for Cloudflare Worker
+              // Add API key for Cloudflare Worker (for AJAX, use base64 as fallback)
               if (
                 config &&
                 config.cloudflareWorkerUrl &&
                 config.workerApiKey &&
                 endpoint === config.cloudflareWorkerUrl
               ) {
-                xhr.setRequestHeader("X-API-Key", config.workerApiKey);
+                // For AJAX (synchronous), use base64 encoding as reliable fallback
+                // JWT encryption is handled in the async sendPayloadFetch method
+                try {
+                  var encodedApiKey = btoa(config.workerApiKey);
+                  xhr.setRequestHeader("X-API-Key", encodedApiKey);
+                } catch (base64Error) {
+                  // Ultimate fallback to plain text for legacy support
+                  xhr.setRequestHeader("X-API-Key", config.workerApiKey);
+                  GA4Utils.helpers.log("⚠️ Using plain text API key in AJAX (base64 failed)", base64Error, config, logPrefix);
+                }
               }
               GA4Utils.helpers.log(
                 "Sending AJAX request to: " + endpoint,
@@ -2545,9 +2594,9 @@
           headers["X-WP-Nonce"] = config.nonce || "";
         }
 
-        // Add API key for Cloudflare Worker
+        // Add API key for Cloudflare Worker (smart encoding based on capabilities)
         if (isCloudflareWorker && config.workerApiKey) {
-          headers["X-API-Key"] = config.workerApiKey;
+          await GA4Utils.ajax.setApiKeyHeader(headers, config, logPrefix);
         }
 
         // Apply encryption for Cloudflare Worker if enabled
@@ -2598,7 +2647,6 @@
             try {
               var decryptedData = await GA4Utils.encryption.decrypt(data.jwt, config.encryptionKey);
               data = JSON.parse(decryptedData);
-              GA4Utils.helpers.log("🔓 Successfully decrypted response", data, config, logPrefix);
             } catch (decError) {
               GA4Utils.helpers.log("⚠️ Failed to decrypt response, using encrypted data", decError, config, logPrefix);
               // Continue with encrypted data - might still be valid
