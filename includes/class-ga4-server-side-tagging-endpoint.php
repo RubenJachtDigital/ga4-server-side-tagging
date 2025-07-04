@@ -335,10 +335,6 @@ class GA4_Server_Side_Tagging_Endpoint {
         try {
             $encrypted_data = GA4_Encryption_Util::create_encrypted_response( $data, $temp_encryption_key );
             
-            $this->logger->info( 'Secure config encrypted successfully with temporary key', array(
-                'ip' => $this->get_client_ip( $request )
-            ) );
-            
             return new \WP_REST_Response( $encrypted_data, 200 );
             
         } catch ( \Exception $e ) {
