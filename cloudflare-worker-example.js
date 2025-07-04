@@ -6,29 +6,46 @@
  * with full GDPR compliance and consent management
  *
  * @version 2.2.0 - GDPR Enhanced
+ * 
+ * IMPORTANT: CONFIGURATION REQUIRED
+ * ================================
+ * This worker requires Cloudflare Variables and Secrets to be configured.
+ * 
+ * Go to your Worker → Settings → Variables and Secrets and add these secrets:
+ * 
+ * GA4_MEASUREMENT_ID    = Your GA4 Measurement ID (e.g., G-XXXXXXXXXX)
+ * GA4_API_SECRET        = Your GA4 API Secret from Google Analytics
+ * API_KEY              = API key from WordPress plugin admin
+ * ENCRYPTION_KEY       = JWT encryption key from WordPress plugin admin
+ * ALLOWED_DOMAINS      = Comma-separated domains (e.g., example.com,www.example.com)
+ * 
+ * DO NOT hardcode these values in this script - always use environment variables!
  */
 
 // GA4 Configuration
 var DEBUG_MODE = true; // Set to true to enable debug logging
 const GA4_ENDPOINT = "https://www.google-analytics.com/mp/collect";
-const GA4_MEASUREMENT_ID = "G-xx"; // Your GA4 Measurement ID
-const GA4_API_SECRET = "xx"; // Your GA4 API Secret
 
 // Bot Detection Configuration
 const BOT_DETECTION_ENABLED = true; // Set to false to disable bot filtering
 const BOT_LOG_ENABLED = true; // Set to false to disable bot logging
 
 // Security Configuration
-const ALLOWED_DOMAINS = ["example.com", "www.example.com"]; // Add your allowed domains
+// These are loaded from Cloudflare Variables and Secrets - DO NOT HARDCODE
 const RATE_LIMIT_REQUESTS = 100; // Max requests per IP per minute
 const RATE_LIMIT_WINDOW = 60; // Rate limit window in seconds
 const MAX_PAYLOAD_SIZE = 50000; // Max payload size in bytes (50KB)
 const REQUIRE_API_KEY = true; // Set to true to require API key authentication
-const API_KEY = "api-key-from-wordpress-admin"; // API key from WordPress admin
 
 // JWT Encryption Configuration
 const JWT_ENCRYPTION_ENABLED = true; // Set to true to enable JWT encryption
-const ENCRYPTION_KEY = "your-256-bit-encryption-key-here"; // 64-character hex key from WordPress admin (same as backend)
+
+// These are loaded from Cloudflare Variables and Secrets - DO NOT HARDCODE
+let GA4_MEASUREMENT_ID; // Loaded from env.GA4_MEASUREMENT_ID
+let GA4_API_SECRET; // Loaded from env.GA4_API_SECRET
+let ENCRYPTION_KEY; // Loaded from env.ENCRYPTION_KEY
+let ALLOWED_DOMAINS; // Loaded from env.ALLOWED_DOMAINS (comma-separated)
+let API_KEY; // Loaded from env.API_KEY
 
 /**
  * =============================================================================
@@ -1042,16 +1059,30 @@ async function runSecurityChecks(request) {
  * =============================================================================
  */
 
-addEventListener("fetch", (event) => {
-  event.respondWith(handleRequest(event.request));
-});
+export default {
+  async fetch(request, env) {
+    return await handleRequest(request, env);
+  }
+};
 
 /**
  * Handle the incoming request (ENHANCED WITH GDPR COMPLIANCE)
  * @param {Request} request
  */
 
-async function handleRequest(request) {
+async function handleRequest(request, env) {
+  // Initialize environment variables
+  if (env) {
+    GA4_MEASUREMENT_ID = env.GA4_MEASUREMENT_ID || GA4_MEASUREMENT_ID;
+    GA4_API_SECRET = env.GA4_API_SECRET || GA4_API_SECRET;
+    API_KEY = env.API_KEY || API_KEY;
+    ENCRYPTION_KEY = env.ENCRYPTION_KEY || ENCRYPTION_KEY;
+    
+    // Parse ALLOWED_DOMAINS from environment (comma-separated string)
+    if (env.ALLOWED_DOMAINS) {
+      ALLOWED_DOMAINS = env.ALLOWED_DOMAINS.split(',').map(domain => domain.trim());
+    }
+  }
   // Handle CORS preflight requests
   if (request.method === "OPTIONS") {
     return handleCORS(request);

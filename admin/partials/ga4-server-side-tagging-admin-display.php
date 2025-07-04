@@ -498,15 +498,77 @@ if (!defined('WPINC')) {
             </div>
 
             <div class="ga4-server-side-tagging-admin-box">
-                <h3>Cloudflare Worker Setup</h3>
-                <p>To use server-side tagging with Cloudflare:</p>
+                <h3>🔧 Cloudflare Worker Setup</h3>
+                <p>To use server-side tagging with Cloudflare Workers:</p>
+                
+                <h4>Step 1: Create Cloudflare Worker</h4>
                 <ol>
-                    <li>Create a Cloudflare worker</li>
-                    <li>Deploy the respective proxy code to each worker</li>
-                    <li>Enter the worker URLs in the settings</li>
+                    <li>Create a new Cloudflare Worker in your dashboard</li>
+                    <li>Deploy the provided <code>cloudflare-worker-example.js</code> script</li>
                 </ol>
-                <p><a href="https://developers.cloudflare.com/workers/" target="_blank">Learn more about Cloudflare
-                        Workers</a></p>
+                
+                <h4>Step 2: Configure Variables and Secrets (Recommended)</h4>
+                <p><strong>🔒 Secure Method:</strong> Use Cloudflare's Variables and Secrets feature instead of hardcoding values:</p>
+                <ol>
+                    <li>Go to your Worker → <strong>Settings → Variables and Secrets</strong></li>
+                    <li>Add the following variables with type <strong>"secret"</strong>:</li>
+                </ol>
+                
+                <div style="background: #f9f9f9; padding: 15px; margin: 10px 0; border-left: 4px solid #0073aa;">
+                    <table style="width: 100%; border-collapse: collapse;">
+                        <thead>
+                            <tr style="background: #0073aa; color: white;">
+                                <th style="padding: 8px; text-align: left;">Variable Name</th>
+                                <th style="padding: 8px; text-align: left;">Value (copy from above)</th>
+                                <th style="padding: 8px; text-align: left;">Description</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr style="border-bottom: 1px solid #ddd;">
+                                <td style="padding: 8px;"><code>GA4_MEASUREMENT_ID</code></td>
+                                <td style="padding: 8px;"><?php echo esc_html($measurement_id); ?></td>
+                                <td style="padding: 8px;">Your GA4 Measurement ID</td>
+                            </tr>
+                            <tr style="border-bottom: 1px solid #ddd;">
+                                <td style="padding: 8px;"><code>GA4_API_SECRET</code></td>
+                                <td style="padding: 8px;"><?php echo esc_html($api_secret); ?></td>
+                                <td style="padding: 8px;">Your GA4 API Secret</td>
+                            </tr>
+                            <tr style="border-bottom: 1px solid #ddd;">
+                                <td style="padding: 8px;"><code>API_KEY</code></td>
+                                <td style="padding: 8px;"><code><?php echo esc_html($api_key); ?></code></td>
+                                <td style="padding: 8px;">API key for secure communication</td>
+                            </tr>
+                            <tr style="border-bottom: 1px solid #ddd;">
+                                <td style="padding: 8px;"><code>ENCRYPTION_KEY</code></td>
+                                <td style="padding: 8px;"><code><?php echo esc_html($jwt_encryption_key ? substr($jwt_encryption_key, 0, 20) . '...' : 'Not generated'); ?></code></td>
+                                <td style="padding: 8px;">JWT encryption key (if enabled)</td>
+                            </tr>
+                            <tr>
+                                <td style="padding: 8px;"><code>ALLOWED_DOMAINS</code></td>
+                                <td style="padding: 8px;"><?php echo esc_html(get_site_url()); ?>,www.<?php echo esc_html(parse_url(get_site_url(), PHP_URL_HOST)); ?></td>
+                                <td style="padding: 8px;">Comma-separated list of allowed domains</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                
+                <h4>Step 3: Deploy and Test</h4>
+                <ol>
+                    <li>Deploy your worker with the updated configuration</li>
+                    <li>Enter the worker URL in the settings above</li>
+                    <li>Test the configuration using the debug mode</li>
+                </ol>
+                
+                <p><strong>💡 Benefits of Variables and Secrets:</strong></p>
+                <ul style="margin-left: 20px;">
+                    <li>✅ <strong>Secure storage</strong> - Values encrypted by Cloudflare</li>
+                    <li>✅ <strong>No hardcoding</strong> - Sensitive data not visible in worker script</li>
+                    <li>✅ <strong>Easy updates</strong> - Change values without redeploying</li>
+                    <li>✅ <strong>Version control safe</strong> - No secrets in your code repository</li>
+                </ul>
+                
+                <p><a href="https://developers.cloudflare.com/workers/runtime-apis/handlers/fetch/" target="_blank">📖 Learn more about Cloudflare Worker environment variables</a></p>
             </div>
         </div>
     </div>

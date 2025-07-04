@@ -77,29 +77,66 @@ For optimal server-side tagging with enhanced bot protection and security:
 
 1. **Create Cloudflare Worker**: Set up a new worker in your Cloudflare dashboard
 2. **Deploy Script**: Use the provided `cloudflare-worker-example.js`
-3. **Configure Credentials**: Replace placeholder values with your GA4 credentials
+3. **Configure Variables and Secrets**: Set up environment variables (see below)
 4. **Set Worker URL**: Enter the worker URL in plugin settings
-5. **Generate API Key**: Click "Generate New Key" in WordPress admin and update worker
+5. **Generate API Key**: Click "Generate New Key" in WordPress admin
 6. **Enable Server-Side Tracking**: Toggle server-side option in admin
 
-**Worker Configuration Variables:**
+### 🔧 **Cloudflare Worker Variables and Secrets Setup**
+
+Instead of hardcoding values in your worker script, use Cloudflare's Variables and Secrets feature for secure configuration:
+
+**Step 1: Create Variables and Secrets**
+1. Go to your Cloudflare Worker dashboard
+2. Navigate to **Settings → Variables and Secrets**
+3. Add the following variables with type "secret":
+
+| Variable Name | Type | Value | Description |
+|---------------|------|-------|-------------|
+| `GA4_MEASUREMENT_ID` | Secret | `G-XXXXXXXXXX` | Your GA4 Measurement ID |
+| `GA4_API_SECRET` | Secret | `your-api-secret-here` | Your GA4 API Secret |
+| `API_KEY` | Secret | `api-key-from-wordpress` | API key from WordPress admin |
+| `ENCRYPTION_KEY` | Secret | `64-char-hex-key` | Encryption key from WordPress admin |
+| `ALLOWED_DOMAINS` | Secret | `yourdomain.com,www.yourdomain.com` | Comma-separated list of allowed domains |
+
+**Step 2: Variable Formats**
+
+```bash
+# GA4_MEASUREMENT_ID
+G-XXXXXXXXXX
+
+# GA4_API_SECRET  
+your-ga4-api-secret-from-google-analytics
+
+# API_KEY (copy from WordPress admin)
+abcd1234-efgh-5678-ijkl-9012mnop3456
+
+# ENCRYPTION_KEY (copy from WordPress admin)
+0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+
+# ALLOWED_DOMAINS (comma-separated, no spaces around commas)
+yourdomain.com,www.yourdomain.com,subdomain.yourdomain.com
+```
+
+**Step 3: Deploy Worker**
+The worker script will automatically load these values from the environment at runtime.
+
+**Benefits of Using Variables and Secrets:**
+- ✅ **Secure Storage**: Sensitive data encrypted by Cloudflare
+- ✅ **No Hardcoding**: Values not visible in your worker script
+- ✅ **Easy Updates**: Change values without redeploying worker
+- ✅ **Version Control Safe**: No secrets in your code repository
+- ✅ **Multiple Environments**: Different values for staging/production
+
+**Legacy Configuration (Not Recommended):**
+If you prefer to hardcode values in the worker script, update these constants:
 ```javascript
-// In Cloudflare Worker - Update these values
-const GA4_MEASUREMENT_ID = 'G-XXXXXXXXXX'; // Your GA4 Measurement ID
-const GA4_API_SECRET = 'your-api-secret-here'; // Your GA4 API Secret
-const API_KEY = "api-key-from-wordpress-admin"; // Copy from WordPress admin
-const ALLOWED_DOMAINS = ["yourdomain.com", "www.yourdomain.com"]; // Your domains
-
-// Security Settings
-const RATE_LIMIT_REQUESTS = 100; // Max requests per IP per minute
-const RATE_LIMIT_WINDOW = 60; // Rate limit window in seconds
-const MAX_PAYLOAD_SIZE = 50000; // Max payload size in bytes (50KB)
-const REQUIRE_API_KEY = true; // Enable API key authentication
-const BOT_DETECTION_ENABLED = true; // Enable bot filtering
-
-// 🔐 JWT Encryption Configuration (NEW)
-const JWT_ENCRYPTION_ENABLED = false; // Set to true to enable JWT encryption
-const ENCRYPTION_KEY = "your-256-bit-encryption-key-here"; // 64-character hex key from WordPress admin
+// In Cloudflare Worker - Update these values (NOT RECOMMENDED)
+let GA4_MEASUREMENT_ID = 'G-XXXXXXXXXX'; // Your GA4 Measurement ID
+let GA4_API_SECRET = 'your-api-secret-here'; // Your GA4 API Secret
+let API_KEY = "api-key-from-wordpress-admin"; // Copy from WordPress admin
+let ALLOWED_DOMAINS = ["yourdomain.com", "www.yourdomain.com"]; // Your domains
+let ENCRYPTION_KEY = "your-256-bit-encryption-key-here"; // 64-character hex key from WordPress admin
 ```
 
 ### 🔐 JWT Encryption Setup (NEW)
