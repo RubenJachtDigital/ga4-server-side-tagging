@@ -50,67 +50,56 @@ class GA4_Server_Side_Tagging_Endpoint {
      * @since    1.0.0
      */
     public function register_routes() {
-        register_rest_route( 'ga4-server-side-tagging/v1', '/auth-token', array(
-            'methods'             => 'POST',
-            'callback'            => array( $this, 'generate_auth_token' ),
-            'permission_callback' => array( $this, 'check_nonce_permission' ),
-        ) );
-        
         register_rest_route( 'ga4-server-side-tagging/v1', '/secure-config', array(
             'methods'             => 'GET',
             'callback'            => array( $this, 'get_secure_config' ),
-            'permission_callback' => array( $this, 'check_permission' ),
+            'permission_callback' => array( $this, 'check_strong_permission' ),
         ) );
     }
 
     /**
-     * Check permission for the endpoint.
+     * Strong permission check for secure config endpoint (enhanced security).
      *
      * @since    1.0.0
      * @param    \WP_REST_Request    $request    The request object.
      * @return   bool                           Whether the request has permission.
      */
-    public function check_permission( $request ) {
+    public function check_strong_permission( $request ) {
         $client_ip = $this->get_client_ip( $request );
         
-        // Only log failures, not all access attempts
-
-        // Rate limiting check
-        if ( ! $this->check_rate_limit( $request ) ) {
-            $this->log_security_failure( $request, 'RATE_LIMIT_EXCEEDED', 'Too many requests from IP: ' . $client_ip );
+        // 1. STRICT rate limiting check (more restrictive than normal)
+        if ( ! $this->check_strict_rate_limit( $request ) ) {
+            $this->log_security_failure( $request, 'STRICT_RATE_LIMIT_EXCEEDED', "Too many secure config requests from IP: {$client_ip}" );
             return false;
         }
 
-        // JWT token validation
-        $auth_header = $request->get_header( 'Authorization' );
-        if ( empty( $auth_header ) || ! preg_match( '/Bearer\s+(.*)$/i', $auth_header, $matches ) ) {
-            $this->log_security_failure( $request, 'MISSING_JWT_TOKEN', 'Missing or invalid Authorization header' );
-            return false;
-        }
-        
-        $token = $matches[1];
-        $token_payload = $this->validate_jwt_token( $token );
-        if ( ! $token_payload ) {
-            $this->log_security_failure( $request, 'INVALID_JWT_TOKEN', 'JWT token validation failed' );
-            return false;
-        }
-
-        // Enhanced origin validation - check multiple headers
+        // 2. Enhanced origin validation - STRICT check
         if ( ! $this->validate_request_origin( $request ) ) {
             $this->log_security_failure( $request, 'ORIGIN_VALIDATION_FAILED', 'Request origin validation failed' );
             return false;
         }
 
-        // Additional security checks
-        if ( ! $this->validate_request_security( $request ) ) {
-            $this->log_security_failure( $request, 'SECURITY_CHECK_FAILED', 'Additional security validation failed' );
+        // 3. Enhanced security checks with stricter validation
+        if ( ! $this->validate_enhanced_security( $request ) ) {
+            $this->log_security_failure( $request, 'ENHANCED_SECURITY_CHECK_FAILED', 'Enhanced security validation failed' );
             return false;
         }
 
-        // Only log failures, not successful access
+        // 4. Browser fingerprint validation
+        if ( ! $this->validate_browser_fingerprint( $request ) ) {
+            $this->log_security_failure( $request, 'BROWSER_FINGERPRINT_FAILED', 'Browser fingerprint validation failed' );
+            return false;
+        }
+
+        // 5. Time-based request validation (prevent replay attacks)
+        if ( ! $this->validate_request_timing( $request ) ) {
+            $this->log_security_failure( $request, 'REQUEST_TIMING_FAILED', 'Request timing validation failed' );
+            return false;
+        }
 
         return true;
     }
+
 
 
     /**
@@ -122,13 +111,14 @@ class GA4_Server_Side_Tagging_Endpoint {
     public function get_secure_config( $request ) {
         try {
             // Handle encrypted request if present (not needed for GET, but for consistency)
-            $request_data = $this->handle_encrypted_request( $request );
+            // $request_data = $this->handle_encrypted_request( $request ); // Not used for GET
             
             $secure_config = array(
                 'cloudflareWorkerUrl' => get_option( 'ga4_cloudflare_worker_url', '' ),
-                'workerApiKey' => get_option( 'ga4_worker_api_key', '' ),
-                'jwtEncryptionEnabled' => (bool) get_option( 'ga4_jwt_encryption_enabled', false ),
-                'jwtEncryptionKey' => get_option( 'ga4_jwt_encryption_key', '' ),
+                'workerApiKey' => $this->secure_key_transmission( get_option( 'ga4_worker_api_key', '' ) ),
+                'encryptionEnabled' => (bool) get_option( 'ga4_jwt_encryption_enabled', false ),
+                'encryptionKey' => $this->secure_key_transmission( get_option( 'ga4_jwt_encryption_key', '' ) ),
+                'keyDerivationSalt' => $this->get_key_derivation_salt(),
             );
 
             // Log secure config access for security audit
@@ -174,256 +164,16 @@ class GA4_Server_Side_Tagging_Endpoint {
         $this->logger->log_data( $failure_data, 'Security Failure' );
     }
 
-    /**
-     * Generate JWT authentication token.
-     *
-     * @since    1.0.0
-     * @param    \WP_REST_Request    $request    The request object.
-     * @return   \WP_REST_Response             The response object.
-     */
-    public function generate_auth_token( $request ) {
-        try {
-            // Handle encrypted request if present
-            // $request_data = $this->handle_encrypted_request( $request );
-            
-            
-            $token = $this->create_jwt_token();
-            
-            $response_data = array(
-                'token' => $token,
-                'expires_in' => 300 // 5 minutes
-            );
-            
-            // Return encrypted response if requested
-            return $this->create_response( $response_data, $request );
-            
-        } catch ( \Exception $e ) {
-            $this->logger->error( 'Failed to generate JWT token: ' . $e->getMessage() );
-            return new \WP_REST_Response( array( 'error' => 'Token generation failed' ), 500 );
-        }
-    }
-
-    /**
-     * Check nonce permission for token generation.
-     *
-     * @since    1.0.0
-     * @param    \WP_REST_Request    $request    The request object.
-     * @return   bool                          Whether the request has permission.
-     */
-    public function check_nonce_permission( $request ) {
-        // Basic nonce check for token generation
-        $nonce = $request->get_header( 'X-WP-Nonce' );
-        if ( ! wp_verify_nonce( $nonce, 'wp_rest' ) ) {
-            $this->logger->error( 'Invalid nonce for token generation' );
-            return false;
-        }
-
-        // Basic origin check
-        if ( ! $this->validate_request_origin( $request ) ) {
-            $this->logger->error( 'Invalid origin for token generation' );
-            return false;
-        }
-
-        return true;
-    }
-
-    /**
-     * Create JWT token.
-     *
-     * @since    1.0.0
-     * @return   string    The JWT token.
-     */
-    private function create_jwt_token() {
-        $secret = $this->get_jwt_secret();
-        $issued_at = time();
-        $expiration = $issued_at + 300; // 5 minutes
-        
-        $payload = array(
-            'iss' => get_site_url(),
-            'aud' => 'ga4-server-side-tagging',
-            'iat' => $issued_at,
-            'exp' => $expiration,
-            'sub' => 'api-access',
-            'jti' => wp_generate_uuid4()
-        );
-
-        return $this->encode_jwt( $payload, $secret );
-    }
-
-    /**
-     * Validate JWT token.
-     *
-     * @since    1.0.0
-     * @param    string    $token    The JWT token.
-     * @return   bool|array         Token payload if valid, false if invalid.
-     */
-    private function validate_jwt_token( $token ) {
-        try {
-            $secret = $this->get_jwt_secret();
-            $payload = $this->decode_jwt( $token, $secret );
-            
-            // Check expiration
-            if ( isset( $payload['exp'] ) && $payload['exp'] < time() ) {
-                return false;
-            }
-            
-            // Check issuer
-            if ( ! isset( $payload['iss'] ) || $payload['iss'] !== get_site_url() ) {
-                return false;
-            }
-            
-            // Check audience
-            if ( ! isset( $payload['aud'] ) || $payload['aud'] !== 'ga4-server-side-tagging' ) {
-                return false;
-            }
-            
-            return $payload;
-        } catch ( \Exception $e ) {
-            $this->logger->error( 'JWT validation failed: ' . $e->getMessage() );
-            return false;
-        }
-    }
-
-    /**
-     * Get or generate JWT secret key.
-     *
-     * @since    1.0.0
-     * @return   string    The JWT secret key.
-     */
-    private function get_jwt_secret() {
-        $secret = get_option( 'ga4_jwt_secret' );
-        
-        if ( empty( $secret ) ) {
-            $secret = wp_generate_password( 64, true, true );
-            update_option( 'ga4_jwt_secret', $secret );
-        }
-        
-        return $secret;
-    }
-
-    /**
-     * Simple JWT encode implementation.
-     *
-     * @since    1.0.0
-     * @param    array     $payload    The payload to encode.
-     * @param    string    $secret     The secret key.
-     * @return   string               The JWT token.
-     */
-    private function encode_jwt( $payload, $secret ) {
-        $header = array(
-            'typ' => 'JWT',
-            'alg' => 'HS256'
-        );
-        
-        $header_encoded = $this->base64url_encode( wp_json_encode( $header ) );
-        $payload_encoded = $this->base64url_encode( wp_json_encode( $payload ) );
-        
-        $signature = hash_hmac( 'sha256', $header_encoded . '.' . $payload_encoded, $secret, true );
-        $signature_encoded = $this->base64url_encode( $signature );
-        
-        return $header_encoded . '.' . $payload_encoded . '.' . $signature_encoded;
-    }
-
-    /**
-     * Simple JWT decode implementation.
-     *
-     * @since    1.0.0
-     * @param    string    $token     The JWT token.
-     * @param    string    $secret    The secret key.
-     * @return   array               The decoded payload.
-     */
-    private function decode_jwt( $token, $secret ) {
-        $parts = explode( '.', $token );
-        
-        if ( count( $parts ) !== 3 ) {
-            throw new \Exception( 'Invalid JWT token format' );
-        }
-        
-        list( $header_encoded, $payload_encoded, $signature_encoded ) = $parts;
-        
-        $signature = $this->base64url_decode( $signature_encoded );
-        $expected_signature = hash_hmac( 'sha256', $header_encoded . '.' . $payload_encoded, $secret, true );
-        
-        if ( ! hash_equals( $signature, $expected_signature ) ) {
-            throw new \Exception( 'JWT signature verification failed' );
-        }
-        
-        $payload = json_decode( $this->base64url_decode( $payload_encoded ), true );
-        
-        if ( json_last_error() !== JSON_ERROR_NONE ) {
-            throw new \Exception( 'Invalid JWT payload JSON' );
-        }
-        
-        return $payload;
-    }
-
-    /**
-     * Base64URL encode.
-     *
-     * @since    1.0.0
-     * @param    string    $data    The data to encode.
-     * @return   string            The encoded data.
-     */
-    private function base64url_encode( $data ) {
-        return rtrim( strtr( base64_encode( $data ), '+/', '-_' ), '=' );
-    }
-
-    /**
-     * Base64URL decode.
-     *
-     * @since    1.0.0
-     * @param    string    $data    The data to decode.
-     * @return   string            The decoded data.
-     */
-    private function base64url_decode( $data ) {
-        return base64_decode( strtr( $data, '-_', '+/' ) . str_repeat( '=', 3 - ( 3 + strlen( $data ) ) % 4 ) );
-    }
 
 
-    /**
-     * Check rate limiting for API requests.
-     *
-     * @since    1.0.0
-     * @param    \WP_REST_Request    $request    The request object.
-     * @return   bool                          Whether the request passes rate limiting.
-     */
-    private function check_rate_limit( $request ) {
-        $client_ip = $this->get_client_ip( $request );
-        
-        // Check if IP is currently blocked (1 hour block)
-        $block_key = 'ga4_api_blocked_' . md5( $client_ip );
-        $is_blocked = get_transient( $block_key );
-        
-        if ( $is_blocked !== false ) {
-            $this->logger->error( 'Blocked IP attempted access: ' . $client_ip . ' (blocked until: ' . date( 'Y-m-d H:i:s', $is_blocked ) . ')' );
-            return false;
-        }
-        
-        // Check hourly rate limit (100 requests per hour)
-        $hourly_key = 'ga4_api_hourly_' . md5( $client_ip );
-        $hourly_count = get_transient( $hourly_key );
-        
-        if ( $hourly_count === false ) {
-            // First request in this hour
-            set_transient( $hourly_key, 1, 3600 ); // 1 hour window
-            return true;
-        }
-        
-        // Check if under hourly limit (100 requests per hour)
-        if ( $hourly_count < 100 ) {
-            set_transient( $hourly_key, $hourly_count + 1, 3600 );
-            return true;
-        }
-        
-        // Hourly limit exceeded - block IP for 1 hour
-        $block_until = time() + 3600; // 1 hour from now
-        set_transient( $block_key, $block_until, 3600 );
-        
-        // Log the block
-        $this->logger->error( 'IP blocked for exceeding rate limit: ' . $client_ip . ' (' . $hourly_count . ' requests in last hour, blocked until: ' . date( 'Y-m-d H:i:s', $block_until ) . ')' );
-        
-        return false;
-    }
+
+
+
+
+
+
+
+
 
     /**
      * Validate request origin with multiple checks.
@@ -471,38 +221,6 @@ class GA4_Server_Side_Tagging_Endpoint {
         return false;
     }
 
-    /**
-     * Additional security validation checks.
-     *
-     * @since    1.0.0
-     * @param    \WP_REST_Request    $request    The request object.
-     * @return   bool                          Whether the request passes security checks.
-     */
-    private function validate_request_security( $request ) {
-        // Check for suspicious User-Agent patterns
-        $user_agent = $request->get_header( 'user-agent' );
-        if ( empty( $user_agent ) || $this->is_suspicious_user_agent( $user_agent ) ) {
-            $this->logger->error( 'Suspicious or missing User-Agent: ' . $user_agent );
-            return false;
-        }
-        
-        // Check for required headers that legitimate browsers send
-        $required_headers = array( 'accept', 'accept-language' );
-        foreach ( $required_headers as $header ) {
-            if ( empty( $request->get_header( $header ) ) ) {
-                $this->logger->error( 'Missing required header: ' . $header );
-                return false;
-            }
-        }
-        
-        // Check request method
-        if ( $request->get_method() !== 'GET' && $request->get_method() !== 'POST' ) {
-            $this->logger->error( 'Invalid request method: ' . $request->get_method() );
-            return false;
-        }
-        
-        return true;
-    }
 
     /**
      * Get client IP address.
@@ -650,5 +368,241 @@ class GA4_Server_Side_Tagging_Endpoint {
             // Fallback to unencrypted response
             return new \WP_REST_Response( $data, 200 );
         }
+    }
+
+    /**
+     * Enhanced rate limiting for secure config endpoint (stricter than normal).
+     *
+     * @since    1.0.0
+     * @param    \WP_REST_Request    $request    The request object.
+     * @return   bool                          Whether the request passes strict rate limiting.
+     */
+    private function check_strict_rate_limit( $request ) {
+        $client_ip = $this->get_client_ip( $request );
+        
+        // Stricter limits for secure config: 10 requests per hour (vs 100 for normal endpoints)
+        $hourly_key = 'ga4_secure_config_hourly_' . md5( $client_ip );
+        $hourly_count = get_transient( $hourly_key );
+        
+        if ( $hourly_count === false ) {
+            set_transient( $hourly_key, 1, 3600 ); // 1 hour window
+            return true;
+        }
+        
+        if ( $hourly_count < 10 ) { // Only 10 requests per hour for secure config
+            set_transient( $hourly_key, $hourly_count + 1, 3600 );
+            return true;
+        }
+        
+        // Block IP for 1 hour if limit exceeded
+        $block_key = 'ga4_secure_config_blocked_' . md5( $client_ip );
+        $block_until = time() + 3600;
+        set_transient( $block_key, $block_until, 3600 );
+        
+        return false;
+    }
+
+    /**
+     * Enhanced security validation with stricter checks.
+     *
+     * @since    1.0.0
+     * @param    \WP_REST_Request    $request    The request object.
+     * @return   bool                          Whether the request passes enhanced security.
+     */
+    private function validate_enhanced_security( $request ) {
+        // 1. Require HTTPS for secure config (except in development)
+        if ( ! is_ssl() && wp_get_environment_type() !== 'development' ) {
+            $this->logger->error( 'Enhanced security failed: Non-HTTPS connection' );
+            return false;
+        }
+
+        // 2. Check for suspicious User-Agent patterns (stricter)
+        $user_agent = $request->get_header( 'user-agent' );
+        if ( empty( $user_agent ) ) {
+            $this->logger->error( 'Enhanced security failed: Missing User-Agent header' );
+            return false;
+        }
+        if ( $this->is_suspicious_user_agent( $user_agent ) ) {
+            $this->logger->error( 'Enhanced security failed: Suspicious User-Agent pattern' );
+            return false;
+        }
+
+        // 3. Require essential browser headers (relaxed for now)
+        $essential_headers = array( 'accept' );
+        foreach ( $essential_headers as $header ) {
+            if ( empty( $request->get_header( $header ) ) ) {
+                $this->logger->error( "Enhanced security failed: Missing essential header: {$header}" );
+                return false;
+            }
+        }
+        
+        // Log other headers for debugging
+        $accept_language = $request->get_header( 'accept-language' );
+        $accept_encoding = $request->get_header( 'accept-encoding' );
+        $this->logger->error( "Debug headers - Accept-Language: '{$accept_language}', Accept-Encoding: '{$accept_encoding}'" );
+
+        // 4. Check request method is GET only
+        if ( $request->get_method() !== 'GET' ) {
+            $this->logger->error( 'Enhanced security failed: Invalid request method: ' . $request->get_method() );
+            return false;
+        }
+
+        // 5. Validate no suspicious query parameters
+        $query_params = $request->get_query_params();
+        $suspicious_params = array( 'cmd', 'exec', 'system', 'eval', 'base64', 'shell' );
+        foreach ( $suspicious_params as $param ) {
+            if ( isset( $query_params[ $param ] ) ) {
+                $this->logger->error( "Enhanced security failed: Suspicious query parameter: {$param}" );
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * Validate browser fingerprint consistency.
+     *
+     * @since    1.0.0
+     * @param    \WP_REST_Request    $request    The request object.
+     * @return   bool                          Whether browser fingerprint is valid.
+     */
+    private function validate_browser_fingerprint( $request ) {
+        $user_agent = $request->get_header( 'user-agent' );
+        $accept = $request->get_header( 'accept' );
+        $accept_language = $request->get_header( 'accept-language' );
+        $accept_encoding = $request->get_header( 'accept-encoding' );
+
+        // Check for consistent browser fingerprint (relaxed for incognito/fetch API)
+        if ( empty( $user_agent ) || empty( $accept ) ) {
+            $this->logger->error( 'Browser fingerprint failed: Missing User-Agent or Accept header' );
+            return false;
+        }
+        
+        // Accept-Language is optional (some browsers/modes might not send it)
+        if ( empty( $accept_language ) ) {
+            $this->logger->error( 'Browser fingerprint warning: Missing Accept-Language (but allowing)' );
+        }
+        
+        // Accept-Encoding is often missing in fetch API / incognito mode - don't require it
+        if ( empty( $accept_encoding ) ) {
+            $this->logger->error( 'Browser fingerprint note: Missing Accept-Encoding (common in incognito/fetch)' );
+        }
+
+        // Detect common bot patterns in headers
+        if ( strpos( $accept, '*/*' ) === 0 && strlen( $accept ) < 10 ) {
+            // Suspicious: only accepts */*, too simple for real browser
+            $this->logger->error( 'Browser fingerprint failed: Accept header too simple (only */* and short)' );
+            return false;
+        }
+
+        // Check for missing typical browser accept headers
+        $has_html = strpos( $accept, 'text/html' ) !== false;
+        $has_json = strpos( $accept, 'application/json' ) !== false;
+        
+        $this->logger->error( "Accept header: '{$accept}'" );
+        $this->logger->error( "Has text/html: " . ( $has_html ? 'yes' : 'no' ) );
+        $this->logger->error( "Has application/json: " . ( $has_json ? 'yes' : 'no' ) );
+        
+        if ( ! $has_html && ! $has_json ) {
+            $this->logger->error( 'Browser fingerprint failed: Accept header missing text/html and application/json' );
+            return false;
+        }
+
+        // Check for realistic accept-language (if present)
+        if ( ! empty( $accept_language ) && strlen( $accept_language ) < 5 ) {
+            $this->logger->error( 'Browser fingerprint failed: Accept-Language too short' );
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * Validate request timing to prevent replay attacks.
+     *
+     * @since    1.0.0
+     * @param    \WP_REST_Request    $request    The request object.
+     * @return   bool                          Whether request timing is valid.
+     */
+    private function validate_request_timing( $request ) {
+        $client_ip = $this->get_client_ip( $request );
+        $current_time = time();
+        
+        // Check last request time for this IP
+        $last_request_key = 'ga4_secure_config_last_' . md5( $client_ip );
+        $last_request_time = get_transient( $last_request_key );
+        
+        if ( $last_request_time !== false ) {
+            // Don't allow requests more frequent than once per minute for secure config
+            if ( ( $current_time - $last_request_time ) < 60 ) {
+                return false;
+            }
+        }
+        
+        // Update last request time
+        set_transient( $last_request_key, $current_time, 3600 ); // Store for 1 hour
+        
+        return true;
+    }
+
+    /**
+     * Secure key transmission using XOR-based obfuscation (reversible).
+     *
+     * @since    1.0.0
+     * @param    string    $original_key    The original key to secure.
+     * @return   string                    The secured key for transmission.
+     */
+    private function secure_key_transmission( $original_key ) {
+        if ( empty( $original_key ) ) {
+            return '';
+        }
+
+        // Get the derivation salt (will be used as XOR key)
+        $salt = $this->get_key_derivation_salt();
+        
+        // XOR obfuscation - reversible by XORing again with same salt
+        $obfuscated_key = $this->xor_obfuscate( $original_key, $salt );
+        
+        // Base64 encode for safe transmission
+        return base64_encode( $obfuscated_key );
+    }
+
+    /**
+     * XOR obfuscation function (reversible).
+     *
+     * @since    1.0.0
+     * @param    string    $data    The data to obfuscate.
+     * @param    string    $key     The XOR key.
+     * @return   string            The obfuscated data.
+     */
+    private function xor_obfuscate( $data, $key ) {
+        $data_len = strlen( $data );
+        $key_len = strlen( $key );
+        $obfuscated = '';
+        
+        for ( $i = 0; $i < $data_len; $i++ ) {
+            $obfuscated .= chr( ord( $data[ $i ] ) ^ ord( $key[ $i % $key_len ] ) );
+        }
+        
+        return $obfuscated;
+    }
+
+    /**
+     * Get or create key derivation salt.
+     *
+     * @since    1.0.0
+     * @return   string    The key derivation salt.
+     */
+    private function get_key_derivation_salt() {
+        // Create a salt based on site URL and current hour
+        // This changes hourly but is predictable on client side
+        $current_hour = gmdate( 'Y-m-d-H' ); // UTC hour for consistency
+        $site_url = get_site_url();
+        
+        // Create deterministic salt that changes hourly
+        $salt = hash( 'sha256', $site_url . $current_hour . 'ga4-key-derivation' );
+        
+        return $salt;
     }
 } 

@@ -19,7 +19,7 @@ const BOT_DETECTION_ENABLED = true; // Set to false to disable bot filtering
 const BOT_LOG_ENABLED = true; // Set to false to disable bot logging
 
 // Security Configuration
-const ALLOWED_DOMAINS = ["compuact-staging.jachtdigital.dev", "jachtdigital.dev"]; // Add your allowed domains
+const ALLOWED_DOMAINS = ["compuact-staging.jachtdigital.dev", "jachtdigital.dev", "www.computertraining.nl", "computertraining.nl"]; // Add your allowed domains
 const RATE_LIMIT_REQUESTS = 100; // Max requests per IP per minute
 const RATE_LIMIT_WINDOW = 60; // Rate limit window in seconds
 const MAX_PAYLOAD_SIZE = 50000; // Max payload size in bytes (50KB)
@@ -1100,8 +1100,8 @@ async function handleRequest(request) {
     // Parse the request body
     let payload = await request.json();
 
-    // Check if the request uses JWT encryption
-    const isJWTEncrypted = request.headers.get('X-JWT-Encrypted') === 'true';
+    // Check if the request uses JWT encryption (check both header variants)
+    const isJWTEncrypted = request.headers.get('X-JWT-Encrypted') === 'true' || request.headers.get('X-Encrypted') === 'true';
     console.log("Is JWT encrypted: " + isJWTEncrypted);
     if (isJWTEncrypted && JWT_ENCRYPTION_ENABLED && ENCRYPTION_KEY) {
       if (DEBUG_MODE) {
@@ -1115,6 +1115,7 @@ async function handleRequest(request) {
           
           if (DEBUG_MODE) {
             console.log("🔓 JWT request successfully verified and decrypted");
+            console.log("Decrypted payload:", JSON.stringify(payload));
           }
         } else {
           console.warn("Request marked as JWT encrypted but no JWT token found");
@@ -1139,7 +1140,7 @@ async function handleRequest(request) {
     }
 
     if (DEBUG_MODE) {
-      console.log("Received payload:", JSON.stringify(payload));
+      console.log("Final payload (after decryption if applicable):", JSON.stringify(payload));
     }
 
     // CONSENT PROCESSING - Process consent data or default to DENIED
@@ -2224,7 +2225,7 @@ function getCORSHeaders(request) {
   return {
     "Access-Control-Allow-Origin": origin,
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization, X-API-Key, X-JWT-Encrypted",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization, X-API-Key, X-JWT-Encrypted, X-Encrypted",
     "Access-Control-Max-Age": "86400",
   };
 }

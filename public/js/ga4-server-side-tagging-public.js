@@ -16,9 +16,6 @@
     consentReady: false,
     trackedPageViews: new Set(), // Track URLs that have been tracked
 
-    // JWT Token Management
-    jwtToken: null,
-    jwtTokenExpiry: null,
 
 
     init: async function () {
@@ -47,7 +44,7 @@
       // Initialize GDPR Consent System with retry mechanism for slow loads (immediate)
       await this.initializeConsentSystemWithRetry();
 
-      // Set up event listeners immediately (these will queue events until JWT is ready)
+      // Set up event listeners immediately (these will queue events until secure config is ready)
       this.setupEventListeners();
 
       // Initialize A/B testing immediately
@@ -56,7 +53,7 @@
       // Initialize Click tracking immediately
       this.initializeClickTracking();
 
-      // Track page view immediately (will be queued until JWT token is ready)
+      // Track page view immediately (will be queued until secure config is ready)
       this.log("🚀 Triggering trackPageView immediately on page load - will queue until secure config loads");
       this.trackPageView(); // Remove await - let it queue
 
@@ -65,95 +62,13 @@
 
       // Log initialization
       this.log(
-        "%c GA4 Server-Side Tagging initialized v2 ",
+        "%c GA4 Server-Side Tagging initialized v1 ",
         "background: #4CAF50; color: white; font-size: 16px; font-weight: bold; padding: 8px 12px; border-radius: 4px;"
       );
     },
 
 
 
-    /**
-     * Request a new JWT token from the server
-     */
-    requestJWTToken: async function() {
-      try {
-        let requestData = {
-          timestamp: Date.now(),
-          userAgent: navigator.userAgent.substring(0, 100) // Truncate for security
-        };
-
-        let requestBody = JSON.stringify(requestData);
-        let headers = {
-          'X-WP-Nonce': this.config.nonce,
-          'Content-Type': 'application/json'
-        };
-
-        // Apply encryption if enabled
-        if (this.config.jwtEncryptionEnabled && this.config.jwtEncryptionKey) {
-          try {
-            const encryptedData = await GA4Utils.encryption.encrypt(requestBody, this.config.jwtEncryptionKey);
-            requestBody = JSON.stringify({ jwt: encryptedData });
-            headers['X-JWT-Encrypted'] = 'true';
-            this.log("🔐 JWT token request encrypted");
-          } catch (encError) {
-            this.log("⚠️ Failed to encrypt JWT token request, falling back to unencrypted:", encError.message);
-          }
-        }
-
-        const response = await fetch(this.config.apiEndpoint + '/auth-token', {
-          method: 'POST',
-          headers: headers,
-          body: requestBody
-        });
-
-        if (response.ok) {
-          let tokenData = await response.json();
-          
-          // Decrypt response if it was encrypted
-          if (tokenData.encrypted && this.config.jwtEncryptionEnabled && this.config.jwtEncryptionKey) {
-            try {
-              const decryptedData = await GA4Utils.encryption.decrypt(tokenData.encrypted, this.config.jwtEncryptionKey);
-              tokenData = JSON.parse(decryptedData);
-              this.log("🔓 JWT token response decrypted");
-            } catch (decError) {
-              this.log("⚠️ Failed to decrypt JWT token response:", decError.message);
-              return false;
-            }
-          }
-
-          this.jwtToken = tokenData.token;
-          this.jwtTokenExpiry = Date.now() + (tokenData.expires_in * 1000);
-          this.log("🔑 JWT token obtained successfully");
-          return true;
-        } else {
-          this.log("⚠️ Failed to obtain JWT token - status:", response.status);
-          return false;
-        }
-      } catch (error) {
-        this.log("⚠️ Error requesting JWT token:", error.message);
-        return false;
-      }
-    },
-
-    /**
-     * Check if JWT token is valid and not expired
-     */
-    isJWTTokenValid: function() {
-      return this.jwtToken && this.jwtTokenExpiry && Date.now() < this.jwtTokenExpiry;
-    },
-
-    /**
-     * Get valid JWT token, requesting new one if needed
-     */
-    getValidJWTToken: async function() {
-      if (!this.isJWTTokenValid()) {
-        const success = await this.requestJWTToken();
-        if (!success) {
-          throw new Error('Failed to obtain valid JWT token');
-        }
-      }
-      return this.jwtToken;
-    },
 
     /**
      * Load secure configuration in background without blocking user experience
@@ -165,7 +80,7 @@
         await this.loadSecureConfig();
         this.log("✅ Secure configuration loaded - processing queued events");
         
-        // Process any queued events now that we have JWT capability
+        // Process any queued events now that we have secure config
         this.processQueuedEvents();
         
       } catch (error) {
@@ -188,20 +103,18 @@
     },
 
     /**
-     * Load secure configuration from REST API with JWT authentication
+     * Load secure configuration from REST API (simplified - no authentication tokens needed)
      */
     loadSecureConfig: async function() {
       try {
-        // Get valid JWT token first
-        const token = await this.getValidJWTToken();
-        
+        // No authentication tokens needed - direct secure config request with essential headers
         let headers = {
-          'Authorization': 'Bearer ' + token,
+          'Accept': 'application/json, text/plain, */*',
           'Content-Type': 'application/json'
         };
 
         // Add encryption header if encryption is enabled
-        if (this.config.jwtEncryptionEnabled && this.config.jwtEncryptionKey) {
+        if (this.config.encryptionEnabled && this.config.encryptionKey) {
           headers['X-Encrypted'] = 'true';
         }
         
@@ -214,9 +127,9 @@
           let secureConfig = await response.json();
           
           // Decrypt response if it was encrypted
-          if (secureConfig.encrypted && this.config.jwtEncryptionEnabled && this.config.jwtEncryptionKey) {
+          if (secureConfig.encrypted && this.config.encryptionEnabled && this.config.encryptionKey) {
             try {
-              const decryptedData = await GA4Utils.encryption.decrypt(secureConfig.encrypted, this.config.jwtEncryptionKey);
+              const decryptedData = await GA4Utils.encryption.decrypt(secureConfig.encrypted, this.config.encryptionKey);
               secureConfig = JSON.parse(decryptedData);
               this.log("🔓 Secure config response decrypted");
             } catch (decError) {
@@ -225,22 +138,30 @@
             }
           }
                     
+          // Derive the original keys from secured transmission
+          const originalWorkerApiKey = secureConfig.workerApiKey ? 
+            await this.deriveOriginalKey(secureConfig.workerApiKey, secureConfig.keyDerivationSalt) : '';
+          const originalEncryptionKey = secureConfig.encryptionKey ? 
+            await this.deriveOriginalKey(secureConfig.encryptionKey, secureConfig.keyDerivationSalt) : '';
+          
           // Merge secure config into main config
           this.config.cloudflareWorkerUrl = secureConfig.cloudflareWorkerUrl || '';
-          this.config.workerApiKey = secureConfig.workerApiKey || '';
+          this.config.workerApiKey = originalWorkerApiKey;
+          this.config.encryptionEnabled = secureConfig.encryptionEnabled || false;
+          this.config.encryptionKey = originalEncryptionKey;
           
           // Load encryption settings from secure config if not already present
-          if (secureConfig.jwtEncryptionEnabled !== undefined) {
-            this.config.jwtEncryptionEnabled = secureConfig.jwtEncryptionEnabled;
+          if (secureConfig.encryptionEnabled !== undefined) {
+            this.config.encryptionEnabled = secureConfig.encryptionEnabled;
           }
-          if (secureConfig.jwtEncryptionKey && !this.config.jwtEncryptionKey) {
-            this.config.jwtEncryptionKey = secureConfig.jwtEncryptionKey;
+          if (secureConfig.encryptionKey && !this.config.encryptionKey) {
+            this.config.encryptionKey = secureConfig.encryptionKey;
           }
           
           this.log("🔒 Secure configuration loaded successfully", {
             cloudflareWorkerUrl: this.config.cloudflareWorkerUrl,
             hasWorkerApiKey: !!this.config.workerApiKey,
-            encryptionEnabled: !!this.config.jwtEncryptionEnabled
+            encryptionEnabled: !!this.config.encryptionEnabled
           });
         } else {
           this.log("⚠️ Failed to load secure configuration - status:", response.status, response.statusText);
@@ -248,6 +169,50 @@
       } catch (error) {
         this.log("⚠️ Error loading secure configuration:", error.message);
       }
+    },
+
+    /**
+     * Derive original key from secured transmission using XOR deobfuscation.
+     * This reverses the XOR obfuscation applied on the server side.
+     */
+    deriveOriginalKey: async function(obfuscatedKey, salt) {
+      try {
+        if (!obfuscatedKey || !salt) {
+          return '';
+        }
+
+        this.log("🔑 Deriving original key from secured transmission...");
+        
+        // Base64 decode the obfuscated key
+        const decodedKey = atob(obfuscatedKey);
+        
+        // XOR deobfuscation (same operation as obfuscation - XOR is reversible)
+        const originalKey = this.xorDeobfuscate(decodedKey, salt);
+        
+        this.log("✅ Original key derived successfully");
+        return originalKey;
+        
+      } catch (error) {
+        this.log("⚠️ Failed to derive original key:", error.message);
+        return '';
+      }
+    },
+
+    /**
+     * XOR deobfuscation function (reverses XOR obfuscation).
+     */
+    xorDeobfuscate: function(data, key) {
+      const dataLen = data.length;
+      const keyLen = key.length;
+      let deobfuscated = '';
+      
+      for (let i = 0; i < dataLen; i++) {
+        deobfuscated += String.fromCharCode(
+          data.charCodeAt(i) ^ key.charCodeAt(i % keyLen)
+        );
+      }
+      
+      return deobfuscated;
     },
 
     /**
@@ -3047,9 +3012,7 @@
      */
     sendAjaxPayload: async function (endpoint, payload) {
       try {
-        // Check if this is a secure endpoint that requires JWT
-        var isSecureEndpoint = endpoint.includes('/secure-config') || 
-                              (this.config.apiEndpoint && endpoint.startsWith(this.config.apiEndpoint));
+        // All endpoints now use simplified authentication
         
         // For events that don't specify an endpoint, determine the target endpoint
         if (!endpoint || endpoint === 'auto') {
@@ -3078,61 +3041,29 @@
           }
         }
         
-        if (isSecureEndpoint) {
-          // Try to get JWT token for secure endpoints
-          try {
-            var token = await this.getValidJWTToken();
-            
-            // Add JWT token to config for this request
-            var configWithJWT = Object.assign({}, this.config);
-            configWithJWT.jwtToken = token;
-            
-            this.log("🔐 Sending request with JWT authentication", {
-              endpoint: endpoint,
-              hasToken: !!token
-            });
-            
-            return await GA4Utils.ajax.sendPayloadFetch(
-              endpoint,
-              payload,
-              configWithJWT,
-              "[GA4 Server-Side Tagging - JWT]"
-            );
-          } catch (jwtError) {
-            this.log("⚠️ JWT token not available, queuing event for later", {
-              endpoint: endpoint,
-              error: jwtError.message
-            });
-            
-            // Queue the event for later processing
-            this.queueEventForLater(endpoint, payload);
-            return Promise.resolve({ queued: true });
-          }
-        } else {
-          // For non-secure endpoints (Cloudflare Worker), check if we have the URL and API key
-          if (!this.config.cloudflareWorkerUrl || !this.config.workerApiKey) {
-            this.log("⏳ Cloudflare Worker config not ready, queuing event", {
-              hasCloudflareUrl: !!this.config.cloudflareWorkerUrl,
-              hasWorkerApiKey: !!this.config.workerApiKey,
-              endpoint: endpoint
-            });
-            
-            this.queueEventForLater(endpoint, payload);
-            return Promise.resolve({ queued: true });
-          }
-          
-          this.log("📤 Sending to Cloudflare Worker", {
-            endpoint: endpoint,
-            hasWorkerApiKey: !!this.config.workerApiKey
+        // Check if we have the required configuration for sending events
+        if (!this.config.cloudflareWorkerUrl || !this.config.workerApiKey) {
+          this.log("⏳ Cloudflare Worker config not ready, queuing event", {
+            hasCloudflareUrl: !!this.config.cloudflareWorkerUrl,
+            hasWorkerApiKey: !!this.config.workerApiKey,
+            endpoint: endpoint
           });
           
-          return await GA4Utils.ajax.sendPayloadFetch(
-            endpoint,
-            payload,
-            this.config,
-            "[GA4 Server-Side Tagging]"
-          );
+          this.queueEventForLater(endpoint, payload);
+          return Promise.resolve({ queued: true });
         }
+        
+        this.log("📤 Sending to Cloudflare Worker", {
+          endpoint: endpoint,
+          hasWorkerApiKey: !!this.config.workerApiKey
+        });
+        
+        return await GA4Utils.ajax.sendPayloadFetch(
+          endpoint,
+          payload,
+          this.config,
+          "[GA4 Server-Side Tagging]"
+        );
       } catch (error) {
         this.log("❌ Error sending event", {
           endpoint: endpoint,
@@ -3152,11 +3083,11 @@
       return !!(this.config.cloudflareWorkerUrl && this.config.workerApiKey);
     },
 
-    // Event queuing for JWT token delays
+    // Event queuing for configuration delays
     eventQueue: [],
 
     /**
-     * Queue event for retry when JWT token is not available
+     * Queue event for retry when secure configuration is not available
      */
     queueEventForLater: function(endpoint, payload) {
       this.eventQueue.push({

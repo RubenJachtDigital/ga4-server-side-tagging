@@ -2540,12 +2540,8 @@
         var requestBody = JSON.stringify(payload);
         var isCloudflareWorker = config && config.cloudflareWorkerUrl && endpoint === config.cloudflareWorkerUrl;
 
-        // Add JWT token for secure WordPress REST API endpoints
-        if (config && config.jwtToken && config.apiEndpoint && endpoint.startsWith(config.apiEndpoint)) {
-          headers["Authorization"] = "Bearer " + config.jwtToken;
-        }
-        // Add nonce for WordPress REST API (fallback/additional auth)
-        else if (config && config.apiEndpoint && endpoint.startsWith(config.apiEndpoint)) {
+        // Add nonce for WordPress REST API endpoints
+        if (config && config.apiEndpoint && endpoint.startsWith(config.apiEndpoint)) {
           headers["X-WP-Nonce"] = config.nonce || "";
         }
 
@@ -2555,11 +2551,11 @@
         }
 
         // Apply encryption for Cloudflare Worker if enabled
-        if (isCloudflareWorker && config.jwtEncryptionEnabled && config.jwtEncryptionKey) {
+        if (isCloudflareWorker && config.encryptionEnabled && config.encryptionKey) {
           try {
-            var encryptedData = await GA4Utils.encryption.encrypt(requestBody, config.jwtEncryptionKey);
+            var encryptedData = await GA4Utils.encryption.encrypt(requestBody, config.encryptionKey);
             requestBody = JSON.stringify({ jwt: encryptedData });
-            headers["X-JWT-Encrypted"] = "true";
+            headers["X-Encrypted"] = "true";
             GA4Utils.helpers.log("🔐 Payload encrypted for Cloudflare Worker", null, config, logPrefix);
           } catch (encError) {
             GA4Utils.helpers.log("⚠️ Failed to encrypt payload, sending unencrypted", encError, config, logPrefix);
@@ -2569,9 +2565,9 @@
         GA4Utils.helpers.log(
           "Sending Fetch request to: " + endpoint,
           {
-            encrypted: !!(isCloudflareWorker && config.jwtEncryptionEnabled),
+            encrypted: !!(isCloudflareWorker && config.encryptionEnabled),
             hasApiKey: !!headers["X-API-Key"],
-            hasJWT: !!headers["Authorization"]
+            hasNonce: !!headers["X-WP-Nonce"]
           },
           config,
           logPrefix
@@ -2585,21 +2581,22 @@
           });
 
           if (!response.ok) {
+            const errorText = await response.text();
             throw new Error(
-              "Network response was not ok: " + response.status
+              "Network response was not ok: " + response.status + " - " + errorText
             );
           }
 
           let data = await response.json();
 
           // Decrypt response from Cloudflare Worker if it was encrypted
-          if (data.jwt && isCloudflareWorker && config.jwtEncryptionEnabled && config.jwtEncryptionKey) {
+          if (data.jwt && isCloudflareWorker && config.encryptionEnabled && config.encryptionKey) {
             try {
-              var decryptedData = await GA4Utils.encryption.decrypt(data.jwt, config.jwtEncryptionKey);
+              var decryptedData = await GA4Utils.encryption.decrypt(data.jwt, config.encryptionKey);
               data = JSON.parse(decryptedData);
-              GA4Utils.helpers.log("🔓 JWT response verified from Cloudflare Worker", null, config, logPrefix);
+              GA4Utils.helpers.log("🔓 Encrypted response verified from Cloudflare Worker", null, config, logPrefix);
             } catch (decError) {
-              GA4Utils.helpers.log("⚠️ Failed to verify JWT response", decError, config, logPrefix);
+              GA4Utils.helpers.log("⚠️ Failed to verify encrypted response", decError, config, logPrefix);
               // Continue with encrypted data - might still be valid
             }
           }
@@ -2650,7 +2647,7 @@
           }
 
           // Check encryption key is present if encryption is enabled
-          if (config.jwtEncryptionEnabled && !config.jwtEncryptionKey) {
+          if (config.encryptionEnabled && !config.encryptionKey) {
             return { valid: false, reason: "missing_encryption_key" };
           }       
         }
@@ -2658,8 +2655,8 @@
         // Validate WordPress API endpoint
         var isWordPressAPI = config && config.apiEndpoint && endpoint.startsWith(config.apiEndpoint);
         if (isWordPressAPI) {
-          // Check nonce or JWT token is present for WordPress API
-          if (!config.nonce && !config.jwtToken) {
+          // Check nonce is present for WordPress API
+          if (!config.nonce) {
             return { valid: false, reason: "missing_wordpress_auth" };
           }
         }
