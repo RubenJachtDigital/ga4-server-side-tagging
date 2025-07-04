@@ -120,13 +120,6 @@ class GA4_Server_Side_Tagging_Endpoint {
                 'encryptionKey' => $this->secure_key_transmission( get_option( 'ga4_jwt_encryption_key', '' ) ),
                 'keyDerivationSalt' => $this->get_key_derivation_salt(),
             );
-
-            // Log secure config access for security audit
-            $this->logger->log_data(  array(
-                'ip' => $this->get_client_ip( $request ),
-                'encrypted' => GA4_Encryption_Util::is_encrypted_request( $request )
-            ), 'Secure config accessed', 'info');
-
             // Return encrypted response if requested
             return $this->create_response( $secure_config, $request );
             
@@ -436,10 +429,12 @@ class GA4_Server_Side_Tagging_Endpoint {
             }
         }
         
-        // Log other headers for debugging
-        $accept_language = $request->get_header( 'accept-language' );
-        $accept_encoding = $request->get_header( 'accept-encoding' );
-        $this->logger->error( "Debug headers - Accept-Language: '{$accept_language}', Accept-Encoding: '{$accept_encoding}'" );
+        // Log other headers for debugging (only in development)
+        if ( wp_get_environment_type() === 'development' ) {
+            $accept_language = $request->get_header( 'accept-language' );
+            $accept_encoding = $request->get_header( 'accept-encoding' );
+            $this->logger->error( "Debug headers - Accept-Language: '{$accept_language}', Accept-Encoding: '{$accept_encoding}'" );
+        }
 
         // 4. Check request method is GET only
         if ( $request->get_method() !== 'GET' ) {
@@ -500,9 +495,12 @@ class GA4_Server_Side_Tagging_Endpoint {
         $has_html = strpos( $accept, 'text/html' ) !== false;
         $has_json = strpos( $accept, 'application/json' ) !== false;
         
-        $this->logger->error( "Accept header: '{$accept}'" );
-        $this->logger->error( "Has text/html: " . ( $has_html ? 'yes' : 'no' ) );
-        $this->logger->error( "Has application/json: " . ( $has_json ? 'yes' : 'no' ) );
+        // Debug logging only in development
+        if ( wp_get_environment_type() === 'development' ) {
+            $this->logger->error( "Accept header: '{$accept}'" );
+            $this->logger->error( "Has text/html: " . ( $has_html ? 'yes' : 'no' ) );
+            $this->logger->error( "Has application/json: " . ( $has_json ? 'yes' : 'no' ) );
+        }
         
         if ( ! $has_html && ! $has_json ) {
             $this->logger->error( 'Browser fingerprint failed: Accept header missing text/html and application/json' );
@@ -534,8 +532,9 @@ class GA4_Server_Side_Tagging_Endpoint {
         $last_request_time = get_transient( $last_request_key );
         
         if ( $last_request_time !== false ) {
-            // Don't allow requests more frequent than once per minute for secure config
-            if ( ( $current_time - $last_request_time ) < 60 ) {
+            // Don't allow requests more frequent than once per 5 seconds for secure config (reasonable for normal usage)
+            if ( ( $current_time - $last_request_time ) < 5 ) {
+                $this->logger->error( "Request timing failed: Last request was " . ( $current_time - $last_request_time ) . " seconds ago (min 5 seconds)" );
                 return false;
             }
         }

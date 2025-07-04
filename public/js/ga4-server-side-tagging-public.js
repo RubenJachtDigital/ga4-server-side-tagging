@@ -15,6 +15,7 @@
     pageStartTime: Date.now(),
     consentReady: false,
     trackedPageViews: new Set(), // Track URLs that have been tracked
+    loadingSecureConfig: false, // Prevent multiple simultaneous secure config requests
 
 
 
@@ -62,7 +63,7 @@
 
       // Log initialization
       this.log(
-        "%c GA4 Server-Side Tagging initialized v1 ",
+        "%c GA4 Server-Side Tagging initialized v2 ",
         "background: #4CAF50; color: white; font-size: 16px; font-weight: bold; padding: 8px 12px; border-radius: 4px;"
       );
     },
@@ -106,6 +107,14 @@
      * Load secure configuration from REST API (simplified - no authentication tokens needed)
      */
     loadSecureConfig: async function() {
+      // Prevent multiple simultaneous requests
+      if (this.loadingSecureConfig) {
+        this.log("⏳ Secure config already loading, skipping duplicate request");
+        return;
+      }
+      
+      this.loadingSecureConfig = true;
+      
       try {
         // No authentication tokens needed - direct secure config request with essential headers
         let headers = {
@@ -127,9 +136,9 @@
           let secureConfig = await response.json();
           
           // Decrypt response if it was encrypted
-          if (secureConfig.encrypted && this.config.encryptionEnabled && this.config.encryptionKey) {
+          if (secureConfig.jwt && this.config.encryptionEnabled && this.config.encryptionKey) {
             try {
-              const decryptedData = await GA4Utils.encryption.decrypt(secureConfig.encrypted, this.config.encryptionKey);
+              const decryptedData = await GA4Utils.encryption.decrypt(secureConfig.jwt, this.config.encryptionKey);
               secureConfig = JSON.parse(decryptedData);
               this.log("🔓 Secure config response decrypted");
             } catch (decError) {
@@ -168,6 +177,9 @@
         }
       } catch (error) {
         this.log("⚠️ Error loading secure configuration:", error.message);
+      } finally {
+        // Reset loading state regardless of success/failure
+        this.loadingSecureConfig = false;
       }
     },
 
