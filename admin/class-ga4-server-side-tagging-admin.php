@@ -819,9 +819,32 @@ class GA4_Server_Side_Tagging_Admin
 
             // Get API key for worker authentication
             $worker_api_key = get_option('ga4_worker_api_key', '');
-            $headers = array('Content-Type' => 'application/json');
+            $headers = array(
+                'Content-Type' => 'application/json',
+                'Origin' => site_url(),
+                'Referer' => site_url(),
+                'User-Agent' => 'WordPress/' . get_bloginfo('version') . ' GA4-Server-Side-Tagging Connection Test'
+            );
+            
             if (!empty($worker_api_key)) {
                 $headers['X-API-Key'] = $worker_api_key;
+            }
+
+            // Handle JWT encryption if enabled
+            $jwt_encryption_enabled = get_option('ga4_jwt_encryption_enabled', false);
+            $jwt_encryption_key = get_option('ga4_jwt_encryption_key', '');
+            $request_body = wp_json_encode($cloudflare_payload);
+            
+            if ($jwt_encryption_enabled && !empty($jwt_encryption_key)) {
+                try {
+                    $encrypted_data = \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::encrypt($request_body, $jwt_encryption_key);
+                    if ($encrypted_data !== false) {
+                        $request_body = wp_json_encode(array('jwt' => $encrypted_data));
+                        $headers['X-JWT-Encrypted'] = 'true';
+                    }
+                } catch (Exception $e) {
+                    // Continue with unencrypted payload if encryption fails
+                }
             }
 
             $cloudflare_response = wp_remote_post($cloudflare_worker_url, array(
@@ -831,7 +854,7 @@ class GA4_Server_Side_Tagging_Admin
                 'httpversion' => '1.1',
                 'blocking' => true,
                 'headers' => $headers,
-                'body' => wp_json_encode($cloudflare_payload),
+                'body' => $request_body,
                 'cookies' => array(),
             ));
 

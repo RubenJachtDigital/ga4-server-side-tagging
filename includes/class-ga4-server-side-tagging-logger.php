@@ -173,7 +173,7 @@ class GA4_Server_Side_Tagging_Logger {
         }
         
         $this->info( 'Tracking event: ' . $event_name );
-        $this->log_data( $event_data, label: 'Event data for ' . $event_name );
+        $this->log_data( $event_data, "Event data for {$event_name}" );
     }
 
     /**

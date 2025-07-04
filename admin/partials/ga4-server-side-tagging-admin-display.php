@@ -451,13 +451,13 @@ if (!defined('WPINC')) {
                     <input type="submit" name="ga4_server_side_tagging_settings_submit" class="button-primary"
                         value="Save Settings" />
                     <input type="submit" name="ga4_test_connection" class="button-secondary"
-                        value="Test GA4 Connection" />
+                        value="Test Connection" />
                 </p>
             </form>
 
             <?php if ($test_result): ?>
                 <div class="ga4-server-side-tagging-admin-section">
-                    <h3>GA4 Connection Test Results</h3>
+                    <h3>Connection Test Results</h3>
 
                     <div
                         class="ga4-server-side-tagging-test-result <?php echo $test_result['success'] ? 'success' : 'error'; ?>">

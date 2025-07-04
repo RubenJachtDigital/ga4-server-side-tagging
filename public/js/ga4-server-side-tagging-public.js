@@ -224,9 +224,7 @@
               return;
             }
           }
-          
-          this.log("🔒 Secure config response:", secureConfig);
-          
+                    
           // Merge secure config into main config
           this.config.cloudflareWorkerUrl = secureConfig.cloudflareWorkerUrl || '';
           this.config.workerApiKey = secureConfig.workerApiKey || '';
