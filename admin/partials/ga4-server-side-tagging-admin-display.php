@@ -511,47 +511,9 @@ if (!defined('WPINC')) {
                 <p><strong>🔒 Secure Method:</strong> Use Cloudflare's Variables and Secrets feature instead of hardcoding values:</p>
                 <ol>
                     <li>Go to your Worker → <strong>Settings → Variables and Secrets</strong></li>
-                    <li>Add the following variables with type <strong>"secret"</strong>:</li>
+                    <li>Add the following variables with type <strong>"secret"</strong></li>
+                    <li><button type="button" id="show-cloudflare-vars" class="button button-secondary">📋 Show Variables to Copy</button></li>
                 </ol>
-                
-                <div style="background: #f9f9f9; padding: 15px; margin: 10px 0; border-left: 4px solid #0073aa;">
-                    <table style="width: 100%; border-collapse: collapse;">
-                        <thead>
-                            <tr style="background: #0073aa; color: white;">
-                                <th style="padding: 8px; text-align: left;">Variable Name</th>
-                                <th style="padding: 8px; text-align: left;">Value (copy from above)</th>
-                                <th style="padding: 8px; text-align: left;">Description</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <tr style="border-bottom: 1px solid #ddd;">
-                                <td style="padding: 8px;"><code>GA4_MEASUREMENT_ID</code></td>
-                                <td style="padding: 8px;"><?php echo esc_html($measurement_id); ?></td>
-                                <td style="padding: 8px;">Your GA4 Measurement ID</td>
-                            </tr>
-                            <tr style="border-bottom: 1px solid #ddd;">
-                                <td style="padding: 8px;"><code>GA4_API_SECRET</code></td>
-                                <td style="padding: 8px;"><?php echo esc_html($api_secret); ?></td>
-                                <td style="padding: 8px;">Your GA4 API Secret</td>
-                            </tr>
-                            <tr style="border-bottom: 1px solid #ddd;">
-                                <td style="padding: 8px;"><code>API_KEY</code></td>
-                                <td style="padding: 8px;"><code><?php echo esc_html($api_key); ?></code></td>
-                                <td style="padding: 8px;">API key for secure communication</td>
-                            </tr>
-                            <tr style="border-bottom: 1px solid #ddd;">
-                                <td style="padding: 8px;"><code>ENCRYPTION_KEY</code></td>
-                                <td style="padding: 8px;"><code><?php echo esc_html($jwt_encryption_key ? substr($jwt_encryption_key, 0, 20) . '...' : 'Not generated'); ?></code></td>
-                                <td style="padding: 8px;">JWT encryption key (if enabled)</td>
-                            </tr>
-                            <tr>
-                                <td style="padding: 8px;"><code>ALLOWED_DOMAINS</code></td>
-                                <td style="padding: 8px;"><?php echo esc_html(get_site_url()); ?>,www.<?php echo esc_html(parse_url(get_site_url(), PHP_URL_HOST)); ?></td>
-                                <td style="padding: 8px;">Comma-separated list of allowed domains</td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </div>
                 
                 <h4>Step 3: Deploy and Test</h4>
                 <ol>
@@ -559,6 +521,67 @@ if (!defined('WPINC')) {
                     <li>Enter the worker URL in the settings above</li>
                     <li>Test the configuration using the debug mode</li>
                 </ol>
+                
+                <!-- Cloudflare Variables Modal -->
+                <div id="cloudflare-vars-modal" style="display: none; position: fixed; z-index: 100000; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5);">
+                    <div style="background-color: #fff; margin: 5% auto; padding: 20px; border-radius: 8px; width: 80%; max-width: 600px; max-height: 80%; overflow-y: auto; position: relative;">
+                        <span id="close-cloudflare-modal" style="color: #aaa; float: right; font-size: 28px; font-weight: bold; cursor: pointer; line-height: 1;">&times;</span>
+                        <h3 style="margin-top: 0;">🔧 Cloudflare Worker Variables and Secrets</h3>
+                        <p>Copy and paste these exact values into your Cloudflare Worker Variables and Secrets:</p>
+                        
+                        <div style="background: #f9f9f9; padding: 15px; border-left: 4px solid #0073aa; font-family: monospace; font-size: 13px; margin: 15px 0;">
+                            <div style="margin-bottom: 15px;">
+                                <strong>Variable Name:</strong> <code>GA4_MEASUREMENT_ID</code><br>
+                                <strong>Value:</strong> <input type="text" readonly value="<?php echo esc_attr($measurement_id ?: 'Configure GA4 Measurement ID first'); ?>" style="width: 100%; padding: 5px; margin-top: 5px; font-family: monospace;" onclick="this.select();">
+                            </div>
+                            
+                            <div style="margin-bottom: 15px;">
+                                <strong>Variable Name:</strong> <code>GA4_API_SECRET</code><br>
+                                <strong>Value:</strong> <input type="text" readonly value="<?php echo esc_attr($api_secret ?: 'Configure GA4 API Secret first'); ?>" style="width: 100%; padding: 5px; margin-top: 5px; font-family: monospace;" onclick="this.select();">
+                            </div>
+                            
+                            <div style="margin-bottom: 15px;">
+                                <strong>Variable Name:</strong> <code>API_KEY</code><br>
+                                <strong>Value:</strong> <input type="text" readonly value="<?php echo esc_attr($worker_api_key ?: 'Generate API key first'); ?>" style="width: 100%; padding: 5px; margin-top: 5px; font-family: monospace;" onclick="this.select();">
+                            </div>
+                            
+                            <div style="margin-bottom: 15px;">
+                                <strong>Variable Name:</strong> <code>ENCRYPTION_KEY</code><br>
+                                <strong>Value:</strong> <input type="text" readonly value="<?php echo esc_attr($jwt_encryption_key ?: 'Generate encryption key if using JWT encryption'); ?>" style="width: 100%; padding: 5px; margin-top: 5px; font-family: monospace;" onclick="this.select();">
+                            </div>
+                            
+                            <div style="margin-bottom: 15px;">
+                                <strong>Variable Name:</strong> <code>ALLOWED_DOMAINS</code><br>
+                                <strong>Value:</strong> <input type="text" readonly value="<?php 
+                                    $site_url = parse_url(get_site_url(), PHP_URL_HOST);
+                                    // Handle www vs non-www
+                                    if (strpos($site_url, 'www.') === 0) {
+                                        // Current has www, show both www and non-www
+                                        $domains = $site_url . ',' . substr($site_url, 4);
+                                    } else {
+                                        // Current doesn't have www, show both non-www and www
+                                        $domains = $site_url . ',www.' . $site_url;
+                                    }
+                                    echo esc_attr($domains); 
+                                ?>" style="width: 100%; padding: 5px; margin-top: 5px; font-family: monospace;" onclick="this.select();">
+                            </div>
+                        </div>
+                        
+                        <div style="background: #e7f3ff; padding: 10px; border-left: 4px solid #0073aa; margin: 15px 0; font-size: 12px;">
+                            <p style="margin: 0;"><strong>💡 Instructions:</strong></p>
+                            <ol style="margin: 5px 0 0 20px; padding: 0;">
+                                <li>Click on each input field to select the value</li>
+                                <li>Copy (Ctrl+C / Cmd+C) and paste into Cloudflare Variables and Secrets</li>
+                                <li>Set each variable type as <strong>"secret"</strong></li>
+                                <li>Save and deploy your worker</li>
+                            </ol>
+                        </div>
+                        
+                        <div style="text-align: center; margin-top: 20px;">
+                            <button type="button" id="close-cloudflare-modal-btn" class="button button-primary">Close</button>
+                        </div>
+                    </div>
+                </div>
                 
                 <p><strong>💡 Benefits of Variables and Secrets:</strong></p>
                 <ul style="margin-left: 20px;">
@@ -610,6 +633,27 @@ jQuery(document).ready(function($) {
         } else {
             $('#encryption_key_row').hide();
         }
+    });
+    
+    // Cloudflare Variables Modal functionality
+    $('#show-cloudflare-vars').on('click', function() {
+        $('#cloudflare-vars-modal').show();
+    });
+    
+    $('#close-cloudflare-modal, #close-cloudflare-modal-btn').on('click', function() {
+        $('#cloudflare-vars-modal').hide();
+    });
+    
+    // Close modal when clicking outside of it
+    $('#cloudflare-vars-modal').on('click', function(e) {
+        if (e.target === this) {
+            $(this).hide();
+        }
+    });
+    
+    // Prevent modal from closing when clicking inside the modal content
+    $('#cloudflare-vars-modal > div').on('click', function(e) {
+        e.stopPropagation();
     });
 });
 </script>
