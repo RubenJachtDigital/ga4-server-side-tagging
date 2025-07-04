@@ -337,17 +337,18 @@ class GA4_Server_Side_Tagging_Endpoint {
             return new \WP_REST_Response( $data, 200 );
         }
         
-        $encryption_key = get_option( 'ga4_jwt_encryption_key', '' );
-        if ( empty( $encryption_key ) ) {
+        // Use temporary key for secure config encryption (changes every 5 minutes)
+        $temp_encryption_key = $this->get_temporary_encryption_key();
+        if ( empty( $temp_encryption_key ) ) {
             // Fallback to unencrypted response if no key
-            $this->logger->warning( 'JWT encryption requested but no key configured' );
+            $this->logger->warning( 'JWT encryption requested but no temporary key could be generated' );
             return new \WP_REST_Response( $data, 200 );
         }
         
         try {
-            $encrypted_data = GA4_Encryption_Util::create_encrypted_response( $data, $encryption_key );
+            $encrypted_data = GA4_Encryption_Util::create_encrypted_response( $data, $temp_encryption_key );
             
-            $this->logger->info( 'JWT response created successfully', array(
+            $this->logger->info( 'JWT response created successfully with temporary key', array(
                 'ip' => $this->get_client_ip( $request )
             ) );
             
@@ -382,7 +383,7 @@ class GA4_Server_Side_Tagging_Endpoint {
             return true;
         }
         
-        if ( $hourly_count < 10 ) { // Only 10 requests per hour for secure config
+        if ( $hourly_count < 100 ) { // Only 100 requests per hour for secure config
             set_transient( $hourly_key, $hourly_count + 1, 3600 );
             return true;
         }
@@ -603,5 +604,23 @@ class GA4_Server_Side_Tagging_Endpoint {
         $salt = hash( 'sha256', $site_url . $current_hour . 'ga4-key-derivation' );
         
         return $salt;
+    }
+
+    /**
+     * Generate temporary encryption key for secure config (changes every 5 minutes).
+     *
+     * @since    1.0.0
+     * @return   string    The temporary encryption key (64 characters hex).
+     */
+    private function get_temporary_encryption_key() {
+        // Create key that changes every 5 minutes but is predictable on client side
+        $current_5min_slot = floor( time() / 300 ); // 300 seconds = 5 minutes
+        $site_url = get_site_url();
+        
+        // Create deterministic key that changes every 5 minutes
+        $temp_key_seed = hash( 'sha256', $site_url . $current_5min_slot . 'ga4-temp-encryption' );
+        
+        // Return 64-character hex key (256 bits)
+        return $temp_key_seed;
     }
 } 

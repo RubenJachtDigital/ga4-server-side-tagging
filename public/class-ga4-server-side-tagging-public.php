@@ -122,6 +122,7 @@ class GA4_Server_Side_Tagging_Public
             'conversionFormIds' => get_option('ga4_conversion_form_ids', ''),
             'currency' => function_exists('get_woocommerce_currency') ? get_woocommerce_currency() : 'EUR',
             'siteName' => get_bloginfo('name'),
+            'encryptionEnabled' => get_option('ga4_jwt_encryption_enabled', false),
 
             // GDPR Consent settings (enhanced)
             'consentSettings' => array(
@@ -793,6 +794,24 @@ class GA4_Server_Side_Tagging_Public
         return array_filter($product_data, function ($value) {
             return $value !== '' && $value !== null && $value !== 0;
         });
+    }
+
+    /**
+     * Generate temporary encryption key for secure config (changes every 5 minutes).
+     *
+     * @since    1.0.0
+     * @return   string    The temporary encryption key (64 characters hex).
+     */
+    private function get_temporary_encryption_key() {
+        // Create key that changes every 5 minutes but is predictable on client side
+        $current_5min_slot = floor( time() / 300 ); // 300 seconds = 5 minutes
+        $site_url = get_site_url();
+        
+        // Create deterministic key that changes every 5 minutes
+        $temp_key_seed = hash( 'sha256', $site_url . $current_5min_slot . 'ga4-temp-encryption' );
+        
+        // Return 64-character hex key (256 bits)
+        return $temp_key_seed;
     }
 
 }

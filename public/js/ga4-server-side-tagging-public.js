@@ -63,7 +63,7 @@
 
       // Log initialization
       this.log(
-        "%c GA4 Server-Side Tagging initialized v2 ",
+        "%c GA4 Server-Side Tagging initialized v1 ",
         "background: #4CAF50; color: white; font-size: 16px; font-weight: bold; padding: 8px 12px; border-radius: 4px;"
       );
     },
@@ -123,7 +123,7 @@
         };
 
         // Add encryption header if encryption is enabled
-        if (this.config.encryptionEnabled && this.config.encryptionKey) {
+        if (this.config.encryptionEnabled) {
           headers['X-Encrypted'] = 'true';
         }
         
@@ -134,13 +134,18 @@
 
         if (response.ok) {
           let secureConfig = await response.json();
-          
           // Decrypt response if it was encrypted
-          if (secureConfig.jwt && this.config.encryptionEnabled && this.config.encryptionKey) {
+          if (secureConfig.jwt && this.config.encryptionEnabled) {
             try {
-              const decryptedData = await GA4Utils.encryption.decrypt(secureConfig.jwt, this.config.encryptionKey);
+              const tempKey = await this.getTemporaryEncryptionKey();
+              if (!tempKey) {
+                this.log("⚠️ Failed to generate temporary encryption key");
+                return;
+              }
+              
+              const decryptedData = await GA4Utils.encryption.decrypt(secureConfig.jwt, tempKey);
               secureConfig = JSON.parse(decryptedData);
-              this.log("🔓 Secure config response decrypted");
+              this.log("🔓 Secure config response decrypted with temporary key");
             } catch (decError) {
               this.log("⚠️ Failed to decrypt secure config response:", decError.message);
               return;
@@ -225,6 +230,35 @@
       }
       
       return deobfuscated;
+    },
+
+    /**
+     * Generate temporary encryption key for secure config (changes every 5 minutes).
+     * This matches the server-side implementation.
+     */
+    getTemporaryEncryptionKey: async function() {
+      try {
+        // Create key that changes every 5 minutes but is predictable
+        const current5minSlot = Math.floor(Date.now() / (1000 * 300)); // 300 seconds = 5 minutes
+        const siteUrl = window.location.origin;
+        
+        // Create deterministic key that changes every 5 minutes
+        const seedString = siteUrl + current5minSlot + 'ga4-temp-encryption';
+        
+        // Use Web Crypto API to generate SHA-256 hash
+        const encoder = new TextEncoder();
+        const data = encoder.encode(seedString);
+        const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+        
+        // Convert to hex string (64 characters)
+        const hashArray = Array.from(new Uint8Array(hashBuffer));
+        const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+        
+        return hashHex;
+      } catch (error) {
+        this.log("⚠️ Failed to generate temporary encryption key:", error.message);
+        return null;
+      }
     },
 
     /**
