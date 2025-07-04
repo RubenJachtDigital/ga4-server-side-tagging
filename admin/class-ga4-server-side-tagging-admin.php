@@ -842,7 +842,7 @@ class GA4_Server_Side_Tagging_Admin
                         $request_body = wp_json_encode(array('jwt' => $encrypted_data));
                         $headers['X-JWT-Encrypted'] = 'true';
                     }
-                } catch (Exception $e) {
+                } catch (\Exception $e) {
                     // Continue with unencrypted payload if encryption fails
                 }
             }

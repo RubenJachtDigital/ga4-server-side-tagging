@@ -3556,7 +3556,16 @@
        * @returns {string} - Encoded data
        */
       base64urlEncode: function(data) {
-        const base64 = btoa(typeof data === 'string' ? data : String.fromCharCode(...new Uint8Array(data)));
+        let base64;
+        if (typeof data === 'string') {
+          // Handle Unicode strings properly by first encoding to UTF-8
+          const encoder = new TextEncoder();
+          const utf8Bytes = encoder.encode(data);
+          base64 = btoa(String.fromCharCode(...utf8Bytes));
+        } else {
+          // Handle Uint8Array data
+          base64 = btoa(String.fromCharCode(...new Uint8Array(data)));
+        }
         return base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
       },
 
