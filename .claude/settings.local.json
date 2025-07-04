@@ -3,7 +3,8 @@
     "allow": [
       "Bash(php:*)",
       "Bash(rg:*)",
-      "Bash(node:*)"
+      "Bash(node:*)",
+      "Bash(grep:*)"
     ],
     "deny": []
   }

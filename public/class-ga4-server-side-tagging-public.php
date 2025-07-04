@@ -152,8 +152,6 @@ class GA4_Server_Side_Tagging_Public
         // Add cart data for checkout events
         if (function_exists('is_checkout') && (is_checkout() || is_cart())) {
             $script_data['cartData'] = $this->get_cart_data_for_tracking();
-            $this->logger->info('Added cart data for checkout events. Items count: ' .
-                (isset($script_data['cartData']['items_count']) ? $script_data['cartData']['items_count'] : 0));
         }
 
         if (function_exists('is_user_logged_in') && is_user_logged_in()) {

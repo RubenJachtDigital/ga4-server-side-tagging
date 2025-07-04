@@ -2652,12 +2652,7 @@
           // Check encryption key is present if encryption is enabled
           if (config.jwtEncryptionEnabled && !config.jwtEncryptionKey) {
             return { valid: false, reason: "missing_encryption_key" };
-          }
-
-          // Validate Cloudflare Worker URL format
-          if (!this.isValidCloudflareWorkerUrl(endpoint)) {
-            return { valid: false, reason: "invalid_cloudflare_worker_url" };
-          }
+          }       
         }
 
         // Validate WordPress API endpoint
@@ -2698,22 +2693,6 @@
         return { valid: true, reason: "security_checks_passed" };
       },
 
-      /**
-       * Validate Cloudflare Worker URL format
-       * @param {string} url URL to validate
-       * @returns {boolean} True if valid Cloudflare Worker URL
-       */
-      isValidCloudflareWorkerUrl: function(url) {
-        // Basic pattern for Cloudflare Worker URLs
-        var cloudflarePatterns = [
-          /^https:\/\/[a-zA-Z0-9-]+\.workers\.dev\//,
-          /^https:\/\/[a-zA-Z0-9.-]+\/[a-zA-Z0-9-_]+/, // Custom domain workers
-        ];
-        
-        return cloudflarePatterns.some(function(pattern) {
-          return pattern.test(url);
-        });
-      },
 
       /**
        * Basic client-side rate limiting

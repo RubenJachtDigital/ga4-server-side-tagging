@@ -184,14 +184,8 @@ class GA4_Server_Side_Tagging_Endpoint {
     public function generate_auth_token( $request ) {
         try {
             // Handle encrypted request if present
-            $request_data = $this->handle_encrypted_request( $request );
+            // $request_data = $this->handle_encrypted_request( $request );
             
-            // Log request details for security audit
-            $this->logger->info( 'JWT token requested', array(
-                'ip' => $this->get_client_ip( $request ),
-                'user_agent' => $request->get_header( 'User-Agent' ),
-                'jwt_encrypted' => GA4_Encryption_Util::is_encrypted_request( $request )
-            ) );
             
             $token = $this->create_jwt_token();
             

@@ -440,7 +440,7 @@ function getUserAgent(payload, request) {
   }
   
   // Priority 4: Request header (least reliable for WordPress requests)
-  return request.headers.get('User-Agent') || '';
+  return request ? (request.headers.get('User-Agent') || '') : '';
 }
 
 /**
@@ -2224,7 +2224,7 @@ function getCORSHeaders(request) {
   return {
     "Access-Control-Allow-Origin": origin,
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization, X-API-Key",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization, X-API-Key, X-JWT-Encrypted",
     "Access-Control-Max-Age": "86400",
   };
 }
