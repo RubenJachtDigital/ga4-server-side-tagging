@@ -2588,21 +2588,25 @@
           }
 
           let data = await response.json();
+          let wasEncrypted = false;
 
           // Decrypt response from Cloudflare Worker if it was encrypted
           if (data.jwt && isCloudflareWorker && config.encryptionEnabled && config.encryptionKey) {
+            wasEncrypted = true;
+            GA4Utils.helpers.log("🔐 Received encrypted response from Cloudflare Worker", null, config, logPrefix);
+            
             try {
               var decryptedData = await GA4Utils.encryption.decrypt(data.jwt, config.encryptionKey);
               data = JSON.parse(decryptedData);
-              GA4Utils.helpers.log("🔓 Encrypted response verified from Cloudflare Worker", null, config, logPrefix);
+              GA4Utils.helpers.log("🔓 Successfully decrypted response", data, config, logPrefix);
             } catch (decError) {
-              GA4Utils.helpers.log("⚠️ Failed to verify encrypted response", decError, config, logPrefix);
+              GA4Utils.helpers.log("⚠️ Failed to decrypt response, using encrypted data", decError, config, logPrefix);
               // Continue with encrypted data - might still be valid
             }
           }
 
           GA4Utils.helpers.log(
-            "Fetch request sent successfully",
+            "Fetch request sent successfully" + (wasEncrypted ? " (decrypted)" : ""),
             data,
             config,
             logPrefix

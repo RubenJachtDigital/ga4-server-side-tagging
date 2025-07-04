@@ -1508,10 +1508,8 @@ async function createResponse(responseData, request) {
     ...getCORSHeaders(request),
   };
 
-  // Check if client supports JWT encryption and encryption is enabled
-  const isJWTEncrypted = request.headers.get('X-JWT-Encrypted') === 'true';
-  
-  if (isJWTEncrypted && JWT_ENCRYPTION_ENABLED && ENCRYPTION_KEY) {
+  // Always encrypt responses when encryption is enabled (regardless of request encryption status)
+  if (JWT_ENCRYPTION_ENABLED && ENCRYPTION_KEY) {
     try {
       const jwtToken = await encrypt(responseBody, ENCRYPTION_KEY);
       responseBody = JSON.stringify({ jwt: jwtToken });
