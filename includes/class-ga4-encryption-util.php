@@ -251,7 +251,7 @@ class GA4_Encryption_Util
      */
     public static function is_encrypted_request($request)
     {
-        return $request->get_header('X-JWT-Encrypted') === 'true';
+        return $request->get_header('X-JWT-Encrypted') === 'true' || $request->get_header('X-Encrypted') === 'true';;
     }
 
     /**

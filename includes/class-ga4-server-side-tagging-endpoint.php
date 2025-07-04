@@ -124,7 +124,7 @@ class GA4_Server_Side_Tagging_Endpoint {
             // Log secure config access for security audit
             $this->logger->log_data(  array(
                 'ip' => $this->get_client_ip( $request ),
-                'jwt_encrypted' => GA4_Encryption_Util::is_encrypted_request( $request )
+                'encrypted' => GA4_Encryption_Util::is_encrypted_request( $request )
             ), 'Secure config accessed', 'info');
 
             // Return encrypted response if requested
