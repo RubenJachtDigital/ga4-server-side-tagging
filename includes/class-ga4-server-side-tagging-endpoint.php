@@ -91,11 +91,7 @@ class GA4_Server_Side_Tagging_Endpoint {
             return false;
         }
 
-        // 5. Time-based request validation (prevent replay attacks)
-        if ( ! $this->validate_request_timing( $request ) ) {
-            $this->log_security_failure( $request, 'REQUEST_TIMING_FAILED', 'Request timing validation failed' );
-            return false;
-        }
+     
 
         return true;
     }
@@ -458,7 +454,6 @@ class GA4_Server_Side_Tagging_Endpoint {
         $user_agent = $request->get_header( 'user-agent' );
         $accept = $request->get_header( 'accept' );
         $accept_language = $request->get_header( 'accept-language' );
-        $accept_encoding = $request->get_header( 'accept-encoding' );
 
         // Check for consistent browser fingerprint (relaxed for incognito/fetch API)
         if ( empty( $user_agent ) || empty( $accept ) ) {
@@ -466,16 +461,6 @@ class GA4_Server_Side_Tagging_Endpoint {
             return false;
         }
         
-        // Accept-Language is optional (some browsers/modes might not send it)
-        if ( empty( $accept_language ) ) {
-            $this->logger->error( 'Browser fingerprint warning: Missing Accept-Language (but allowing)' );
-        }
-        
-        // Accept-Encoding is often missing in fetch API / incognito mode - don't require it
-        if ( empty( $accept_encoding ) ) {
-            $this->logger->error( 'Browser fingerprint note: Missing Accept-Encoding (common in incognito/fetch)' );
-        }
-
         // Detect common bot patterns in headers
         if ( strpos( $accept, '*/*' ) === 0 && strlen( $accept ) < 10 ) {
             // Suspicious: only accepts */*, too simple for real browser
@@ -505,35 +490,6 @@ class GA4_Server_Side_Tagging_Endpoint {
             return false;
         }
 
-        return true;
-    }
-
-    /**
-     * Validate request timing to prevent replay attacks.
-     *
-     * @since    1.0.0
-     * @param    \WP_REST_Request    $request    The request object.
-     * @return   bool                          Whether request timing is valid.
-     */
-    private function validate_request_timing( $request ) {
-        $client_ip = $this->get_client_ip( $request );
-        $current_time = time();
-        
-        // Check last request time for this IP
-        $last_request_key = 'ga4_secure_config_last_' . md5( $client_ip );
-        $last_request_time = get_transient( $last_request_key );
-        
-        if ( $last_request_time !== false ) {
-            // Don't allow requests more frequent than once per 5 seconds for secure config (reasonable for normal usage)
-            if ( ( $current_time - $last_request_time ) < 5 ) {
-                $this->logger->error( "Request timing failed: Last request was " . ( $current_time - $last_request_time ) . " seconds ago (min 5 seconds)" );
-                return false;
-            }
-        }
-        
-        // Update last request time
-        set_transient( $last_request_key, $current_time, 3600 ); // Store for 1 hour
-        
         return true;
     }
 

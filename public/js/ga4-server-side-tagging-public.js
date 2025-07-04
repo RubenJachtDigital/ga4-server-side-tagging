@@ -63,7 +63,7 @@
 
       // Log initialization
       this.log(
-        "%c GA4 Server-Side Tagging initialized v2 ",
+        "%c GA4 Server-Side Tagging initialized v3 ",
         "background: #4CAF50; color: white; font-size: 16px; font-weight: bold; padding: 8px 12px; border-radius: 4px;"
       );
     },
@@ -247,7 +247,9 @@
         const siteUrl = window.location.origin;
         
         // Create deterministic key that changes every 5 minutes
-        const seedString = siteUrl + current5minSlot + 'ga4-temp-encryption';
+        // Normalize site URL to match PHP get_site_url() format
+        const normalizedSiteUrl = siteUrl.replace(/\/$/, ''); // Remove trailing slash
+        const seedString = normalizedSiteUrl + current5minSlot + 'ga4-temp-encryption';
         
         // Use Web Crypto API to generate SHA-256 hash
         const encoder = new TextEncoder();
