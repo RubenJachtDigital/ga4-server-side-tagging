@@ -19,7 +19,7 @@ const BOT_DETECTION_ENABLED = true; // Set to false to disable bot filtering
 const BOT_LOG_ENABLED = true; // Set to false to disable bot logging
 
 // Security Configuration
-const ALLOWED_DOMAINS = ["compuact-staging.jachtdigital.dev", "jachtdigital.dev", "www.computertraining.nl", "computertraining.nl"]; // Add your allowed domains
+const ALLOWED_DOMAINS = ["example.com", "www.example.com"]; // Add your allowed domains
 const RATE_LIMIT_REQUESTS = 100; // Max requests per IP per minute
 const RATE_LIMIT_WINDOW = 60; // Rate limit window in seconds
 const MAX_PAYLOAD_SIZE = 50000; // Max payload size in bytes (50KB)
