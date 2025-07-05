@@ -2631,6 +2631,49 @@
         pageLocation: eventParams.page_location || 'not set',
         currentPageLocation: window.location.href
       });
+      
+      // Add stored attribution to conversion events
+      var conversionEvents = ['purchase', 'quote_request', 'form_conversion'];
+      if (conversionEvents.includes(eventName)) {
+        var storedAttribution = this.getStoredAttribution();
+        
+        // Only add attribution if not already present and stored attribution exists
+        if (!eventParams.source && storedAttribution.source) {
+          eventParams.source = storedAttribution.source;
+        }
+        if (!eventParams.medium && storedAttribution.medium) {
+          eventParams.medium = storedAttribution.medium;
+        }
+        if (!eventParams.campaign && storedAttribution.campaign) {
+          eventParams.campaign = storedAttribution.campaign;
+        }
+        if (!eventParams.content && storedAttribution.content) {
+          eventParams.content = storedAttribution.content;
+        }
+        if (!eventParams.term && storedAttribution.term) {
+          eventParams.term = storedAttribution.term;
+        }
+        
+        // Add traffic_type based on stored attribution
+        if (!eventParams.traffic_type) {
+          eventParams.traffic_type = GA4Utils.traffic.getType(
+            storedAttribution.source,
+            storedAttribution.medium,
+            null // No referrer domain for stored attribution
+          );
+        }
+        
+        // Debug log only in debug mode
+        if (this.config.debugMode) {
+          console.log('DEBUG: Conversion event enriched with stored attribution:', {
+            eventName: eventName,
+            source: eventParams.source,
+            medium: eventParams.medium,
+            campaign: eventParams.campaign,
+            traffic_type: eventParams.traffic_type
+          });
+        }
+      }
 
       // Add debug_mode and timestamp if not present
       if (!eventParams.hasOwnProperty("debug_mode")) {
