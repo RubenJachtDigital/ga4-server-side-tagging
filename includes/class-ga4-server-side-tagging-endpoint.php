@@ -91,11 +91,7 @@ class GA4_Server_Side_Tagging_Endpoint {
             return false;
         }
 
-        // 4. Browser fingerprint validation
-        if ( ! $this->validate_browser_fingerprint( $request ) ) {
-            $this->log_security_failure( $request, 'BROWSER_FINGERPRINT_FAILED', 'Browser fingerprint validation failed' );
-            return false;
-        }
+ 
 
      
 
@@ -592,7 +588,7 @@ class GA4_Server_Side_Tagging_Endpoint {
             return true;
         }
         
-        if ( $hourly_count < 100 ) { // Only 100 requests per hour for secure config
+        if ( $hourly_count < 500 ) { // Only 500 requests per hour for secure config
             set_transient( $hourly_key, $hourly_count + 1, 3600 );
             return true;
         }
@@ -665,55 +661,7 @@ class GA4_Server_Side_Tagging_Endpoint {
         return true;
     }
 
-    /**
-     * Validate browser fingerprint consistency.
-     *
-     * @since    1.0.0
-     * @param    \WP_REST_Request    $request    The request object.
-     * @return   bool                          Whether browser fingerprint is valid.
-     */
-    private function validate_browser_fingerprint( $request ) {
-        $user_agent = $request->get_header( 'user-agent' );
-        $accept = $request->get_header( 'accept' );
-        $accept_language = $request->get_header( 'accept-language' );
 
-        // Check for consistent browser fingerprint (relaxed for incognito/fetch API)
-        if ( empty( $user_agent ) || empty( $accept ) ) {
-            $this->logger->error( 'Browser fingerprint failed: Missing User-Agent or Accept header' );
-            return false;
-        }
-        
-        // Detect common bot patterns in headers
-        if ( strpos( $accept, '*/*' ) === 0 && strlen( $accept ) < 10 ) {
-            // Suspicious: only accepts */*, too simple for real browser
-            $this->logger->error( 'Browser fingerprint failed: Accept header too simple (only */* and short)' );
-            return false;
-        }
-
-        // Check for missing typical browser accept headers
-        $has_html = strpos( $accept, 'text/html' ) !== false;
-        $has_json = strpos( $accept, 'application/json' ) !== false;
-        
-        // Debug logging only in development
-        if ( wp_get_environment_type() === 'development' ) {
-            $this->logger->error( "Accept header: '{$accept}'" );
-            $this->logger->error( "Has text/html: " . ( $has_html ? 'yes' : 'no' ) );
-            $this->logger->error( "Has application/json: " . ( $has_json ? 'yes' : 'no' ) );
-        }
-        
-        if ( ! $has_html && ! $has_json ) {
-            $this->logger->error( 'Browser fingerprint failed: Accept header missing text/html and application/json' );
-            return false;
-        }
-
-        // Check for realistic accept-language (if present)
-        if ( ! empty( $accept_language ) && strlen( $accept_language ) < 5 ) {
-            $this->logger->error( 'Browser fingerprint failed: Accept-Language too short' );
-            return false;
-        }
-
-        return true;
-    }
 
     /**
      * Secure key transmission using XOR-based obfuscation (reversible).
