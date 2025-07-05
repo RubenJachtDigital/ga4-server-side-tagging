@@ -1354,7 +1354,33 @@
           this.checkSuspiciousReferrers(sessionParams.page_referrer),
         ];
 
-        return checks.some((check) => check === true);
+        // More lenient: require at least 2 checks to trigger or 1 high-confidence check
+        const trueChecks = checks.filter(check => check === true).length;
+        const highConfidenceChecks = [
+          this.checkUserAgent(userAgentInfo.user_agent),    // Very reliable
+          this.checkWebDriver(userAgentInfo),               // Very reliable
+          this.checkHeadlessBrowser(userAgentInfo)          // Very reliable
+        ];
+        const highConfidenceTriggers = highConfidenceChecks.filter(check => check === true).length;
+        
+        // Debug logging for bot detection analysis
+        const isBot = trueChecks >= 2 || highConfidenceTriggers >= 1;
+        if (isBot) {
+          console.log('Bot Detection Debug:', {
+            userAgent: this.checkUserAgent(userAgentInfo.user_agent),
+            geoLocation: this.checkSuspiciousGeoLocation(sessionParams),
+            behaviorPatterns: this.checkBehaviorPatterns(clientBehavior, sessionParams),
+            webDriver: this.checkWebDriver(userAgentInfo),
+            headlessBrowser: this.checkHeadlessBrowser(userAgentInfo),
+            knownBotIPs: this.checkKnownBotIPs(sessionParams.client_ip),
+            suspiciousReferrers: this.checkSuspiciousReferrers(sessionParams.page_referrer),
+            totalChecks: trueChecks,
+            highConfidenceChecks: highConfidenceTriggers
+          });
+        }
+        
+        // Bot if: 2+ checks OR 1+ high-confidence check
+        return isBot;
       },
 
       /**
@@ -1451,26 +1477,31 @@
       checkBehaviorPatterns: function (clientBehavior, sessionParams) {
         const suspiciousPatterns = [];
 
-        if (sessionParams.engagement_time_msec < 1000) {
-          suspiciousPatterns.push("short_engagement");
+        // More lenient engagement time check (under 100ms is very suspicious)
+        if (sessionParams.engagement_time_msec < 100) {
+          suspiciousPatterns.push("very_short_engagement");
         }
 
+        // Only flag if explicitly reported as no JavaScript
         if (clientBehavior.hasJavaScript === false) {
           suspiciousPatterns.push("no_javascript");
         }
 
+        // Remove common legitimate resolutions, only flag very unusual ones
         const resolution = sessionParams.screen_resolution || "";
-        const botResolutions = ["1024x768", "1366x768", "1920x1080", "800x600"];
+        const botResolutions = ["800x600", "640x480", "1x1", "0x0"];
         if (botResolutions.includes(resolution)) {
           suspiciousPatterns.push("bot_resolution");
         }
 
+        // More specific round timestamp check (multiple of 1000ms)
         const timestamp = sessionParams.event_timestamp;
-        if (timestamp && timestamp % 10 === 0) {
-          suspiciousPatterns.push("round_timestamp");
+        if (timestamp && timestamp % 1000 === 0) {
+          suspiciousPatterns.push("very_round_timestamp");
         }
 
-        return suspiciousPatterns.length >= 2;
+        // Require 3+ patterns instead of 2 for more leniency
+        return suspiciousPatterns.length >= 3;
       },
 
       /**
