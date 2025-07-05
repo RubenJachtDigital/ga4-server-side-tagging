@@ -79,7 +79,13 @@ class GA4_Server_Side_Tagging_Endpoint {
             return false;
         }
 
-        // 3. Enhanced security checks with stricter validation
+        // 3. Bot detection - Block automated requests to secure config
+        if ( $this->is_bot_request( $request ) ) {
+            $this->log_security_failure( $request, 'BOT_DETECTED', 'Bot or automated request detected' );
+            return false;
+        }
+
+        // 4. Enhanced security checks with stricter validation
         if ( ! $this->validate_enhanced_security( $request ) ) {
             $this->log_security_failure( $request, 'ENHANCED_SECURITY_CHECK_FAILED', 'Enhanced security validation failed' );
             return false;
@@ -96,7 +102,220 @@ class GA4_Server_Side_Tagging_Endpoint {
         return true;
     }
 
+    /**
+     * Comprehensive bot detection for secure config endpoint.
+     * 
+     * Implements server-side bot detection similar to client-side patterns
+     * to prevent bots from accessing sensitive configuration data.
+     *
+     * @since    1.0.0
+     * @param    \WP_REST_Request    $request    The request object.
+     * @return   bool                          True if request is from a bot, false otherwise.
+     */
+    private function is_bot_request( $request ) {
+        // Allow bypassing bot detection in development mode
+        if ( defined( 'WP_DEBUG' ) && WP_DEBUG && get_option( 'ga4_disable_bot_detection', false ) ) {
+            return false;
+        }
+        
+        $user_agent = $request->get_header( 'user-agent' );
+        $client_ip = $this->get_client_ip( $request );
+        $referer = $request->get_header( 'referer' );
+    
+        // Run multiple bot detection checks
+        $bot_checks = array(
+            $this->check_user_agent_patterns( $user_agent ),
+            $this->check_known_bot_ips( $client_ip ),
+            $this->check_suspicious_referrers( $referer ),
+        );
+        
+        // If any check returns true, it's a bot
+        $is_bot = in_array( true, $bot_checks, true );
+        
+        if ( $is_bot ) {
+            // Log detailed bot detection information
+            $detection_details = array(
+                'user_agent_check' => $bot_checks[0],
+                'headers_check' => $bot_checks[1], 
+                'ip_check' => $bot_checks[2],
+                'referer_check' => $bot_checks[3],
+                'behavior_check' => $bot_checks[4],
+                'fingerprint_check' => $bot_checks[5]
+            );
+            
+            $this->logger->log_data(  array(
+                'ip' => $client_ip,
+                'user_agent' => $user_agent,
+                'referer' => $referer,
+                'detection_details' => $detection_details
+            ),'Bot detected attempting to access secure config', );
+        }
+        
+        return $is_bot;
+    }
 
+    /**
+     * Check user agent for bot patterns.
+     *
+     * @since    1.0.0
+     * @param    string    $user_agent    The user agent string.
+     * @return   bool                    True if bot detected.
+     */
+    private function check_user_agent_patterns( $user_agent ) {
+        if ( empty( $user_agent ) || strlen( $user_agent ) < 10 ) {
+            return true; // Missing or suspiciously short user agent
+        }
+        
+        // Comprehensive bot patterns based on client-side detection
+        $bot_patterns = array(
+            '/bot\b/i',
+            '/crawl/i',
+            '/spider/i',
+            '/scraper/i',
+            '/googlebot/i',
+            '/bingbot/i',
+            '/yahoo/i',
+            '/duckduckbot/i',
+            '/baiduspider/i',
+            '/yandexbot/i',
+            '/sogou/i',
+            '/facebookexternalhit/i',
+            '/twitterbot/i',
+            '/linkedinbot/i',
+            '/whatsapp/i',
+            '/telegrambot/i',
+            '/semrushbot/i',
+            '/ahrefsbot/i',
+            '/mj12bot/i',
+            '/dotbot/i',
+            '/screaming frog/i',
+            '/seobility/i',
+            '/headlesschrome/i',
+            '/phantomjs/i',
+            '/slimerjs/i',
+            '/htmlunit/i',
+            '/selenium/i',
+            '/pingdom/i',
+            '/uptimerobot/i',
+            '/statuscake/i',
+            '/site24x7/i',
+            '/newrelic/i',
+            '/python/i',
+            '/requests/i',
+            '/curl/i',
+            '/wget/i',
+            '/apache-httpclient/i',
+            '/java\//i',
+            '/okhttp/i',
+            '/^mozilla\/5\.0$/i',
+            '/compatible;\s*$/i',
+            '/chrome-lighthouse/i',
+            '/pagespeed/i',
+            '/prerender/i',
+            '/node\.js/i',
+            '/go-http-client/i',
+            '/ruby/i',
+            '/perl/i',
+            '/libwww/i'
+        );
+        
+        foreach ( $bot_patterns as $pattern ) {
+            if ( preg_match( $pattern, $user_agent ) ) {
+                return true;
+            }
+        }
+        
+        // Check for suspicious user agent patterns
+        if ( preg_match( '/^[a-z\s]+$/i', $user_agent ) ) {
+            return true; // Too simple user agent
+        }
+        
+        return false;
+    }
+
+    /**
+     * Check if IP is from known bot/hosting providers.
+     *
+     * @since    1.0.0
+     * @param    string    $ip    The client IP address.
+     * @return   bool            True if IP is suspicious.
+     */
+    private function check_known_bot_ips( $ip ) {
+        if ( empty( $ip ) ) {
+            return false;
+        }
+        
+        // Known bot IP ranges (simplified - in production you'd use a more comprehensive list)
+        $bot_ip_ranges = array(
+            '66.249.64.0/19',     // Googlebot
+            '157.55.32.0/20',     // Bingbot
+            '40.77.167.0/24',     // Bingbot
+            '207.46.0.0/16',      // Bingbot
+            '72.30.0.0/16',       // Yahoo
+            '98.137.149.56/29',   // Yahoo
+            '74.6.136.0/26',      // Yahoo
+        );
+        
+        foreach ( $bot_ip_ranges as $range ) {
+            if ( $this->ip_in_range( $ip, $range ) ) {
+                return true;
+            }
+        }
+        
+        return false;
+    }
+
+    /**
+     * Check if IP is within a CIDR range.
+     *
+     * @since    1.0.0
+     * @param    string    $ip      The IP to check.
+     * @param    string    $range   The CIDR range.
+     * @return   bool              True if IP is in range.
+     */
+    private function ip_in_range( $ip, $range ) {
+        if ( strpos( $range, '/' ) === false ) {
+            return $ip === $range;
+        }
+        
+        list( $range_ip, $netmask ) = explode( '/', $range, 2 );
+        $range_decimal = ip2long( $range_ip );
+        $ip_decimal = ip2long( $ip );
+        $wildcard_decimal = pow( 2, ( 32 - $netmask ) ) - 1;
+        $netmask_decimal = ~ $wildcard_decimal;
+        
+        return ( ( $ip_decimal & $netmask_decimal ) === ( $range_decimal & $netmask_decimal ) );
+    }
+
+    /**
+     * Check for suspicious referrer patterns.
+     *
+     * @since    1.0.0
+     * @param    string    $referer    The referer header.
+     * @return   bool                 True if suspicious referrer detected.
+     */
+    private function check_suspicious_referrers( $referer ) {
+        if ( empty( $referer ) ) {
+            return false; // Missing referer is not necessarily suspicious for API calls
+        }
+        
+        $suspicious_patterns = array(
+            '/google\.com\/search/i',
+            '/bing\.com\/search/i',
+            '/yahoo\.com\/search/i',
+            '/bot/i',
+            '/crawl/i',
+            '/spider/i'
+        );
+        
+        foreach ( $suspicious_patterns as $pattern ) {
+            if ( preg_match( $pattern, $referer ) ) {
+                return true;
+            }
+        }
+        
+        return false;
+    }
 
     /**
      * Get the secure GA4 configuration (sensitive data).
