@@ -4,8 +4,10 @@
  * @since      1.0.0
  */
 
-/* Admin Layout */
+/* Admin Layout - Enhanced for wider logs display */
 .ga4-server-side-tagging-admin {
+    max-width: none !important;
+    width: 98% !important;
     display: flex;
     flex-wrap: wrap;
     margin-top: 20px;
@@ -17,21 +19,46 @@
 }
 
 .ga4-server-side-tagging-admin-content {
-    flex: 1;
+    width: 75% !important;
+    float: left !important;
     min-width: 500px;
-    margin-right: 20px;
+    margin-right: 2%;
 }
 
 .ga4-server-side-tagging-admin-sidebar {
-    width: 300px;
+    width: 23% !important;
+    float: right !important;
 }
 
-@media screen and (max-width: 960px) {
+/* Responsive design for logs */
+@media (max-width: 1200px) {
+    .ga4-server-side-tagging-admin-content {
+        width: 70% !important;
+    }
+    
+    .ga4-server-side-tagging-admin-sidebar {
+        width: 28% !important;
+    }
+}
+
+@media (max-width: 900px) {
     .ga4-server-side-tagging-admin-content,
     .ga4-server-side-tagging-admin-sidebar {
-        width: 100%;
-        margin-right: 0;
+        width: 100% !important;
+        float: none !important;
+        margin-right: 0 !important;
     }
+    
+    .ga4-server-side-tagging-admin-sidebar {
+        margin-top: 20px !important;
+    }
+}
+
+/* Clear floats */
+.ga4-server-side-tagging-admin::after {
+    content: "";
+    display: table;
+    clear: both;
 }
 
 /* Admin Sections */
@@ -97,23 +124,47 @@
     color: #f56c6c;
 }
 
-/* Log Viewer */
+/* Enhanced Log Viewer */
+.ga4-server-side-tagging-logs {
+    margin-top: 20px;
+}
+
 .ga4-server-side-tagging-log-viewer {
-    background: #f5f5f5;
-    border: 1px solid #ddd;
-    border-radius: 3px;
-    padding: 10px;
-    margin-top: 15px;
-    overflow: auto;
-    max-height: 500px;
+    width: 100%;
+    max-width: none;
+    overflow-x: auto;
 }
 
 .ga4-server-side-tagging-log-viewer pre {
-    margin: 0;
+    width: 100%;
+    max-width: none;
     white-space: pre-wrap;
-    font-family: monospace;
-    font-size: 12px;
-    line-height: 1.5;
+    word-wrap: break-word;
+    background: #f9f9f9;
+    border: 1px solid #ddd;
+    padding: 15px;
+    border-radius: 4px;
+    font-family: 'Courier New', monospace;
+    font-size: 13px;
+    line-height: 1.4;
+    max-height: 600px;
+    overflow-y: auto;
+    margin: 0;
+}
+
+/* Log Information Bar */
+.ga4-log-info {
+    margin-bottom: 10px;
+}
+
+/* Time Display Styling */
+#current-datetime,
+#reference-time {
+    font-family: 'Courier New', monospace;
+    background: #f0f0f1;
+    padding: 4px 8px;
+    border-radius: 3px;
+    border: 1px solid #c3c4c7;
 }
 
 .ga4-server-side-tagging-admin-actions {

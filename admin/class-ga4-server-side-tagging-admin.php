@@ -587,7 +587,15 @@ class GA4_Server_Side_Tagging_Admin
         $log_content = '';
 
         if (file_exists($log_file)) {
-            $log_content = file_get_contents($log_file);
+            // Clean up old log entries (older than 14 days) before displaying
+            $this->cleanup_old_logs($log_file, 14);
+            
+            // Read all lines and reverse order to show newest first
+            $log_lines = file($log_file, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+            if ($log_lines) {
+                $log_lines = array_reverse($log_lines);
+                $log_content = implode("\n", $log_lines);
+            }
         }
 
         // Include the logs view
@@ -905,6 +913,59 @@ class GA4_Server_Side_Tagging_Admin
     }
 
     /**
+     * Clean up old log entries older than specified days.
+     *
+     * @since    1.0.0
+     * @param    string    $log_file    Path to the log file.
+     * @param    int       $days        Number of days to keep logs.
+     */
+    private function cleanup_old_logs($log_file, $days = 14)
+    {
+        if (!file_exists($log_file)) {
+            return;
+        }
+
+        // Calculate cutoff timestamp (X days ago)
+        $cutoff_timestamp = time() - ($days * 24 * 60 * 60);
+        
+        // Read all log lines
+        $log_lines = file($log_file, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+        if (!$log_lines) {
+            return;
+        }
+
+        $filtered_lines = array();
+        $cleaned_count = 0;
+
+        foreach ($log_lines as $line) {
+            // Extract timestamp from log line format: [2025-01-05 13:45:32]
+            if (preg_match('/^\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\]/', $line, $matches)) {
+                $log_timestamp = strtotime($matches[1]);
+                
+                // Keep lines newer than cutoff
+                if ($log_timestamp >= $cutoff_timestamp) {
+                    $filtered_lines[] = $line;
+                } else {
+                    $cleaned_count++;
+                }
+            } else {
+                // Keep lines without valid timestamp (just in case)
+                $filtered_lines[] = $line;
+            }
+        }
+
+        // Only rewrite file if we removed some entries
+        if ($cleaned_count > 0) {
+            file_put_contents($log_file, implode("\n", $filtered_lines) . "\n");
+            
+            // Log the cleanup action
+            if ($this->logger) {
+                $this->logger->info("Cleaned up {$cleaned_count} log entries older than {$days} days");
+            }
+        }
+    }
+
+    /**
      * Display the debug logs page.
      *
      * @since    1.0.0
@@ -929,10 +990,14 @@ class GA4_Server_Side_Tagging_Admin
         $log_content = '';
 
         if (file_exists($log_file)) {
-            // Get the last 500 lines (or fewer if file is smaller)
+            // Clean up old log entries (older than 14 days) before displaying
+            $this->cleanup_old_logs($log_file, 14);
+            
+            // Get the last 500 lines (or fewer if file is smaller) and reverse to show newest first
             $log_lines = file($log_file, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
             if ($log_lines) {
                 $log_lines = array_slice($log_lines, max(0, count($log_lines) - 500));
+                $log_lines = array_reverse($log_lines);
                 $log_content = implode("\n", $log_lines);
             }
         }
@@ -979,10 +1044,22 @@ class GA4_Server_Side_Tagging_Admin
                 <?php if (empty($log_content)): ?>
                     <p>No log entries found. <?php echo !$debug_mode ? 'Enable debug mode to start logging.' : ''; ?></p>
                 <?php else: ?>
-                    <p>Showing the last 500 log entries (newest at the bottom):</p>
-                    <div
-                        style="background: #f6f6f6; padding: 10px; border: 1px solid #ddd; overflow: auto; max-height: 500px; font-family: monospace; white-space: pre-wrap; font-size: 12px;">
-                        <?php echo esc_html($log_content); ?>
+                    <div class="ga4-log-info" style="margin-bottom: 10px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px; background: #fff; border: 1px solid #ccd0d4; border-radius: 4px;">
+                            <div>
+                                <strong>📋 Showing:</strong> Last 500 entries (newest first) 
+                                <span style="color: #666;">• Auto-cleanup: Entries older than 14 days removed</span>
+                            </div>
+                            <div>
+                                <strong>🕐 Reference Time:</strong> 
+                                <span id="dashboard-reference-time" style="font-family: 'Courier New', monospace; background: #f0f0f1; padding: 2px 6px; border-radius: 3px; border: 1px solid #c3c4c7;">
+                                    <?php echo esc_html( current_time( 'Y-m-d H:i:s T' ) ); ?>
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="ga4-server-side-tagging-log-viewer">
+                        <pre style="background: #f9f9f9; border: 1px solid #ddd; padding: 15px; border-radius: 4px; font-family: 'Courier New', monospace; font-size: 13px; line-height: 1.4; max-height: 600px; overflow-y: auto; margin: 0; white-space: pre-wrap; word-wrap: break-word;"><?php echo esc_html($log_content); ?></pre>
                     </div>
                 <?php endif; ?>
             </div>
@@ -999,6 +1076,33 @@ class GA4_Server_Side_Tagging_Admin
             </div>
 
         </div>
+
+        <script>
+        function updateDashboardTime() {
+            const now = new Date();
+            const year = now.getFullYear();
+            const month = String(now.getMonth() + 1).padStart(2, '0');
+            const day = String(now.getDate()).padStart(2, '0');
+            const hours = String(now.getHours()).padStart(2, '0');
+            const minutes = String(now.getMinutes()).padStart(2, '0');
+            const seconds = String(now.getSeconds()).padStart(2, '0');
+            
+            // Get timezone abbreviation
+            const timezone = Intl.DateTimeFormat('en', {timeZoneName: 'short'}).formatToParts(now)
+                .find(part => part.type === 'timeZoneName').value;
+            
+            const timeString = `${year}-${month}-${day} ${hours}:${minutes}:${seconds} ${timezone}`;
+            
+            const dashboardElement = document.getElementById('dashboard-reference-time');
+            if (dashboardElement) {
+                dashboardElement.textContent = timeString;
+            }
+        }
+
+        // Update dashboard time immediately and then every second
+        updateDashboardTime();
+        setInterval(updateDashboardTime, 1000);
+        </script>
         <?php
     }
 
