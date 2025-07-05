@@ -63,7 +63,7 @@
 
       // Log initialization
       this.log(
-        "%c GA4 Server-Side Tagging initialized v3 ",
+        "%c GA4 Server-Side Tagging initialized v1 ",
         "background: #4CAF50; color: white; font-size: 16px; font-weight: bold; padding: 8px 12px; border-radius: 4px;"
       );
     },
@@ -156,14 +156,28 @@
                 const renewTokenCallback = async () => {
                   this.log("🔄 JWT token expired, requesting new secure config...");
                   
-                  // Make a fresh request for secure config
-                  const renewalResponse = await fetch(this.config.apiEndpoint + '/secure-config', {
+                  // Make a fresh request for secure config with cache-busting
+                  const renewalHeaders = {
+                    ...headers,
+                    'Cache-Control': 'no-cache, no-store, must-revalidate',
+                    'Pragma': 'no-cache',
+                    'Expires': '0'
+                  };
+                  
+                  const renewalResponse = await fetch(this.config.apiEndpoint + '/secure-config?t=' + Date.now(), {
                     method: 'GET',
-                    headers: headers
+                    headers: renewalHeaders
                   });
                   
                   if (renewalResponse.ok) {
                     const newSecureConfig = await renewalResponse.json();
+                    this.log("🔄 Renewal response received:", {
+                      hasJwt: !!newSecureConfig.jwt,
+                      hasFingerprint: !!newSecureConfig.client_fingerprint,
+                      hasEntropy: !!newSecureConfig.server_entropy,
+                      timeSlot: newSecureConfig.time_slot
+                    });
+                    
                     if (newSecureConfig.jwt && newSecureConfig.client_fingerprint && newSecureConfig.server_entropy) {
                       // Reconstruct new key with new server entropy
                       const newTempKey = await this.reconstructSecureEncryptionKey({
@@ -173,6 +187,23 @@
                       });
                       
                       if (newTempKey) {
+                        // Debug: Check the new JWT timestamps
+                        try {
+                          const jwtParts = newSecureConfig.jwt.split('.');
+                          if (jwtParts.length === 3) {
+                            const payload = JSON.parse(atob(jwtParts[1].replace(/-/g, '+').replace(/_/g, '/')));
+                            const now = Math.floor(Date.now() / 1000);
+                            this.log("🔍 New JWT timestamps:", {
+                              issued: payload.iat,
+                              expires: payload.exp,
+                              current: now,
+                              timeLeft: payload.exp - now
+                            });
+                          }
+                        } catch (e) {
+                          this.log("⚠️ Could not decode JWT for debugging:", e.message);
+                        }
+                        
                         this.log("✅ New secure encryption key reconstructed for renewed token");
                         return { jwt: newSecureConfig.jwt, key: newTempKey };
                       }
@@ -187,39 +218,11 @@
                 secureConfig = JSON.parse(decryptedData);
                 this.log("🔓 Secure config response decrypted with reconstructed key");
               } else {
-                // Fallback to legacy predictable key method
-                const tempKey = await this.getTemporaryEncryptionKey();
-                if (!tempKey) {
-                  this.log("⚠️ Failed to generate temporary encryption key");
-                  return;
-                }
-                
-                // Legacy renewal callback
-                const renewTokenCallback = async () => {
-                  this.log("🔄 JWT token expired, requesting new secure config...");
-                  const renewalResponse = await fetch(this.config.apiEndpoint + '/secure-config', {
-                    method: 'GET',
-                    headers: headers
-                  });
-                  
-                  if (renewalResponse.ok) {
-                    const newSecureConfig = await renewalResponse.json();
-                    if (newSecureConfig.jwt) {
-                      const newTempKey = await this.getTemporaryEncryptionKey();
-                      if (newTempKey) {
-                        this.log("✅ Legacy temporary encryption key generated for renewed token");
-                        return { jwt: newSecureConfig.jwt, key: newTempKey };
-                      }
-                    }
-                  }
-                  throw new Error('Failed to renew secure config token');
-                };
-                
-                const decryptedData = await GA4Utils.encryption.decrypt(secureConfig.jwt, tempKey, {
-                  renewTokenCallback: renewTokenCallback
-                });
-                secureConfig = JSON.parse(decryptedData);
-                this.log("🔓 Secure config response decrypted with legacy key (fallback)");
+                // No secure entropy provided - request fresh config instead of using legacy method
+                this.log("⚠️ No secure entropy in response, requesting fresh secure config...");
+
+                // Retry loadSecureConfig to get response with proper entropy
+                return await this.loadSecureConfig();
               }
             } catch (decError) {
               this.log("⚠️ Failed to decrypt secure config response:", decError.message);

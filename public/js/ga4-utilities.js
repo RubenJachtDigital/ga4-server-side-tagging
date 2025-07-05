@@ -3641,8 +3641,12 @@
         // Decode and validate payload
         const payload = JSON.parse(new TextDecoder().decode(this.base64urlDecode(payloadEncoded)));
         
-        // Check expiration
-        if (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) {
+        // Check expiration with 30-second tolerance for clock differences
+        const currentTime = Math.floor(Date.now() / 1000);
+        const clockTolerance = 30; // 30 seconds tolerance
+        if (payload.exp && payload.exp < (currentTime - clockTolerance)) {
+          const timeLeft = payload.exp - currentTime;
+          console.log(`JWT verification: token exp=${payload.exp}, current=${currentTime}, diff=${timeLeft}s`);
           throw new Error('JWT token has expired');
         }
         
