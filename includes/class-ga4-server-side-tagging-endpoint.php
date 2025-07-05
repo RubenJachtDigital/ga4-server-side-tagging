@@ -65,35 +65,24 @@ class GA4_Server_Side_Tagging_Endpoint {
      * @return   bool                           Whether the request has permission.
      */
     public function check_strong_permission( $request ) {
-        $client_ip = $this->get_client_ip( $request );
         
-        // 1. STRICT rate limiting check (more restrictive than normal)
-        if ( ! $this->check_strict_rate_limit( $request ) ) {
-            $this->log_security_failure( $request, 'STRICT_RATE_LIMIT_EXCEEDED', "Too many secure config requests from IP: {$client_ip}" );
-            return false;
-        }
-
-        // 2. Enhanced origin validation - STRICT check
+        // 1. Enhanced origin validation - STRICT check
         if ( ! $this->validate_request_origin( $request ) ) {
             $this->log_security_failure( $request, 'ORIGIN_VALIDATION_FAILED', 'Request origin validation failed' );
             return false;
         }
 
-        // 3. Bot detection - Block automated requests to secure config
+        // 2. Bot detection - Block automated requests to secure config
         if ( $this->is_bot_request( $request ) ) {
             $this->log_security_failure( $request, 'BOT_DETECTED', 'Bot or automated request detected' );
             return false;
         }
 
-        // 4. Enhanced security checks with stricter validation
+        // 3. Enhanced security checks with stricter validation
         if ( ! $this->validate_enhanced_security( $request ) ) {
             $this->log_security_failure( $request, 'ENHANCED_SECURITY_CHECK_FAILED', 'Enhanced security validation failed' );
             return false;
         }
-
- 
-
-     
 
         return true;
     }
@@ -567,38 +556,6 @@ class GA4_Server_Side_Tagging_Endpoint {
             // Return error instead of unencrypted fallback
             return new \WP_REST_Response( array( 'error' => 'Encryption failed' ), 500 );
         }
-    }
-
-    /**
-     * Enhanced rate limiting for secure config endpoint (stricter than normal).
-     *
-     * @since    1.0.0
-     * @param    \WP_REST_Request    $request    The request object.
-     * @return   bool                          Whether the request passes strict rate limiting.
-     */
-    private function check_strict_rate_limit( $request ) {
-        $client_ip = $this->get_client_ip( $request );
-        
-        // Stricter limits for secure config: 10 requests per hour (vs 100 for normal endpoints)
-        $hourly_key = 'ga4_secure_config_hourly_' . md5( $client_ip );
-        $hourly_count = get_transient( $hourly_key );
-        
-        if ( $hourly_count === false ) {
-            set_transient( $hourly_key, 1, 3600 ); // 1 hour window
-            return true;
-        }
-        
-        if ( $hourly_count < 500 ) { // Only 500 requests per hour for secure config
-            set_transient( $hourly_key, $hourly_count + 1, 3600 );
-            return true;
-        }
-        
-        // Block IP for 1 hour if limit exceeded
-        $block_key = 'ga4_secure_config_blocked_' . md5( $client_ip );
-        $block_until = time() + 3600;
-        set_transient( $block_key, $block_until, 3600 );
-        
-        return false;
     }
 
     /**
