@@ -3533,11 +3533,27 @@
             console.log('JWT token expired, attempting renewal...');
             
             try {
-              // Call the renewal callback to get a new token
-              const newToken = await options.renewTokenCallback();
-              if (newToken) {
+              // Call the renewal callback to get a new token (and possibly new key)
+              const renewalResult = await options.renewTokenCallback();
+              
+              if (renewalResult) {
+                // Handle both legacy string return and new object return
+                let newToken, newKey;
+                
+                if (typeof renewalResult === 'string') {
+                  // Legacy format: just the JWT token
+                  newToken = renewalResult;
+                  newKey = key; // Use existing key
+                } else if (renewalResult.jwt) {
+                  // New format: object with jwt and optionally key
+                  newToken = renewalResult.jwt;
+                  newKey = renewalResult.key || key; // Use new key if provided, fallback to existing
+                } else {
+                  throw new Error('Invalid renewal result format');
+                }
+                
                 console.log('JWT token renewed successfully, retrying decryption...');
-                return await this.verifyJWTToken(newToken, key);
+                return await this.verifyJWTToken(newToken, newKey);
               }
             } catch (renewError) {
               console.warn('JWT token renewal failed:', renewError);

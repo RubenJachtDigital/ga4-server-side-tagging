@@ -63,7 +63,7 @@
 
       // Log initialization
       this.log(
-        "%c GA4 Server-Side Tagging initialized v2 ",
+        "%c GA4 Server-Side Tagging initialized v3 ",
         "background: #4CAF50; color: white; font-size: 16px; font-weight: bold; padding: 8px 12px; border-radius: 4px;"
       );
     },
@@ -138,43 +138,89 @@
           // All secure config responses are encrypted - always decrypt
           if (secureConfig.jwt) {
             try {
-              const tempKey = await this.getTemporaryEncryptionKey();
-              if (!tempKey) {
-                this.log("⚠️ Failed to generate temporary encryption key");
-                return;
-              }
-              
-              // Create token renewal callback
-              const renewTokenCallback = async () => {
-                this.log("🔄 JWT token expired, requesting new secure config...");
-                
-                // Make a fresh request for secure config
-                const renewalResponse = await fetch(this.config.apiEndpoint + '/secure-config', {
-                  method: 'GET',
-                  headers: headers
+              // Check if we have server entropy for secure key reconstruction
+              if (secureConfig.client_fingerprint && secureConfig.server_entropy && secureConfig.time_slot) {
+                // Use new secure key reconstruction
+                const tempKey = await this.reconstructSecureEncryptionKey({
+                  client_fingerprint: secureConfig.client_fingerprint,
+                  server_entropy: secureConfig.server_entropy,
+                  time_slot: secureConfig.time_slot
                 });
                 
-                if (renewalResponse.ok) {
-                  const newSecureConfig = await renewalResponse.json();
-                  if (newSecureConfig.jwt) {
-                    // Generate new temporary key for the new time window
-                    const newTempKey = await this.getTemporaryEncryptionKey();
-                    if (newTempKey) {
-                      this.log("✅ New temporary encryption key generated for renewed token");
-                      // Update the temporary key for use in decryption
-                      tempKey = newTempKey;
-                      return newSecureConfig.jwt;
+                if (!tempKey) {
+                  this.log("⚠️ Failed to reconstruct secure encryption key");
+                  return;
+                }
+                
+                // Create token renewal callback for secure keys
+                const renewTokenCallback = async () => {
+                  this.log("🔄 JWT token expired, requesting new secure config...");
+                  
+                  // Make a fresh request for secure config
+                  const renewalResponse = await fetch(this.config.apiEndpoint + '/secure-config', {
+                    method: 'GET',
+                    headers: headers
+                  });
+                  
+                  if (renewalResponse.ok) {
+                    const newSecureConfig = await renewalResponse.json();
+                    if (newSecureConfig.jwt && newSecureConfig.client_fingerprint && newSecureConfig.server_entropy) {
+                      // Reconstruct new key with new server entropy
+                      const newTempKey = await this.reconstructSecureEncryptionKey({
+                        client_fingerprint: newSecureConfig.client_fingerprint,
+                        server_entropy: newSecureConfig.server_entropy,
+                        time_slot: newSecureConfig.time_slot
+                      });
+                      
+                      if (newTempKey) {
+                        this.log("✅ New secure encryption key reconstructed for renewed token");
+                        return { jwt: newSecureConfig.jwt, key: newTempKey };
+                      }
                     }
                   }
+                  throw new Error('Failed to renew secure config token');
+                };
+                
+                const decryptedData = await GA4Utils.encryption.decrypt(secureConfig.jwt, tempKey, {
+                  renewTokenCallback: renewTokenCallback
+                });
+                secureConfig = JSON.parse(decryptedData);
+                this.log("🔓 Secure config response decrypted with reconstructed key");
+              } else {
+                // Fallback to legacy predictable key method
+                const tempKey = await this.getTemporaryEncryptionKey();
+                if (!tempKey) {
+                  this.log("⚠️ Failed to generate temporary encryption key");
+                  return;
                 }
-                throw new Error('Failed to renew secure config token');
-              };
-              
-              const decryptedData = await GA4Utils.encryption.decrypt(secureConfig.jwt, tempKey, {
-                renewTokenCallback: renewTokenCallback
-              });
-              secureConfig = JSON.parse(decryptedData);
-              this.log("🔓 Secure config response decrypted with temporary key");
+                
+                // Legacy renewal callback
+                const renewTokenCallback = async () => {
+                  this.log("🔄 JWT token expired, requesting new secure config...");
+                  const renewalResponse = await fetch(this.config.apiEndpoint + '/secure-config', {
+                    method: 'GET',
+                    headers: headers
+                  });
+                  
+                  if (renewalResponse.ok) {
+                    const newSecureConfig = await renewalResponse.json();
+                    if (newSecureConfig.jwt) {
+                      const newTempKey = await this.getTemporaryEncryptionKey();
+                      if (newTempKey) {
+                        this.log("✅ Legacy temporary encryption key generated for renewed token");
+                        return { jwt: newSecureConfig.jwt, key: newTempKey };
+                      }
+                    }
+                  }
+                  throw new Error('Failed to renew secure config token');
+                };
+                
+                const decryptedData = await GA4Utils.encryption.decrypt(secureConfig.jwt, tempKey, {
+                  renewTokenCallback: renewTokenCallback
+                });
+                secureConfig = JSON.parse(decryptedData);
+                this.log("🔓 Secure config response decrypted with legacy key (fallback)");
+              }
             } catch (decError) {
               this.log("⚠️ Failed to decrypt secure config response:", decError.message);
               return;
@@ -265,7 +311,44 @@
     },
 
     /**
+     * Reconstruct encryption key using server-provided entropy
+     * @param {Object} serverEntropy Server entropy data from secure-config response
+     * @returns {Promise<string>} Reconstructed encryption key
+     */
+    reconstructSecureEncryptionKey: async function(serverEntropy) {
+      try {
+        // Extract entropy components from server response
+        const { client_fingerprint, server_entropy, time_slot } = serverEntropy;
+        
+        if (!client_fingerprint || !server_entropy || !time_slot) {
+          throw new Error('Missing entropy components from server');
+        }
+        
+        // Normalize site URL to match PHP get_site_url() format
+        const siteUrl = window.location.origin.replace(/\/$/, '');
+        
+        // Recreate the same key material as PHP
+        const keyMaterial = siteUrl + time_slot + client_fingerprint + server_entropy + 'ga4-secure-encryption';
+        
+        // Use Web Crypto API to generate SHA-256 hash
+        const encoder = new TextEncoder();
+        const data = encoder.encode(keyMaterial);
+        const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+        
+        // Convert to hex string (64 characters)
+        const hashArray = Array.from(new Uint8Array(hashBuffer));
+        const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+        
+        return hashHex;
+      } catch (error) {
+        this.log("⚠️ Failed to reconstruct secure encryption key:", error.message);
+        return null;
+      }
+    },
+
+    /**
      * Generate temporary encryption key for secure config (changes every 5 minutes).
+     * @deprecated Use reconstructSecureEncryptionKey instead for better security
      * This matches the server-side implementation.
      */
     getTemporaryEncryptionKey: async function() {

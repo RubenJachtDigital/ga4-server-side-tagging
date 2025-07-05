@@ -543,18 +543,25 @@ class GA4_Server_Side_Tagging_Endpoint {
      * @return \WP_REST_Response Response object
      */
     private function create_response( $data, $request ) {
-        // Always encrypt secure config responses - no exceptions
-        $temp_encryption_key = $this->get_temporary_encryption_key();
-        if ( empty( $temp_encryption_key ) ) {
-            // Return error if encryption fails - secure config must be encrypted
-            $this->logger->error( 'Secure config encryption failed: no temporary key could be generated' );
+        // Generate secure encryption key using request entropy
+        $key_data = $this->generate_secure_encryption_key( $request );
+        
+        if ( empty( $key_data['encryption_key'] ) ) {
+            $this->logger->error( 'Secure config encryption failed: no encryption key could be generated' );
             return new \WP_REST_Response( array( 'error' => 'Encryption required but unavailable' ), 500 );
         }
         
         try {
-            $encrypted_data = GA4_Encryption_Util::create_encrypted_response( $data, $temp_encryption_key );
+            $encrypted_data = GA4_Encryption_Util::create_encrypted_response( $data, $key_data['encryption_key'] );
             
-            return new \WP_REST_Response( $encrypted_data, 200 );
+            // Include client entropy in response for key reconstruction
+            $response_data = array_merge( $encrypted_data, [
+                'client_fingerprint' => $key_data['client_fingerprint'],
+                'server_entropy' => $key_data['server_entropy'],
+                'time_slot' => $key_data['time_slot']
+            ] );
+            
+            return new \WP_REST_Response( $response_data, 200 );
             
         } catch ( \Exception $e ) {
             $this->logger->error( 'Failed to encrypt secure config: ' . $e->getMessage(), array(
@@ -769,20 +776,56 @@ class GA4_Server_Side_Tagging_Endpoint {
     }
 
     /**
-     * Generate temporary encryption key for secure config (changes every 5 minutes).
+     * Generate secure encryption key using request entropy (non-predictable).
+     *
+     * @since    1.0.0
+     * @param    \WP_REST_Request    $request    The request object.
+     * @return   array                         Array with encryption key and client entropy.
+     */
+    private function generate_secure_encryption_key( $request ) {
+        // Get client-specific entropy
+        $client_ip = $this->get_client_ip( $request );
+        $user_agent = $request->get_header( 'user-agent' );
+        $timestamp = time();
+        
+        // Create 5-minute time slot for key rotation
+        $time_slot = floor( $timestamp / 300 ); // 300 seconds = 5 minutes
+        
+        // Generate server entropy (cryptographically secure)
+        $server_entropy = bin2hex( random_bytes( 16 ) ); // 32 hex chars
+        
+        // Create client fingerprint (non-sensitive, can be shared)
+        $client_fingerprint = hash( 'sha256', $client_ip . $user_agent . $time_slot . 'ga4-client-fp' );
+        
+        // Combine all entropy sources for key derivation
+        $key_material = hash( 'sha256', 
+            get_site_url() . 
+            $time_slot . 
+            $client_fingerprint . 
+            $server_entropy . 
+            'ga4-secure-encryption'
+        );
+        
+        return [
+            'encryption_key' => $key_material,
+            'client_fingerprint' => $client_fingerprint,
+            'server_entropy' => $server_entropy,
+            'time_slot' => $time_slot
+        ];
+    }
+
+    /**
+     * Legacy method for backward compatibility - now redirects to secure version.
      *
      * @since    1.0.0
      * @return   string    The temporary encryption key (64 characters hex).
      */
     private function get_temporary_encryption_key() {
-        // Create key that changes every 5 minutes but is predictable on client side
-        $current_5min_slot = floor( time() / 300 ); // 300 seconds = 5 minutes
+        // This method is kept for backward compatibility but should not be used
+        // for new implementations. It creates a basic time-based key.
+        $current_5min_slot = floor( time() / 300 );
         $site_url = get_site_url();
-        
-        // Create deterministic key that changes every 5 minutes
         $temp_key_seed = hash( 'sha256', $site_url . $current_5min_slot . 'ga4-temp-encryption' );
-        
-        // Return 64-character hex key (256 bits)
         return $temp_key_seed;
     }
 } 
