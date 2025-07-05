@@ -5,7 +5,8 @@
       "Bash(rg:*)",
       "Bash(node:*)",
       "Bash(grep:*)",
-      "Bash(cat:*)"
+      "Bash(cat:*)",
+      "Bash(find:*)"
     ],
     "deny": []
   }
