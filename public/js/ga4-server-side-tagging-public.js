@@ -63,7 +63,7 @@
 
       // Log initialization
       this.log(
-        "%c GA4 Server-Side Tagging initialized v1 ",
+        "%c GA4 Server-Side Tagging initialized v2 ",
         "background: #4CAF50; color: white; font-size: 16px; font-weight: bold; padding: 8px 12px; border-radius: 4px;"
       );
     },
@@ -161,6 +161,8 @@
                     const newTempKey = await this.getTemporaryEncryptionKey();
                     if (newTempKey) {
                       this.log("✅ New temporary encryption key generated for renewed token");
+                      // Update the temporary key for use in decryption
+                      tempKey = newTempKey;
                       return newSecureConfig.jwt;
                     }
                   }
