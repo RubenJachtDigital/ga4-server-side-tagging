@@ -63,7 +63,7 @@
 
       // Log initialization
       this.log(
-        "%c GA4 Server-Side Tagging initialized v1 ",
+        "%c GA4 Server-Side Tagging initialized v3 ",
         "background: #4CAF50; color: white; font-size: 16px; font-weight: bold; padding: 8px 12px; border-radius: 4px;"
       );
     },
@@ -1161,16 +1161,29 @@
       // Store attribution if:
       // 1. It's a new session with any attribution, OR
       // 2. We have UTM parameters or gclid (new campaign data), OR
-      // 3. The attribution is not direct traffic (preserve non-direct sources)
+      // 3. The attribution is not direct or internal traffic (preserve only real external sources)
       var shouldStore =
         isNewSession ||
         utmParams.utm_source ||
         utmParams.utm_medium ||
         gclid ||
-        (attribution.source && attribution.source !== "(direct)");
+        (attribution.source && attribution.source !== "(direct)" && attribution.source !== "(internal)");
 
       if (shouldStore && attribution.source && attribution.medium) {
         var userData = GA4Utils.storage.getUserData();
+        
+        // Debug log for attribution storage
+        if (this.config && this.config.debugMode) {
+          console.log('DEBUG: Storing new attribution data:', {
+            isNewSession: isNewSession,
+            attribution: attribution,
+            previousStored: {
+              source: userData.lastSource,
+              medium: userData.lastMedium,
+              campaign: userData.lastCampaign
+            }
+          });
+        }
         
         userData.lastSource = attribution.source;
         userData.lastMedium = attribution.medium;
@@ -1192,6 +1205,21 @@
         }
         
         GA4Utils.storage.saveUserData(userData);
+      } else {
+        // Debug log for attribution preservation
+        if (this.config && this.config.debugMode) {
+          var userData = GA4Utils.storage.getUserData();
+          console.log('DEBUG: Preserving existing attribution (not storing):', {
+            isNewSession: isNewSession,
+            currentAttribution: attribution,
+            shouldStore: shouldStore,
+            preservedStored: {
+              source: userData.lastSource,
+              medium: userData.lastMedium,
+              campaign: userData.lastCampaign
+            }
+          });
+        }
       }
     },
 
@@ -2725,31 +2753,37 @@
       if (conversionEvents.includes(eventName)) {
         var storedAttribution = this.getStoredAttribution();
         
-        // Only add attribution if not already present and stored attribution exists
-        if (!eventParams.source && storedAttribution.source) {
+        // Debug log stored attribution
+        if (this.config.debugMode) {
+          console.log('DEBUG: Stored attribution for conversion event:', {
+            eventName: eventName,
+            storedAttribution: storedAttribution
+          });
+        }
+        
+        // Force stored attribution for conversion events (overrides current attribution)
+        if (storedAttribution.source) {
           eventParams.source = storedAttribution.source;
         }
-        if (!eventParams.medium && storedAttribution.medium) {
+        if (storedAttribution.medium) {
           eventParams.medium = storedAttribution.medium;
         }
-        if (!eventParams.campaign && storedAttribution.campaign) {
+        if (storedAttribution.campaign) {
           eventParams.campaign = storedAttribution.campaign;
         }
-        if (!eventParams.content && storedAttribution.content) {
+        if (storedAttribution.content) {
           eventParams.content = storedAttribution.content;
         }
-        if (!eventParams.term && storedAttribution.term) {
+        if (storedAttribution.term) {
           eventParams.term = storedAttribution.term;
         }
         
-        // Add traffic_type based on stored attribution
-        if (!eventParams.traffic_type) {
-          eventParams.traffic_type = GA4Utils.traffic.getType(
-            storedAttribution.source,
-            storedAttribution.medium,
-            null // No referrer domain for stored attribution
-          );
-        }
+        // Force traffic_type based on stored attribution
+        eventParams.traffic_type = GA4Utils.traffic.getType(
+          storedAttribution.source,
+          storedAttribution.medium,
+          null // No referrer domain for stored attribution
+        );
         
         // Debug log only in debug mode
         if (this.config.debugMode) {
