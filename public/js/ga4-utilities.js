@@ -1644,6 +1644,11 @@
           return "internal";
         }
 
+        // Internal traffic - explicit internal source
+        if (source === "(internal)") {
+          return "internal";
+        }
+
         // Direct traffic
         if (source === "(direct)" && (medium === "none" || medium === "(none)")) {
           return "direct";

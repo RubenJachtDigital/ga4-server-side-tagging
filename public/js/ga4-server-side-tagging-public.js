@@ -63,7 +63,7 @@
 
       // Log initialization
       this.log(
-        "%c GA4 Server-Side Tagging initialized v2 ",
+        "%c GA4 Server-Side Tagging initialized v4 ",
         "background: #4CAF50; color: white; font-size: 16px; font-weight: bold; padding: 8px 12px; border-radius: 4px;"
       );
     },
@@ -920,7 +920,13 @@
 
       // Handle cases where no attribution is determined yet
       if (!source && !medium) {
+        console.log("DEBUG: No attribution found, calling handleNoAttribution", {
+          isNewSession: isNewSession,
+          ignore_referrer: ignore_referrer,
+          referrerDomain: referrerDomain
+        });
         var fallbackAttribution = this.handleNoAttribution(isNewSession);
+        console.log("DEBUG: fallbackAttribution result:", fallbackAttribution);
         source = fallbackAttribution.source;
         medium = fallbackAttribution.medium;
         campaign = fallbackAttribution.campaign;
@@ -985,14 +991,22 @@
     handleNoAttribution: function (isNewSession) {
       // Always try to get stored attribution first (for session continuity)
       var storedAttribution = this.getStoredAttribution();
+      console.log("DEBUG: handleNoAttribution called", {
+        isNewSession: isNewSession,
+        storedAttribution: storedAttribution
+      });
 
-      // If we have stored attribution and it's not a new session, use it
-      if (
-        !isNewSession &&
-        storedAttribution.source &&
-        storedAttribution.source !== "(direct)"
-      ) {
-        return storedAttribution;
+      // For continuing sessions with no attribution, mark as internal traffic
+      if (!isNewSession) {
+        console.log("DEBUG: Returning internal attribution for continuing session");
+        return {
+          source: "(internal)",
+          medium: "internal",
+          campaign: "(not set)",
+          content: "",
+          term: "",
+          gclid: "",
+        };
       }
 
       // If it's a new session but we have stored attribution and no current attribution
