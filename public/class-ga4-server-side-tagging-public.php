@@ -354,8 +354,6 @@ class GA4_Server_Side_Tagging_Public
      */
     private function get_order_data_for_tracking($order)
     {
-        $this->logger->info('Preparing order data for purchase event. Order #' . $order->get_order_number());
-
         // Get order items
         $items = array();
         $item_list_id = null; // Will be set to the first product's primary category
