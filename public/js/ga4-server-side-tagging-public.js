@@ -63,7 +63,7 @@
 
       // Log initialization
       this.log(
-        "%c GA4 Server-Side Tagging initialized v5 ",
+        "%c GA4 Server-Side Tagging initialized v2 ",
         "background: #4CAF50; color: white; font-size: 16px; font-weight: bold; padding: 8px 12px; border-radius: 4px;"
       );
     },
@@ -144,7 +144,33 @@
                 return;
               }
               
-              const decryptedData = await GA4Utils.encryption.decrypt(secureConfig.jwt, tempKey);
+              // Create token renewal callback
+              const renewTokenCallback = async () => {
+                this.log("🔄 JWT token expired, requesting new secure config...");
+                
+                // Make a fresh request for secure config
+                const renewalResponse = await fetch(this.config.apiEndpoint + '/secure-config', {
+                  method: 'GET',
+                  headers: headers
+                });
+                
+                if (renewalResponse.ok) {
+                  const newSecureConfig = await renewalResponse.json();
+                  if (newSecureConfig.jwt) {
+                    // Generate new temporary key for the new time window
+                    const newTempKey = await this.getTemporaryEncryptionKey();
+                    if (newTempKey) {
+                      this.log("✅ New temporary encryption key generated for renewed token");
+                      return newSecureConfig.jwt;
+                    }
+                  }
+                }
+                throw new Error('Failed to renew secure config token');
+              };
+              
+              const decryptedData = await GA4Utils.encryption.decrypt(secureConfig.jwt, tempKey, {
+                renewTokenCallback: renewTokenCallback
+              });
               secureConfig = JSON.parse(decryptedData);
               this.log("🔓 Secure config response decrypted with temporary key");
             } catch (decError) {

@@ -78,7 +78,7 @@ class GA4_Encryption_Util
     }
 
     /**
-     * Create JWT token using HMACSHA256
+     * Create JWT token using HMACSHA256 with AES-GCM encrypted payload
      * 
      * @param string $payload Data to encrypt as JWT payload
      * @param string $key Binary signing key
@@ -86,15 +86,21 @@ class GA4_Encryption_Util
      */
     private static function create_jwt_token($payload, $key)
     {
-        // JWT Header
+        // JWT Header - indicate that payload is encrypted
         $header = array(
             'typ' => 'JWT',
-            'alg' => 'HS256'
+            'alg' => 'HS256',
+            'enc' => 'A256GCM' // Indicate AES-256-GCM encryption
         );
         
-        // JWT Payload - wrap the data
+        // Encrypt the payload data using AES-GCM
+        $encryption_result = self::encrypt_aes_gcm($payload, $key);
+        
+        // JWT Payload - contains encrypted data, IV, and tag
         $jwt_payload = array(
-            'data' => $payload,
+            'enc_data' => self::base64url_encode($encryption_result['encrypted']),
+            'iv' => self::base64url_encode($encryption_result['iv']),
+            'tag' => self::base64url_encode($encryption_result['tag']),
             'iat' => time(),
             'exp' => time() + 300 // 5 minutes expiry
         );
@@ -112,7 +118,7 @@ class GA4_Encryption_Util
     }
 
     /**
-     * Verify JWT token and extract payload
+     * Verify JWT token and extract payload with AES-GCM decryption
      * 
      * @param string $jwt_token JWT token to verify
      * @param string $key Binary signing key
@@ -128,7 +134,7 @@ class GA4_Encryption_Util
         
         list($header_encoded, $payload_encoded, $signature_encoded) = $parts;
         
-        // Verify signature
+        // Verify signature first
         $expected_signature = hash_hmac('sha256', $header_encoded . '.' . $payload_encoded, $key, true);
         $provided_signature = self::base64url_decode($signature_encoded);
         
@@ -147,8 +153,31 @@ class GA4_Encryption_Util
             throw new \Exception('JWT token has expired');
         }
         
-        // Return the original data
-        return isset($payload['data']) ? $payload['data'] : '';
+        // Check header for encryption information
+        $header = json_decode(self::base64url_decode($header_encoded), true);
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            throw new \Exception('Invalid JWT header JSON');
+        }
+        
+        // Handle both encrypted and legacy unencrypted tokens
+        if (isset($header['enc']) && $header['enc'] === 'A256GCM' && 
+            isset($payload['enc_data']) && isset($payload['iv']) && isset($payload['tag'])) {
+            // New encrypted format - decrypt the payload
+            try {
+                $encrypted_data = self::base64url_decode($payload['enc_data']);
+                $iv = self::base64url_decode($payload['iv']);
+                $tag = self::base64url_decode($payload['tag']);
+                $decrypted_data = self::decrypt_aes_gcm($encrypted_data, $iv, $tag, $key);
+                return $decrypted_data;
+            } catch (\Exception $decrypt_error) {
+                throw new \Exception('JWT payload decryption failed: ' . $decrypt_error->getMessage());
+            }
+        } elseif (isset($payload['data'])) {
+            // Legacy unencrypted format for backwards compatibility
+            return $payload['data'];
+        } else {
+            throw new \Exception('JWT payload format not recognized');
+        }
     }
 
     /**
@@ -171,6 +200,68 @@ class GA4_Encryption_Util
     private static function base64url_decode($data)
     {
         return base64_decode(strtr($data, '-_', '+/') . str_repeat('=', 3 - (3 + strlen($data)) % 4));
+    }
+
+    /**
+     * Encrypt data using AES-256-GCM
+     * 
+     * @param string $plaintext Data to encrypt
+     * @param string $key 32-byte encryption key
+     * @return array Array containing encrypted data and IV
+     * @throws Exception If encryption fails
+     */
+    private static function encrypt_aes_gcm($plaintext, $key)
+    {
+        // Generate random IV (12 bytes for GCM)
+        $iv = random_bytes(12);
+        
+        // Encrypt using AES-256-GCM
+        $encrypted = openssl_encrypt(
+            $plaintext,
+            'aes-256-gcm',
+            $key,
+            OPENSSL_RAW_DATA,
+            $iv,
+            $tag
+        );
+        
+        if ($encrypted === false) {
+            throw new \Exception('AES-GCM encryption failed');
+        }
+        
+        return array(
+            'encrypted' => $encrypted,
+            'iv' => $iv,
+            'tag' => $tag
+        );
+    }
+
+    /**
+     * Decrypt data using AES-256-GCM
+     * 
+     * @param string $encrypted_data Encrypted data
+     * @param string $iv Initialization vector
+     * @param string $tag Authentication tag
+     * @param string $key 32-byte encryption key
+     * @return string Decrypted plaintext
+     * @throws Exception If decryption fails
+     */
+    private static function decrypt_aes_gcm($encrypted_data, $iv, $tag, $key)
+    {
+        $decrypted = openssl_decrypt(
+            $encrypted_data,
+            'aes-256-gcm',
+            $key,
+            OPENSSL_RAW_DATA,
+            $iv,
+            $tag
+        );
+        
+        if ($decrypted === false) {
+            throw new \Exception('AES-GCM decryption failed');
+        }
+        
+        return $decrypted;
     }
 
     /**

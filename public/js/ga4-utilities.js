@@ -2645,7 +2645,31 @@
             GA4Utils.helpers.log("🔐 Received encrypted response from Cloudflare Worker", null, config, logPrefix);
             
             try {
-              var decryptedData = await GA4Utils.encryption.decrypt(data.jwt, config.encryptionKey);
+              // For Cloudflare Worker responses, if token is expired, we should retry the entire request
+              const renewTokenCallback = async () => {
+                GA4Utils.helpers.log("🔄 Cloudflare Worker JWT token expired, retrying request...", null, config, logPrefix);
+                
+                // Re-execute the original request to get a fresh token
+                const retryResponse = await fetch(endpoint, {
+                  method: "POST",
+                  headers: headers,
+                  body: requestBody,
+                });
+                
+                if (!retryResponse.ok) {
+                  throw new Error("Failed to retry request for fresh token");
+                }
+                
+                const retryData = await retryResponse.json();
+                if (retryData.jwt) {
+                  return retryData.jwt;
+                }
+                throw new Error('No JWT token in retry response');
+              };
+              
+              var decryptedData = await GA4Utils.encryption.decrypt(data.jwt, config.encryptionKey, {
+                renewTokenCallback: renewTokenCallback
+              });
               data = JSON.parse(decryptedData);
             } catch (decError) {
               GA4Utils.helpers.log("⚠️ Failed to decrypt response, using encrypted data", decError, config, logPrefix);
@@ -3483,12 +3507,14 @@
       },
 
       /**
-       * Verify JWT token and extract payload
+       * Verify JWT token and extract payload with automatic token renewal
        * @param {string} jwtToken - JWT token to verify
        * @param {string} key - Backend key (hex string)
+       * @param {Object} options - Options for token renewal
+       * @param {Function} options.renewTokenCallback - Function to renew token when expired
        * @returns {Promise<string>} - Decrypted plaintext
        */
-      decrypt: async function(jwtToken, key) {
+      decrypt: async function(jwtToken, key, options = {}) {
         try {
           if (window.crypto && window.crypto.subtle && key.length === 64) {
             return await this.verifyJWTToken(jwtToken, key);
@@ -3496,13 +3522,31 @@
             throw new Error('JWT verification requires Web Crypto API and 64-character hex key');
           }
         } catch (error) {
+          // Check if this is an expiration error and we have a renewal callback
+          if ((error.message.includes('expired') || error.message.includes('signature verification failed')) && 
+              options.renewTokenCallback && typeof options.renewTokenCallback === 'function') {
+            console.log('JWT token expired, attempting renewal...');
+            
+            try {
+              // Call the renewal callback to get a new token
+              const newToken = await options.renewTokenCallback();
+              if (newToken) {
+                console.log('JWT token renewed successfully, retrying decryption...');
+                return await this.verifyJWTToken(newToken, key);
+              }
+            } catch (renewError) {
+              console.warn('JWT token renewal failed:', renewError);
+              throw new Error('JWT token expired and renewal failed: ' + renewError.message);
+            }
+          }
+          
           console.warn('JWT verification failed:', error);
           throw error;
         }
       },
 
       /**
-       * Create JWT token using HMACSHA256
+       * Create JWT token using HMACSHA256 with AES-GCM encrypted payload
        * @param {string} plaintext - Text to encrypt as JWT payload
        * @param {string} keyHex - Backend key as hex string
        * @returns {Promise<string>} - JWT token
@@ -3510,15 +3554,26 @@
       createJWTToken: async function(plaintext, keyHex) {
         const keyBytes = this.hexToBytes(keyHex);
         
-        // JWT Header
+        // JWT Header - indicate that payload is encrypted
         const header = {
           typ: 'JWT',
-          alg: 'HS256'
+          alg: 'HS256',
+          enc: 'A256GCM' // Indicate AES-256-GCM encryption
         };
         
-        // JWT Payload - wrap the data
+        // Encrypt the plaintext data using AES-GCM
+        const encryptionResult = await this.encryptAESGCM(plaintext, keyBytes);
+        
+        // JWT Payload - contains encrypted data, IV, and authentication tag
+        // Note: Web Crypto API GCM includes the tag in the encrypted data, but we need to extract it for PHP compatibility
+        const encryptedWithTag = new Uint8Array(encryptionResult.encrypted);
+        const encryptedData = encryptedWithTag.slice(0, -16); // Remove last 16 bytes (tag)
+        const authTag = encryptedWithTag.slice(-16); // Last 16 bytes are the authentication tag
+        
         const payload = {
-          data: plaintext,
+          enc_data: this.base64urlEncode(encryptedData),
+          iv: this.base64urlEncode(encryptionResult.iv),
+          tag: this.base64urlEncode(authTag),
           iat: Math.floor(Date.now() / 1000),
           exp: Math.floor(Date.now() / 1000) + 300 // 5 minutes expiry
         };
@@ -3537,7 +3592,7 @@
       },
 
       /**
-       * Verify JWT token and extract payload
+       * Verify JWT token and extract payload with AES-GCM decryption
        * @param {string} jwtToken - JWT token to verify
        * @param {string} keyHex - Backend key as hex string
        * @returns {Promise<string>} - Decrypted plaintext
@@ -3553,7 +3608,7 @@
         
         const [headerEncoded, payloadEncoded, signatureEncoded] = parts;
         
-        // Verify signature
+        // Verify signature first
         const signatureInput = headerEncoded + '.' + payloadEncoded;
         const expectedSignature = await this.createHMACSHA256(signatureInput, keyBytes);
         const providedSignature = this.base64urlDecode(signatureEncoded);
@@ -3570,8 +3625,33 @@
           throw new Error('JWT token has expired');
         }
         
-        // Return the original data
-        return payload.data || '';
+        // Check header for encryption information
+        const header = JSON.parse(new TextDecoder().decode(this.base64urlDecode(headerEncoded)));
+        
+        // Handle both encrypted and legacy unencrypted tokens
+        if (header.enc === 'A256GCM' && payload.enc_data && payload.iv && payload.tag) {
+          // New encrypted format - decrypt the payload
+          try {
+            const encryptedData = this.base64urlDecode(payload.enc_data);
+            const iv = this.base64urlDecode(payload.iv);
+            const tag = this.base64urlDecode(payload.tag);
+            
+            // Combine encrypted data and tag for Web Crypto API (which expects them together)
+            const encryptedWithTag = new Uint8Array(encryptedData.length + tag.length);
+            encryptedWithTag.set(encryptedData);
+            encryptedWithTag.set(tag, encryptedData.length);
+            
+            const decryptedData = await this.decryptAESGCM(encryptedWithTag, iv, keyBytes);
+            return decryptedData;
+          } catch (decryptError) {
+            throw new Error('JWT payload decryption failed: ' + decryptError.message);
+          }
+        } else if (payload.data) {
+          // Legacy unencrypted format for backwards compatibility
+          return payload.data;
+        } else {
+          throw new Error('JWT payload format not recognized');
+        }
       },
 
       /**
@@ -3654,6 +3734,81 @@
           bytes[i / 2] = parseInt(hex.substr(i, 2), 16);
         }
         return bytes;
+      },
+
+      /**
+       * Encrypt data using AES-GCM
+       * @param {string} plaintext - Data to encrypt
+       * @param {Uint8Array} key - 32-byte encryption key
+       * @returns {Promise<Object>} - Object containing encrypted data and IV
+       */
+      encryptAESGCM: async function(plaintext, key) {
+        try {
+          // Generate random IV (12 bytes for GCM)
+          const iv = window.crypto.getRandomValues(new Uint8Array(12));
+          
+          // Import the key for AES-GCM
+          const cryptoKey = await window.crypto.subtle.importKey(
+            'raw',
+            key,
+            { name: 'AES-GCM' },
+            false,
+            ['encrypt']
+          );
+          
+          // Encrypt the data
+          const encoder = new TextEncoder();
+          const encryptedData = await window.crypto.subtle.encrypt(
+            {
+              name: 'AES-GCM',
+              iv: iv
+            },
+            cryptoKey,
+            encoder.encode(plaintext)
+          );
+          
+          return {
+            encrypted: new Uint8Array(encryptedData),
+            iv: iv
+          };
+        } catch (error) {
+          throw new Error('AES-GCM encryption failed: ' + error.message);
+        }
+      },
+
+      /**
+       * Decrypt data using AES-GCM
+       * @param {Uint8Array} encryptedData - Encrypted data
+       * @param {Uint8Array} iv - Initialization vector
+       * @param {Uint8Array} key - 32-byte encryption key
+       * @returns {Promise<string>} - Decrypted plaintext
+       */
+      decryptAESGCM: async function(encryptedData, iv, key) {
+        try {
+          // Import the key for AES-GCM
+          const cryptoKey = await window.crypto.subtle.importKey(
+            'raw',
+            key,
+            { name: 'AES-GCM' },
+            false,
+            ['decrypt']
+          );
+          
+          // Decrypt the data
+          const decryptedData = await window.crypto.subtle.decrypt(
+            {
+              name: 'AES-GCM',
+              iv: iv
+            },
+            cryptoKey,
+            encryptedData
+          );
+          
+          const decoder = new TextDecoder();
+          return decoder.decode(decryptedData);
+        } catch (error) {
+          throw new Error('AES-GCM decryption failed: ' + error.message);
+        }
       },
 
       /**

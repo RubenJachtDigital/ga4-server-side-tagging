@@ -73,6 +73,93 @@ async function encrypt(plaintext, keyHex) {
 }
 
 /**
+ * Encrypt data using AES-256-GCM
+ * @param {string} plaintext - Data to encrypt
+ * @param {Uint8Array} key - 32-byte encryption key
+ * @returns {Promise<Object>} - Object containing encrypted data, IV, and tag
+ */
+async function encryptAESGCM(plaintext, key) {
+  try {
+    // Generate random IV (12 bytes for GCM)
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    
+    // Import the key for AES-GCM
+    const cryptoKey = await crypto.subtle.importKey(
+      'raw',
+      key,
+      { name: 'AES-GCM' },
+      false,
+      ['encrypt']
+    );
+    
+    // Encrypt the data
+    const encoder = new TextEncoder();
+    const encryptedData = await crypto.subtle.encrypt(
+      {
+        name: 'AES-GCM',
+        iv: iv
+      },
+      cryptoKey,
+      encoder.encode(plaintext)
+    );
+    
+    // Extract tag and data (Web Crypto API returns them together)
+    const encryptedArray = new Uint8Array(encryptedData);
+    const dataWithoutTag = encryptedArray.slice(0, -16); // Remove last 16 bytes (tag)
+    const authTag = encryptedArray.slice(-16); // Last 16 bytes are the authentication tag
+    
+    return {
+      encrypted: dataWithoutTag,
+      iv: iv,
+      tag: authTag
+    };
+  } catch (error) {
+    throw new Error('AES-GCM encryption failed: ' + error.message);
+  }
+}
+
+/**
+ * Decrypt data using AES-256-GCM
+ * @param {Uint8Array} encryptedData - Encrypted data
+ * @param {Uint8Array} iv - Initialization vector  
+ * @param {Uint8Array} tag - Authentication tag
+ * @param {Uint8Array} key - 32-byte encryption key
+ * @returns {Promise<string>} - Decrypted plaintext
+ */
+async function decryptAESGCM(encryptedData, iv, tag, key) {
+  try {
+    // Import the key for AES-GCM
+    const cryptoKey = await crypto.subtle.importKey(
+      'raw',
+      key,
+      { name: 'AES-GCM' },
+      false,
+      ['decrypt']
+    );
+    
+    // Combine encrypted data and tag for Web Crypto API
+    const encryptedWithTag = new Uint8Array(encryptedData.length + tag.length);
+    encryptedWithTag.set(encryptedData);
+    encryptedWithTag.set(tag, encryptedData.length);
+    
+    // Decrypt the data
+    const decryptedData = await crypto.subtle.decrypt(
+      {
+        name: 'AES-GCM',
+        iv: iv
+      },
+      cryptoKey,
+      encryptedWithTag
+    );
+    
+    const decoder = new TextDecoder();
+    return decoder.decode(decryptedData);
+  } catch (error) {
+    throw new Error('AES-GCM decryption failed: ' + error.message);
+  }
+}
+
+/**
  * Verify JWT token and extract payload
  * @param {string} jwtToken - JWT token to verify
  * @param {string} keyHex - Backend key as hex string
@@ -92,20 +179,26 @@ async function decrypt(jwtToken, keyHex) {
 }
 
 /**
- * Create JWT token using HMACSHA256
+ * Create JWT token using HMACSHA256 with AES-GCM encrypted payload
  */
 async function createJWTToken(plaintext, keyHex) {
   const keyBytes = hexToBytes(keyHex);
   
-  // JWT Header
+  // JWT Header - indicate that payload is encrypted
   const header = {
     typ: 'JWT',
-    alg: 'HS256'
+    alg: 'HS256',
+    enc: 'A256GCM' // Indicate AES-256-GCM encryption
   };
   
-  // JWT Payload - wrap the data
+  // Encrypt the plaintext data using AES-GCM
+  const encryptionResult = await encryptAESGCM(plaintext, keyBytes);
+  
+  // JWT Payload - contains encrypted data, IV, and authentication tag
   const payload = {
-    data: plaintext,
+    enc_data: base64urlEncode(encryptionResult.encrypted),
+    iv: base64urlEncode(encryptionResult.iv),
+    tag: base64urlEncode(encryptionResult.tag),
     iat: Math.floor(Date.now() / 1000),
     exp: Math.floor(Date.now() / 1000) + 300 // 5 minutes expiry
   };
@@ -137,7 +230,7 @@ async function verifyJWTToken(jwtToken, keyHex) {
   
   const [headerEncoded, payloadEncoded, signatureEncoded] = parts;
   
-  // Verify signature
+  // Verify signature first
   const signatureInput = headerEncoded + '.' + payloadEncoded;
   const expectedSignature = await createHMACSHA256(signatureInput, keyBytes);
   const providedSignature = base64urlDecode(signatureEncoded);
@@ -154,8 +247,27 @@ async function verifyJWTToken(jwtToken, keyHex) {
     throw new Error('JWT token has expired');
   }
   
-  // Return the original data
-  return payload.data || '';
+  // Check header for encryption information
+  const header = JSON.parse(new TextDecoder().decode(base64urlDecode(headerEncoded)));
+  
+  // Handle both encrypted and legacy unencrypted tokens
+  if (header.enc === 'A256GCM' && payload.enc_data && payload.iv && payload.tag) {
+    // New encrypted format - decrypt the payload
+    try {
+      const encryptedData = base64urlDecode(payload.enc_data);
+      const iv = base64urlDecode(payload.iv);
+      const tag = base64urlDecode(payload.tag);
+      const decryptedData = await decryptAESGCM(encryptedData, iv, tag, keyBytes);
+      return decryptedData;
+    } catch (decryptError) {
+      throw new Error('JWT payload decryption failed: ' + decryptError.message);
+    }
+  } else if (payload.data) {
+    // Legacy unencrypted format for backwards compatibility
+    return payload.data;
+  } else {
+    throw new Error('JWT payload format not recognized');
+  }
 }
 
 /**
