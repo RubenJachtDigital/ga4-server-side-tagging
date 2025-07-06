@@ -835,7 +835,7 @@ class GA4_Server_Side_Tagging_Admin
             );
             
             if (!empty($worker_api_key)) {
-                $headers['X-API-Key'] = $worker_api_key;
+                $headers['Authorization'] = 'Bearer ' . $worker_api_key;
             }
 
             // Handle JWT encryption if enabled

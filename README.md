@@ -374,8 +374,6 @@ const hasConsent = GA4Utils.storage.hasValidConsent();
 // Manual data cleanup
 GA4Utils.storage.clearUserData();
 
-// Test storage system (development)
-GA4Utils.storage.testNewStorage();
 ```
 
 #### 🆔 **User Identification**

@@ -133,38 +133,41 @@
      * Process all queued events
      */
     processQueuedEvents: function() {
-      if (this.eventQueue.length === 0) {
-        return;
+      // Call the main GA4ServerSideTagging processQueuedEvents function
+      if (typeof GA4ServerSideTagging !== 'undefined' && GA4ServerSideTagging.processQueuedEvents) {
+        GA4ServerSideTagging.processQueuedEvents();
       }
 
-      // Prevent duplicate processing if events were already processed
-      if (this.eventsProcessed) {
-        this.eventQueue = []; // Clear queue
-        return;
+      // Also process consent manager's own queue if it exists
+      if (this.eventQueue && this.eventQueue.length > 0) {
+        // Prevent duplicate processing if events were already processed
+        if (this.eventsProcessed) {
+          this.eventQueue = []; // Clear queue
+          return;
+        }
+
+        // Mark events as being processed
+        this.eventsProcessed = true;
+
+        // Process events in order
+        var eventsToProcess = this.eventQueue.slice(); // Copy array
+        this.eventQueue = []; // Clear queue immediately to prevent reprocessing
+        
+        // Clear session storage since events are being processed
+        this.clearQueuedEventsFromSession();
+
+        // Use setTimeout to ensure events are processed after consent is fully applied
+        setTimeout(function() {
+          eventsToProcess.forEach(function(queuedEvent, index) {
+
+            // Add small delay between events to prevent overwhelming the server
+            setTimeout(async function() {
+              await this.sendEventWithBypass(queuedEvent.eventName, queuedEvent.eventParams, queuedEvent.isCompleteData);
+            }.bind(this), index * 100); // 100ms delay between events
+            
+          }.bind(this));
+        }.bind(this), 200); // 200ms delay before starting to process
       }
-
-
-      // Mark events as being processed
-      this.eventsProcessed = true;
-
-      // Process events in order
-      var eventsToProcess = this.eventQueue.slice(); // Copy array
-      this.eventQueue = []; // Clear queue immediately to prevent reprocessing
-      
-      // Clear session storage since events are being processed
-      this.clearQueuedEventsFromSession();
-
-      // Use setTimeout to ensure events are processed after consent is fully applied
-      setTimeout(function() {
-        eventsToProcess.forEach(function(queuedEvent, index) {
-
-          // Add small delay between events to prevent overwhelming the server
-          setTimeout(async function() {
-            await this.sendEventWithBypass(queuedEvent.eventName, queuedEvent.eventParams, queuedEvent.isCompleteData);
-          }.bind(this), index * 100); // 100ms delay between events
-          
-        }.bind(this));
-      }.bind(this), 200); // 200ms delay before starting to process
     },
 
     /**

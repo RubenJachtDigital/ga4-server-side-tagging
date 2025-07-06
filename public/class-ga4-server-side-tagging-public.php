@@ -793,4 +793,5 @@ class GA4_Server_Side_Tagging_Public
             return $value !== '' && $value !== null && $value !== 0;
         });
     }
+
 }

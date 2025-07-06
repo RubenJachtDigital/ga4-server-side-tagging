@@ -15,7 +15,7 @@
     pageStartTime: Date.now(),
     consentReady: false,
     trackedPageViews: new Set(), // Track URLs that have been tracked
-    loadingSecureConfig: false, // Prevent multiple simultaneous secure config requests
+    eventQueue: [], // Queue events until consent is determined
 
 
 
@@ -40,12 +40,12 @@
         return;
       }
 
-      this.log("🚀 Starting immediate initialization of user-facing features...");
+      this.log("🚀 Starting immediate initialization...");
 
       // Initialize GDPR Consent System with retry mechanism for slow loads (immediate)
       await this.initializeConsentSystemWithRetry();
 
-      // Set up event listeners immediately (these will queue events until secure config is ready)
+      // Set up event listeners immediately
       this.setupEventListeners();
 
       // Initialize A/B testing immediately
@@ -54,16 +54,12 @@
       // Initialize Click tracking immediately
       this.initializeClickTracking();
 
-      // Track page view immediately (will be queued until secure config is ready)
-      this.log("🚀 Triggering trackPageView immediately on page load - will queue until secure config loads");
-      this.trackPageView(); // Remove await - let it queue
-
-      // Load secure configuration in background (don't block user experience)
-      this.loadSecureConfigInBackground();
+      // Track page view immediately
+      this.trackPageView();
 
       // Log initialization
       this.log(
-        "%c GA4 Server-Side Tagging initialized v4 ",
+        "%c GA4 Server-Side Tagging initialized v1 (Single Endpoint) ",
         "background: #4CAF50; color: white; font-size: 16px; font-weight: bold; padding: 8px 12px; border-radius: 4px;"
       );
     },
@@ -71,315 +67,10 @@
 
 
 
-    /**
-     * Load secure configuration in background without blocking user experience
-     */
-    loadSecureConfigInBackground: async function() {
-      this.log("🔒 Loading secure configuration in background...");
-      
-      try {
-        await this.loadSecureConfig();
-        this.log("✅ Secure configuration loaded - processing queued events");
-        
-        // Process any queued events now that we have secure config
-        this.processQueuedEvents();
-        
-      } catch (error) {
-        this.log("⚠️ Failed to load secure configuration in background:", error.message);
-        this.log("❌ Events will not be sent - secure config required");
-        
-        // No retry - secure config loading failed
-      }
-    },
 
 
-    /**
-     * Process any events that were queued while waiting for secure config
-     */
-    processQueuedEvents: function() {
-      this.log("🚀 Secure config ready - processing queued events immediately");
-      
-      // Trigger immediate queue processing
-      this.processEventQueue();
-    },
 
-    /**
-     * Load secure configuration from REST API (simplified - no authentication tokens needed)
-     */
-    loadSecureConfig: async function() {
-      // Prevent multiple simultaneous requests
-      if (this.loadingSecureConfig) {
-        this.log("⏳ Secure config already loading, skipping duplicate request");
-        return;
-      }
-      
-      this.loadingSecureConfig = true;
-      
-      try {
-        // No authentication tokens needed - direct secure config request with essential headers
-        let headers = {
-          'Accept': 'application/json, text/plain, */*',
-          'Content-Type': 'application/json'
-        };
 
-        // Add encryption header if encryption is enabled
-        if (this.config.encryptionEnabled) {
-          headers['X-Encrypted'] = 'true';
-        }
-        
-        const response = await fetch(this.config.apiEndpoint + '/secure-config', {
-          method: 'GET',
-          headers: headers
-        });
-
-        if (response.ok) {
-          let secureConfig = await response.json();
-          
-          // All secure config responses are encrypted - always decrypt
-          if (secureConfig.jwt) {
-            try {
-              // Check if we have server entropy for secure key reconstruction
-              if (secureConfig.client_fingerprint && secureConfig.server_entropy && secureConfig.time_slot) {
-                // Use new secure key reconstruction
-                const tempKey = await this.reconstructSecureEncryptionKey({
-                  client_fingerprint: secureConfig.client_fingerprint,
-                  server_entropy: secureConfig.server_entropy,
-                  time_slot: secureConfig.time_slot
-                });
-                
-                if (!tempKey) {
-                  this.log("⚠️ Failed to reconstruct secure encryption key");
-                  return;
-                }
-                
-                // Create token renewal callback for secure keys
-                const renewTokenCallback = async () => {
-                  this.log("🔄 JWT token expired, requesting new secure config...");
-                  
-                  // Make a fresh request for secure config with cache-busting
-                  const renewalHeaders = {
-                    ...headers,
-                    'Cache-Control': 'no-cache, no-store, must-revalidate',
-                    'Pragma': 'no-cache',
-                    'Expires': '0'
-                  };
-                  
-                  const renewalResponse = await fetch(this.config.apiEndpoint + '/secure-config?t=' + Date.now(), {
-                    method: 'GET',
-                    headers: renewalHeaders
-                  });
-                  
-                  if (renewalResponse.ok) {
-                    const newSecureConfig = await renewalResponse.json();
-                    this.log("🔄 Renewal response received:", {
-                      hasJwt: !!newSecureConfig.jwt,
-                      hasFingerprint: !!newSecureConfig.client_fingerprint,
-                      hasEntropy: !!newSecureConfig.server_entropy,
-                      timeSlot: newSecureConfig.time_slot
-                    });
-                    
-                    if (newSecureConfig.jwt && newSecureConfig.client_fingerprint && newSecureConfig.server_entropy) {
-                      // Reconstruct new key with new server entropy
-                      const newTempKey = await this.reconstructSecureEncryptionKey({
-                        client_fingerprint: newSecureConfig.client_fingerprint,
-                        server_entropy: newSecureConfig.server_entropy,
-                        time_slot: newSecureConfig.time_slot
-                      });
-                      
-                      if (newTempKey) {
-                        // Debug: Check the new JWT timestamps
-                        try {
-                          const jwtParts = newSecureConfig.jwt.split('.');
-                          if (jwtParts.length === 3) {
-                            const payload = JSON.parse(atob(jwtParts[1].replace(/-/g, '+').replace(/_/g, '/')));
-                            const now = Math.floor(Date.now() / 1000);
-                            this.log("🔍 New JWT timestamps:", {
-                              issued: payload.iat,
-                              expires: payload.exp,
-                              current: now,
-                              timeLeft: payload.exp - now
-                            });
-                          }
-                        } catch (e) {
-                          this.log("⚠️ Could not decode JWT for debugging:", e.message);
-                        }
-                        
-                        this.log("✅ New secure encryption key reconstructed for renewed token");
-                        return { jwt: newSecureConfig.jwt, key: newTempKey };
-                      }
-                    }
-                  }
-                  throw new Error('Failed to renew secure config token');
-                };
-                
-                const decryptedData = await GA4Utils.encryption.decrypt(secureConfig.jwt, tempKey, {
-                  renewTokenCallback: renewTokenCallback
-                });
-                secureConfig = JSON.parse(decryptedData);
-                this.log("🔓 Secure config response decrypted with reconstructed key");
-              } else {
-                // No secure entropy provided - request fresh config instead of using legacy method
-                this.log("⚠️ No secure entropy in response, requesting fresh secure config...");
-
-                // Retry loadSecureConfig to get response with proper entropy
-                return await this.loadSecureConfig();
-              }
-            } catch (decError) {
-              this.log("⚠️ Failed to decrypt secure config response:", decError.message);
-              return;
-            }
-          } else {
-            this.log("⚠️ Expected encrypted response but received unencrypted data");
-            return;
-          }
-                    
-          // Derive the original keys from secured transmission
-          const originalWorkerApiKey = secureConfig.workerApiKey ? 
-            await this.deriveOriginalKey(secureConfig.workerApiKey, secureConfig.keyDerivationSalt) : '';
-          const originalEncryptionKey = secureConfig.encryptionKey ? 
-            await this.deriveOriginalKey(secureConfig.encryptionKey, secureConfig.keyDerivationSalt) : '';
-          
-          // Merge secure config into main config
-          this.config.cloudflareWorkerUrl = secureConfig.cloudflareWorkerUrl || '';
-          this.config.workerApiKey = originalWorkerApiKey;
-          this.config.encryptionEnabled = secureConfig.encryptionEnabled || false;
-          this.config.encryptionKey = originalEncryptionKey;
-          
-          // Load encryption settings from secure config if not already present
-          if (secureConfig.encryptionEnabled !== undefined) {
-            this.config.encryptionEnabled = secureConfig.encryptionEnabled;
-          }
-          if (secureConfig.encryptionKey && !this.config.encryptionKey) {
-            this.config.encryptionKey = secureConfig.encryptionKey;
-          }
-          
-          this.log("🔒 Secure configuration loaded successfully", {
-            cloudflareWorkerUrl: this.config.cloudflareWorkerUrl,
-            hasWorkerApiKey: !!this.config.workerApiKey,
-            encryptionEnabled: !!this.config.encryptionEnabled
-          });
-        } else {
-          this.log("⚠️ Failed to load secure configuration - status:", response.status, response.statusText);
-        }
-      } catch (error) {
-        this.log("⚠️ Error loading secure configuration:", error.message);
-      } finally {
-        // Reset loading state regardless of success/failure
-        this.loadingSecureConfig = false;
-      }
-    },
-
-    /**
-     * Derive original key from secured transmission using XOR deobfuscation.
-     * This reverses the XOR obfuscation applied on the server side.
-     */
-    deriveOriginalKey: async function(obfuscatedKey, salt) {
-      try {
-        if (!obfuscatedKey || !salt) {
-          return '';
-        }
-
-        this.log("🔑 Deriving original key from secured transmission...");
-        
-        // Base64 decode the obfuscated key
-        const decodedKey = atob(obfuscatedKey);
-        
-        // XOR deobfuscation (same operation as obfuscation - XOR is reversible)
-        const originalKey = this.xorDeobfuscate(decodedKey, salt);
-        
-        this.log("✅ Original key derived successfully");
-        return originalKey;
-        
-      } catch (error) {
-        this.log("⚠️ Failed to derive original key:", error.message);
-        return '';
-      }
-    },
-
-    /**
-     * XOR deobfuscation function (reverses XOR obfuscation).
-     */
-    xorDeobfuscate: function(data, key) {
-      const dataLen = data.length;
-      const keyLen = key.length;
-      let deobfuscated = '';
-      
-      for (let i = 0; i < dataLen; i++) {
-        deobfuscated += String.fromCharCode(
-          data.charCodeAt(i) ^ key.charCodeAt(i % keyLen)
-        );
-      }
-      
-      return deobfuscated;
-    },
-
-    /**
-     * Reconstruct encryption key using server-provided entropy
-     * @param {Object} serverEntropy Server entropy data from secure-config response
-     * @returns {Promise<string>} Reconstructed encryption key
-     */
-    reconstructSecureEncryptionKey: async function(serverEntropy) {
-      try {
-        // Extract entropy components from server response
-        const { client_fingerprint, server_entropy, time_slot } = serverEntropy;
-        
-        if (!client_fingerprint || !server_entropy || !time_slot) {
-          throw new Error('Missing entropy components from server');
-        }
-        
-        // Normalize site URL to match PHP get_site_url() format
-        const siteUrl = window.location.origin.replace(/\/$/, '');
-        
-        // Recreate the same key material as PHP
-        const keyMaterial = siteUrl + time_slot + client_fingerprint + server_entropy + 'ga4-secure-encryption';
-        
-        // Use Web Crypto API to generate SHA-256 hash
-        const encoder = new TextEncoder();
-        const data = encoder.encode(keyMaterial);
-        const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-        
-        // Convert to hex string (64 characters)
-        const hashArray = Array.from(new Uint8Array(hashBuffer));
-        const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-        
-        return hashHex;
-      } catch (error) {
-        this.log("⚠️ Failed to reconstruct secure encryption key:", error.message);
-        return null;
-      }
-    },
-
-    /**
-     * Generate temporary encryption key for secure config (changes every 5 minutes).
-     * @deprecated Use reconstructSecureEncryptionKey instead for better security
-     * This matches the server-side implementation.
-     */
-    getTemporaryEncryptionKey: async function() {
-      try {
-        // Create key that changes every 5 minutes but is predictable
-        const current5minSlot = Math.floor(Date.now() / (1000 * 300)); // 300 seconds = 5 minutes
-        const siteUrl = window.location.origin;
-        
-        // Create deterministic key that changes every 5 minutes
-        // Normalize site URL to match PHP get_site_url() format
-        const normalizedSiteUrl = siteUrl.replace(/\/$/, ''); // Remove trailing slash
-        const seedString = normalizedSiteUrl + current5minSlot + 'ga4-temp-encryption';
-        
-        // Use Web Crypto API to generate SHA-256 hash
-        const encoder = new TextEncoder();
-        const data = encoder.encode(seedString);
-        const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-        
-        // Convert to hex string (64 characters)
-        const hashArray = Array.from(new Uint8Array(hashBuffer));
-        const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-        
-        return hashHex;
-      } catch (error) {
-        this.log("⚠️ Failed to generate temporary encryption key:", error.message);
-        return null;
-      }
-    },
 
     /**
      * Initialize consent system with retry mechanism for slow page loads
@@ -2923,17 +2614,9 @@
       // Remove the temporary original consent status
       delete completeEventData._originalConsentStatus;
       
-      // Use Cloudflare Worker endpoint, or queue if not available
-      var endpoint = this.config.cloudflareWorkerUrl;
-      var data = this.formatEventData(eventName, completeEventData, endpoint);
-      
-      if (endpoint) {
-        this.sendAjaxPayload(endpoint, data);
-      } else {
-        this.log("Cloudflare Worker URL not loaded yet, using auto-detection");
-        // Use 'auto' to trigger endpoint detection and queuing logic
-        this.sendAjaxPayload('auto', data);
-      }
+      // Use single send-event endpoint
+      var data = this.formatEventData(eventName, completeEventData);
+      this.sendAjaxPayload(null, data);
     },
 
   /**
@@ -3046,29 +2729,16 @@
       // Add consent data to the payload (only essential fields)
       params.consent = this.getMinimalConsent(consentData);
 
-      // Use Cloudflare Worker endpoint, or queue if not available
-      var endpoint = this.config.cloudflareWorkerUrl;
+      // Use single send-event endpoint
+      var data = this.formatEventData(eventName, params);
       
-      // Format data based on endpoint type
-      var data = this.formatEventData(eventName, params, endpoint);
-
-      if (endpoint) {
-        this.log("Sending to endpoint: " + endpoint, {
-          consent: this.getMinimalConsent(consentData),
-          anonymized: consentData.analytics_storage !== "GRANTED",
-          eventName: eventName
-        });
-        
-        this.sendAjaxPayload(endpoint, data);
-      } else {
-        this.log("Cloudflare Worker URL not loaded yet, queuing event", {
-          eventName: eventName,
-          consent: this.getMinimalConsent(consentData)
-        });
-        
-        // Use 'auto' to trigger endpoint detection and queuing logic
-        this.sendAjaxPayload('auto', data);
-      }
+      this.log("Sending via send-event endpoint", {
+        consent: this.getMinimalConsent(consentData),
+        anonymized: consentData.analytics_storage !== "GRANTED",
+        eventName: eventName
+      });
+      
+      this.sendAjaxPayload(null, data);
     },
 
 
@@ -3231,13 +2901,13 @@
   },
 
 
-  formatEventData: function (eventName, params, endpoint) {
-    // Always use Cloudflare Worker format
+  formatEventData: function (eventName, params) {
+    // Format for send-event endpoint
     var data = {
       name: eventName,
       params: params,
     };
-    this.log("Using Cloudflare Worker format", data);
+    this.log("Formatting event data for send-event endpoint", data);
     return data;
   },
     /**
@@ -3269,179 +2939,100 @@
      */
     sendAjaxPayload: async function (endpoint, payload) {
       try {
-        // All endpoints now use simplified authentication
-        
-        // For events that don't specify an endpoint, determine the target endpoint
-        if (!endpoint || endpoint === 'auto') {
-          // Check if secure config is loaded
-          if (!this.isSecureConfigLoaded()) {
-            this.log("⏳ Secure config not loaded yet, queuing event", {
-              hasCloudflareUrl: !!this.config.cloudflareWorkerUrl,
-              hasWorkerApiKey: !!this.config.workerApiKey
-            });
-            
-            this.queueEventForLater('auto', payload);
-            return Promise.resolve({ queued: true });
-          }
-          
-          // Use Cloudflare Worker if available
-          endpoint = this.config.cloudflareWorkerUrl;
-          
-          if (!endpoint) {
-            this.log("❌ No endpoint available for sending event", {
-              cloudflareWorkerUrl: this.config.cloudflareWorkerUrl,
-              secureConfigLoaded: this.isSecureConfigLoaded()
-            });
-            
-            this.queueEventForLater('auto', payload);
-            return Promise.resolve({ queued: true });
-          }
-        }
-        
-        // Check if we have the required configuration for sending events
-        if (!this.config.cloudflareWorkerUrl || !this.config.workerApiKey) {
-          this.log("⏳ Cloudflare Worker config not ready, queuing event", {
-            hasCloudflareUrl: !!this.config.cloudflareWorkerUrl,
-            hasWorkerApiKey: !!this.config.workerApiKey,
-            endpoint: endpoint
+        // Check if consent is ready - if not, queue the event
+        if (!this.consentReady && !this.hasConsentDecision()) {
+          this.log("⏳ Consent not determined yet, queuing event", {
+            eventName: payload.name,
+            queueLength: this.eventQueue.length + 1
           });
           
-          this.queueEventForLater(endpoint, payload);
+          this.queueEventForConsent(payload);
           return Promise.resolve({ queued: true });
         }
         
-        this.log("📤 Sending to Cloudflare Worker", {
-          endpoint: endpoint,
-          hasWorkerApiKey: !!this.config.workerApiKey
+        // Use the single send-event endpoint
+        const sendEventEndpoint = this.config.apiEndpoint + '/send-event';
+        
+        this.log("📤 Sending event via send-event endpoint", {
+          endpoint: sendEventEndpoint,
+          eventName: payload.name,
+          consentReady: this.consentReady
         });
         
         return await GA4Utils.ajax.sendPayloadFetch(
-          endpoint,
-          payload,
+          sendEventEndpoint,
+          {
+            event_name: payload.name,
+            params: payload.params || {}
+          },
           this.config,
           "[GA4 Server-Side Tagging]"
         );
       } catch (error) {
         this.log("❌ Error sending event", {
-          endpoint: endpoint,
           error: error.message
         });
-        
-        // Queue for retry if sending fails
-        this.queueEventForLater(endpoint, payload);
         return Promise.resolve({ error: error.message });
       }
     },
 
     /**
-     * Check if secure configuration has been loaded
+     * Queue event for consent decision
      */
-    isSecureConfigLoaded: function() {
-      return !!(this.config.cloudflareWorkerUrl && this.config.workerApiKey);
-    },
-
-    // Event queuing for configuration delays
-    eventQueue: [],
-
-    /**
-     * Queue event for retry when secure configuration is not available
-     */
-    queueEventForLater: function(endpoint, payload) {
+    queueEventForConsent: function(payload) {
       this.eventQueue.push({
-        endpoint: endpoint,
         payload: payload,
         timestamp: Date.now()
       });
       
-      this.log("📦 Event queued (will process when config ready)", {
-        queueLength: this.eventQueue.length,
-        endpoint: endpoint
-      });
-      
-      // Queue is processed once when secure config loads
-    },
-
-    /**
-     * Schedule periodic queue processing
-     */
-    processQueuedEvents: function() {
-      this.log("🚀 Processing queued events (no retries)");
-      this.processEventQueue();
-    },
-
-    /**
-     * Process queued events
-     */
-    processEventQueue: async function() {
-      if (this.eventQueue.length === 0) {
-        return;
-      }
-      
-      this.log("🔄 Processing event queue", {
+      this.log("📦 Event queued for consent decision", {
+        eventName: payload.name,
         queueLength: this.eventQueue.length
       });
-      
-      var processedCount = 0;
-      var failedCount = 0;
-      
-      // Process events one by one
-      for (var i = this.eventQueue.length - 1; i >= 0; i--) {
-        var queuedEvent = this.eventQueue[i];
-        
+    },
+
+    /**
+     * Process queued events when consent is granted or denied
+     */
+    processQueuedEvents: function() {
+      if (this.eventQueue.length === 0) {
+        this.log("📭 No events in queue to process");
+        return;
+      }
+
+      this.log("🚀 Processing queued events", {
+        queueLength: this.eventQueue.length,
+        consentReady: this.consentReady
+      });
+
+      // Process all queued events
+      const eventsToProcess = [...this.eventQueue];
+      this.eventQueue = []; // Clear the queue
+
+      eventsToProcess.forEach(async (queuedEvent) => {
         try {
-          // For auto endpoints, resolve to actual endpoint now
-          var actualEndpoint = queuedEvent.endpoint;
-          if (actualEndpoint === 'auto') {
-            actualEndpoint = this.config.cloudflareWorkerUrl;
-            if (!actualEndpoint) {
-              this.log("⚠️ Auto endpoint not resolved, discarding event");
-              this.eventQueue.splice(i, 1);
-              failedCount++;
-              continue;
-            }
-          }
+          this.log("📤 Processing queued event", {
+            eventName: queuedEvent.payload.name,
+            queueTime: Date.now() - queuedEvent.timestamp + 'ms'
+          });
           
-          var result = await this.sendAjaxPayload(actualEndpoint, queuedEvent.payload);
-          
-          if (result && !result.queued && !result.error) {
-            // Successfully sent, remove from queue
-            this.eventQueue.splice(i, 1);
-            processedCount++;
-            
-            this.log("✅ Queued event processed successfully", {
-              originalEndpoint: queuedEvent.endpoint,
-              actualEndpoint: actualEndpoint,
-              queueTime: Date.now() - queuedEvent.timestamp + 'ms'
-            });
-          } else {
-            // Failed - remove from queue (no retry)
-            this.eventQueue.splice(i, 1);
-            failedCount++;
-          }
+          await this.sendAjaxPayload(null, queuedEvent.payload);
         } catch (error) {
-          this.log("❌ Failed to process queued event - discarding", {
-            endpoint: queuedEvent.endpoint,
+          this.log("❌ Failed to process queued event", {
+            eventName: queuedEvent.payload.name,
             error: error.message
           });
-          // Remove failed event from queue (no retry)
-          this.eventQueue.splice(i, 1);
-          failedCount++;
         }
-      }
-      
-      this.log("📊 Queue processing complete", {
-        processed: processedCount,
-        failed: failedCount,
-        remaining: this.eventQueue.length
       });
-      
-      // No retry scheduling - failed events are discarded
-      if (failedCount > 0) {
-        this.log("⚠️ Some events failed and were discarded (no retries)", {
-          discarded: failedCount
-        });
-      }
     },
+
+    /**
+     * Check if user has made a consent decision
+     */
+    hasConsentDecision: function() {
+      return GA4ConsentManager && GA4ConsentManager.hasConsentDecision && GA4ConsentManager.hasConsentDecision();
+    },
+
 
     // Log messages if debug mode is enabled
     log: function (message, data) {

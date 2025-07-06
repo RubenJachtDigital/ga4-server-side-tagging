@@ -110,141 +110,6 @@
        */
       clearUserData: function() {
         localStorage.removeItem('ga4_user_data');
-        
-        // Also clean up legacy items if they exist
-        var legacyKeys = [
-          'server_side_ga4_client_id',
-          'server_side_ga4_session_id', 
-          'server_side_ga4_session_start',
-          'server_side_ga4_session_count',
-          'server_side_ga4_first_visit',
-          'server_side_ga4_last_source',
-          'server_side_ga4_last_medium',
-          'server_side_ga4_last_campaign',
-          'server_side_ga4_last_content',
-          'server_side_ga4_last_term',
-          'server_side_ga4_last_gclid',
-          'user_location_data'
-        ];
-        
-        legacyKeys.forEach(function(key) {
-          localStorage.removeItem(key);
-          localStorage.removeItem(key + '_timestamp');
-        });
-
-        // IMPORTANT: Do NOT clear consent data (ga4_consent_status)
-        // Consent should persist longer than tracking data for GDPR compliance
-      },
-
-      /**
-       * Migrate legacy data to new centralized system
-       */
-      migrateLegacyData: function() {
-        
-        // Check if we already have centralized data
-        var existingData = localStorage.getItem('ga4_user_data');
-        if (existingData) {
-          return JSON.parse(existingData);
-        }
-        
-        var userData = this.getDefaultUserData();
-        var needsMigration = false;
-        var migratedItems = [];
-
-        // Migrate client ID
-        var oldClientId = localStorage.getItem('server_side_ga4_client_id');
-        if (oldClientId && !userData.clientId) {
-          userData.clientId = oldClientId;
-          needsMigration = true;
-          migratedItems.push('clientId: ' + oldClientId);
-        }
-
-        // Migrate session data
-        var oldSessionId = localStorage.getItem('server_side_ga4_session_id');
-        var oldSessionStart = localStorage.getItem('server_side_ga4_session_start');
-        var oldSessionCount = localStorage.getItem('server_side_ga4_session_count');
-        var oldFirstVisit = localStorage.getItem('server_side_ga4_first_visit');
-
-        if (oldSessionId) {
-          userData.sessionId = oldSessionId;
-          userData.sessionStart = parseInt(oldSessionStart) || Date.now();
-          userData.sessionCount = parseInt(oldSessionCount) || 1;
-          userData.firstVisit = parseInt(oldFirstVisit) || Date.now();
-          needsMigration = true;
-          migratedItems.push('sessionData: ' + oldSessionId);
-        }
-
-        // Migrate attribution data
-        var attributionKeys = ['source', 'medium', 'campaign', 'content', 'term', 'gclid'];
-        attributionKeys.forEach(function(key) {
-          var oldValue = localStorage.getItem('server_side_ga4_last_' + key);
-          if (oldValue) {
-            userData['last' + key.charAt(0).toUpperCase() + key.slice(1)] = oldValue;
-            needsMigration = true;
-            migratedItems.push(key + ': ' + oldValue);
-          }
-        });
-
-        // Migrate location data
-        var oldLocation = localStorage.getItem('user_location_data');
-        if (oldLocation) {
-          try {
-            userData.location = JSON.parse(oldLocation);
-            needsMigration = true;
-            migratedItems.push('location data');
-          } catch (e) {
-            console.log('❌ [GA4 Storage] Error migrating location data:', e);
-          }
-        }
-
-        if (needsMigration) {
-          this.saveUserData(userData);
-          
-          // Clean up old data after successful migration
-          setTimeout(() => {
-            this.clearLegacyData(); // Clean only legacy keys, not the new centralized data
-          }, 100);
-          
-        } else {
-        }
-
-        return userData;
-      },
-
-      /**
-       * Clear only legacy data items (not the new centralized data)
-       */
-      clearLegacyData: function() {
-        var legacyKeys = [
-          'server_side_ga4_client_id',
-          'server_side_ga4_session_id', 
-          'server_side_ga4_session_start',
-          'server_side_ga4_session_count',
-          'server_side_ga4_first_visit',
-          'server_side_ga4_last_source',
-          'server_side_ga4_last_medium',
-          'server_side_ga4_last_campaign',
-          'server_side_ga4_last_content',
-          'server_side_ga4_last_term',
-          'server_side_ga4_last_gclid',
-          'user_location_data'
-        ];
-        
-        var removedItems = [];
-        legacyKeys.forEach(function(key) {
-          if (localStorage.getItem(key)) {
-            localStorage.removeItem(key);
-            removedItems.push(key);
-          }
-          var timestampKey = key + '_timestamp';
-          if (localStorage.getItem(timestampKey)) {
-            localStorage.removeItem(timestampKey);
-            removedItems.push(timestampKey);
-          }
-        });
-        
-        if (removedItems.length > 0) {
-        }
       },
 
       /**
@@ -328,64 +193,7 @@
         this.saveConsentData(newConsentData);
       },
 
-      /**
-       * Test function to verify the new storage system is working
-       * Call GA4Utils.storage.testNewStorage() in console to test
-       */
-      testNewStorage: function() {
-        console.log('🧪 [GA4 Storage] Testing new centralized storage system...');
-        
-        // Test 1: Get current data
-        console.log('📋 Test 1: Getting current user data');
-        var userData = this.getUserData();
-        console.log('Current data:', userData);
-        
-        // Test 2: Generate client ID
-        console.log('📋 Test 2: Testing client ID generation');
-        var clientId = GA4Utils.clientId.get();
-        console.log('Client ID:', clientId);
-        
-        // Test 3: Test session data
-        console.log('📋 Test 3: Testing session data');
-        var session = GA4Utils.session.get();
-        console.log('Session data:', session);
-        
-        // Test 4: Check data retention setting
-        console.log('📋 Test 4: Checking data retention setting');
-        var expirationHours = this.getExpirationHours();
-        console.log('Data retention hours:', expirationHours);
-        
-        // Test 5: Check consent data
-        console.log('📋 Test 5: Testing consent data persistence');
-        var consentData = this.getConsentData();
-        var hasValidConsent = this.hasValidConsent();
-        console.log('Consent data:', consentData);
-        console.log('Has valid consent (never expires unless 1+ year old):', hasValidConsent);
-        
-        // Test 6: Show localStorage status
-        console.log('📋 Test 6: localStorage status');
-        console.log('New centralized data exists:', !!localStorage.getItem('ga4_user_data'));
-        console.log('Consent data exists:', !!localStorage.getItem('ga4_consent_status'));
-        console.log('Legacy client ID exists:', !!localStorage.getItem('server_side_ga4_client_id'));
-        console.log('Legacy session ID exists:', !!localStorage.getItem('server_side_ga4_session_id'));
-        
-        console.log('✅ [GA4 Storage] Test completed! Check the logs above.');
-        
-        return {
-          userData: userData,
-          clientId: clientId,
-          session: session,
-          expirationHours: expirationHours,
-          consentData: consentData,
-          hasValidConsent: hasValidConsent,
-          newDataExists: !!localStorage.getItem('ga4_user_data'),
-          consentDataExists: !!localStorage.getItem('ga4_consent_status'),
-          legacyDataExists: {
-            clientId: !!localStorage.getItem('server_side_ga4_client_id'),
-            sessionId: !!localStorage.getItem('server_side_ga4_session_id')
-          }
-        };
-      }
+ 
     },
 
     /**
@@ -2472,45 +2280,6 @@
      * AJAX Utilities
      */
     ajax: {
-      /**
-       * Set API key header with smart encoding (JWT -> Base64 -> Plain text fallback)
-       * @param {Object} headers Headers object to modify
-       * @param {Object} config Configuration object
-       * @param {string} logPrefix Prefix for log messages
-       * @returns {Promise<void>}
-       */
-      setApiKeyHeader: async function(headers, config, logPrefix) {
-        logPrefix = logPrefix || "[GA4Utils API]";
-        
-        if (!config.workerApiKey) {
-          return;
-        }
-        
-        // Strategy 1: Try JWT encryption if enabled and available
-        if (config.encryptionEnabled && config.encryptionKey) {
-          try {
-            const encryptedApiKey = await GA4Utils.encryption.encrypt(config.workerApiKey, config.encryptionKey);
-            headers["X-API-Key"] = encryptedApiKey;
-            GA4Utils.helpers.log("🔐 API key encrypted with JWT", null, config, logPrefix);
-            return;
-          } catch (encError) {
-            GA4Utils.helpers.log("⚠️ JWT encryption failed for API key, falling back to base64", encError, config, logPrefix);
-          }
-        }
-        
-        // Strategy 2: Use base64 encoding as reliable fallback
-        try {
-          headers["X-API-Key"] = btoa(config.workerApiKey);
-          GA4Utils.helpers.log("🔑 API key encoded with base64", null, config, logPrefix);
-          return;
-        } catch (base64Error) {
-          GA4Utils.helpers.log("⚠️ Base64 encoding failed for API key, using plain text", base64Error, config, logPrefix);
-        }
-        
-        // Strategy 3: Plain text as last resort (for development/legacy)
-        headers["X-API-Key"] = config.workerApiKey;
-        GA4Utils.helpers.log("⚠️ API key sent as plain text - consider enabling encryption", null, config, logPrefix);
-      },
 
       /**
        * Send AJAX payload to endpoint
@@ -2547,24 +2316,6 @@
                 xhr.setRequestHeader("X-WP-Nonce", config.nonce || "");
               }
               
-              // Add API key for Cloudflare Worker (for AJAX, use base64 as fallback)
-              if (
-                config &&
-                config.cloudflareWorkerUrl &&
-                config.workerApiKey &&
-                endpoint === config.cloudflareWorkerUrl
-              ) {
-                // For AJAX (synchronous), use base64 encoding as reliable fallback
-                // JWT encryption is handled in the async sendPayloadFetch method
-                try {
-                  var encodedApiKey = btoa(config.workerApiKey);
-                  xhr.setRequestHeader("X-API-Key", encodedApiKey);
-                } catch (base64Error) {
-                  // Ultimate fallback to plain text for legacy support
-                  xhr.setRequestHeader("X-API-Key", config.workerApiKey);
-                  GA4Utils.helpers.log("⚠️ Using plain text API key in AJAX (base64 failed)", base64Error, config, logPrefix);
-                }
-              }
               GA4Utils.helpers.log(
                 "Sending AJAX request to: " + endpoint,
                 null,
@@ -2623,35 +2374,20 @@
         };
 
         var requestBody = JSON.stringify(payload);
-        var isCloudflareWorker = config && config.cloudflareWorkerUrl && endpoint === config.cloudflareWorkerUrl;
 
         // Add nonce for WordPress REST API endpoints
         if (config && config.apiEndpoint && endpoint.startsWith(config.apiEndpoint)) {
           headers["X-WP-Nonce"] = config.nonce || "";
+          
+          // Note: Encryption is handled server-side by WordPress when forwarding to Cloudflare Worker
+          // Client sends unencrypted data to WordPress REST API for security
         }
 
-        // Add API key for Cloudflare Worker (smart encoding based on capabilities)
-        if (isCloudflareWorker && config.workerApiKey) {
-          await GA4Utils.ajax.setApiKeyHeader(headers, config, logPrefix);
-        }
-
-        // Apply encryption for Cloudflare Worker if enabled
-        if (isCloudflareWorker && config.encryptionEnabled && config.encryptionKey) {
-          try {
-            var encryptedData = await GA4Utils.encryption.encrypt(requestBody, config.encryptionKey);
-            requestBody = JSON.stringify({ jwt: encryptedData });
-            headers["X-Encrypted"] = "true";
-            GA4Utils.helpers.log("🔐 Payload encrypted for Cloudflare Worker", null, config, logPrefix);
-          } catch (encError) {
-            GA4Utils.helpers.log("⚠️ Failed to encrypt payload, sending unencrypted", encError, config, logPrefix);
-          }
-        }
 
         GA4Utils.helpers.log(
           "Sending Fetch request to: " + endpoint,
           {
-            encrypted: !!(isCloudflareWorker && config.encryptionEnabled),
-            hasApiKey: !!headers["X-API-Key"],
+            encrypted: !!headers["X-Encrypted"],
             hasNonce: !!headers["X-WP-Nonce"]
           },
           config,
@@ -2673,48 +2409,9 @@
           }
 
           let data = await response.json();
-          let wasEncrypted = false;
-
-          // Decrypt response from Cloudflare Worker if it was encrypted
-          if (data.jwt && isCloudflareWorker && config.encryptionEnabled && config.encryptionKey) {
-            wasEncrypted = true;
-            GA4Utils.helpers.log("🔐 Received encrypted response from Cloudflare Worker", null, config, logPrefix);
-            
-            try {
-              // For Cloudflare Worker responses, if token is expired, we should retry the entire request
-              const renewTokenCallback = async () => {
-                GA4Utils.helpers.log("🔄 Cloudflare Worker JWT token expired, retrying request...", null, config, logPrefix);
-                
-                // Re-execute the original request to get a fresh token
-                const retryResponse = await fetch(endpoint, {
-                  method: "POST",
-                  headers: headers,
-                  body: requestBody,
-                });
-                
-                if (!retryResponse.ok) {
-                  throw new Error("Failed to retry request for fresh token");
-                }
-                
-                const retryData = await retryResponse.json();
-                if (retryData.jwt) {
-                  return retryData.jwt;
-                }
-                throw new Error('No JWT token in retry response');
-              };
-              
-              var decryptedData = await GA4Utils.encryption.decrypt(data.jwt, config.encryptionKey, {
-                renewTokenCallback: renewTokenCallback
-              });
-              data = JSON.parse(decryptedData);
-            } catch (decError) {
-              GA4Utils.helpers.log("⚠️ Failed to decrypt response, using encrypted data", decError, config, logPrefix);
-              // Continue with encrypted data - might still be valid
-            }
-          }
 
           GA4Utils.helpers.log(
-            "Fetch request sent successfully" + (wasEncrypted ? " (decrypted)" : ""),
+            "Fetch request sent successfully",
             data,
             config,
             logPrefix
@@ -2750,19 +2447,6 @@
           return { valid: false, reason: "insecure_endpoint_protocol" };
         }
 
-        // Validate Cloudflare Worker endpoint
-        var isCloudflareWorker = config && config.cloudflareWorkerUrl && endpoint === config.cloudflareWorkerUrl;
-        if (isCloudflareWorker) {
-          // Check API key is present for Cloudflare Worker
-          if (config.requireApiKey && !config.workerApiKey) {
-            return { valid: false, reason: "missing_api_key" };
-          }
-
-          // Check encryption key is present if encryption is enabled
-          if (config.encryptionEnabled && !config.encryptionKey) {
-            return { valid: false, reason: "missing_encryption_key" };
-          }       
-        }
 
         // Validate WordPress API endpoint
         var isWordPressAPI = config && config.apiEndpoint && endpoint.startsWith(config.apiEndpoint);
@@ -3940,43 +3624,7 @@
         };
       },
 
-      /**
-       * Decrypt request data from secure transmission
-       * @param {Object} encryptedRequest - Encrypted request structure
-       * @param {string} encryptionKey - Encryption key (hex string)
-       * @returns {Promise<Object>} - Decrypted request data
-       */
-      decryptRequest: async function(encryptedRequest, encryptionKey) {
-        if (!encryptionKey) {
-          throw new Error('Encryption key is required');
-        }
-        
-        if (!encryptedRequest.jwt) {
-          throw new Error('No JWT token found in request');
-        }
-        
-        const decryptedJson = await this.decrypt(encryptedRequest.jwt, encryptionKey);
-        return JSON.parse(decryptedJson);
-      },
 
-      /**
-       * Decrypt response data from secure transmission
-       * @param {Object} encryptedResponse - Encrypted response structure
-       * @param {string} encryptionKey - Encryption key (hex string)
-       * @returns {Promise<Object>} - Decrypted response data
-       */
-      decryptResponse: async function(encryptedResponse, encryptionKey) {
-        if (!encryptionKey) {
-          throw new Error('Encryption key is required');
-        }
-        
-        if (!encryptedResponse.jwt) {
-          throw new Error('No JWT token found in response');
-        }
-        
-        const decryptedJson = await this.decrypt(encryptedResponse.jwt, encryptionKey);
-        return JSON.parse(decryptedJson);
-      }
     },
 
   };
@@ -3986,8 +3634,6 @@
 
   // Initialize cleanup on page load
   $(document).ready(function () {
-    // Migrate legacy data to new centralized system
-    GA4Utils.storage.migrateLegacyData();
     
     // Clean up expired data on page load
     GA4Utils.storage.cleanupExpiredData();

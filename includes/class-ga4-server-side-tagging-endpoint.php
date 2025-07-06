@@ -50,9 +50,9 @@ class GA4_Server_Side_Tagging_Endpoint {
      * @since    1.0.0
      */
     public function register_routes() {
-        register_rest_route( 'ga4-server-side-tagging/v1', '/secure-config', array(
-            'methods'             => 'GET',
-            'callback'            => array( $this, 'get_secure_config' ),
+        register_rest_route( 'ga4-server-side-tagging/v1', '/send-event', array(
+            'methods'             => 'POST',
+            'callback'            => array( $this, 'send_event' ),
             'permission_callback' => array( $this, 'check_strong_permission' ),
         ) );
     }
@@ -303,29 +303,55 @@ class GA4_Server_Side_Tagging_Endpoint {
     }
 
     /**
-     * Get the secure GA4 configuration (sensitive data).
+     * Send event to Cloudflare Worker with embedded config.
      *
      * @since    1.0.0
-     * @return   \WP_REST_Response    The response object.
+     * @param    \WP_REST_Request    $request    The request object.
+     * @return   \WP_REST_Response               The response object.
      */
-    public function get_secure_config( $request ) {
+    public function send_event( $request ) {
         try {
-            // Handle encrypted request if present (not needed for GET, but for consistency)
-            // $request_data = $this->handle_encrypted_request( $request ); // Not used for GET
+            // Handle encrypted request if present
+            $request_data = $this->handle_encrypted_request( $request );
             
-            $secure_config = array(
-                'cloudflareWorkerUrl' => get_option( 'ga4_cloudflare_worker_url', '' ),
-                'workerApiKey' => $this->secure_key_transmission( get_option( 'ga4_worker_api_key', '' ) ),
-                'encryptionEnabled' => (bool) get_option( 'ga4_jwt_encryption_enabled', false ),
-                'encryptionKey' => $this->secure_key_transmission( get_option( 'ga4_jwt_encryption_key', '' ) ),
-                'keyDerivationSalt' => $this->get_key_derivation_salt(),
+            if ( empty( $request_data ) || !isset( $request_data['event_name'] ) ) {
+                return new \WP_REST_Response( array( 'error' => 'Invalid event data' ), 400 );
+            }
+            
+            // Get configuration
+            $cloudflare_url = get_option( 'ga4_cloudflare_worker_url', '' );
+            $worker_api_key = get_option( 'ga4_worker_api_key', '' );
+            $encryption_enabled = (bool) get_option( 'ga4_jwt_encryption_enabled', false );
+            $encryption_key = get_option( 'ga4_jwt_encryption_key', '' );
+            
+            if ( empty( $cloudflare_url ) || empty( $worker_api_key ) ) {
+                return new \WP_REST_Response( array( 'error' => 'Configuration incomplete' ), 500 );
+            }
+            
+            // Prepare event payload
+            $event_payload = array(
+                'name' => $request_data['event_name'],
+                'params' => $request_data['params'] ?? array()
             );
-            // Return encrypted response if requested
-            return $this->create_response( $secure_config, $request );
+            
+            // Send to Cloudflare Worker
+            $result = $this->forward_to_cloudflare( $event_payload, $cloudflare_url, $worker_api_key, $encryption_enabled, $encryption_key );
+            
+            if ( $result['success'] ) {
+                // Include worker response in the response back to client
+                $response_data = array( 'success' => true );
+                if ( isset( $result['worker_response'] ) ) {
+                    $response_data['worker_response'] = $result['worker_response'];
+                }
+                return new \WP_REST_Response( $response_data, 200 );
+            } else {
+                $this->logger->error( 'Failed to send event to Cloudflare: ' . $result['error'] );
+                return new \WP_REST_Response( array( 'error' => 'Event sending failed', 'details' => $result['error'] ), 500 );
+            }
             
         } catch ( \Exception $e ) {
-            $this->logger->error( 'Failed to get secure config: ' . $e->getMessage() );
-            return new \WP_REST_Response( array( 'error' => 'Configuration error' ), 500 );
+            $this->logger->error( 'Failed to process send-event request: ' . $e->getMessage() );
+            return new \WP_REST_Response( array( 'error' => 'Processing error' ), 500 );
         }
     }
 
@@ -497,13 +523,15 @@ class GA4_Server_Side_Tagging_Endpoint {
             return $request->get_json_params();
         }
         
+        // Use the configured encryption key from backend settings
         $encryption_key = get_option( 'ga4_jwt_encryption_key', '' );
+        $request_body = $request->get_json_params();
+        
         if ( empty( $encryption_key ) ) {
-            throw new \Exception( 'Encryption key not configured' );
+            throw new \Exception( 'Encryption is enabled but no encryption key is configured' );
         }
         
         try {
-            $request_body = $request->get_json_params();
             $decrypted_data = GA4_Encryption_Util::parse_encrypted_request( $request_body, $encryption_key );
             
             $this->logger->info( 'JWT request verified successfully', array(
@@ -516,47 +544,11 @@ class GA4_Server_Side_Tagging_Endpoint {
             $this->logger->error( 'Failed to verify JWT request: ' . $e->getMessage(), array(
                 'ip' => $this->get_client_ip( $request )
             ) );
-            throw new \Exception( 'JWT request verification failed' );
+            
+            throw new \Exception( 'JWT request verification failed: ' . $e->getMessage() );
         }
     }
 
-    /**
-     * Create response with mandatory encryption for secure config endpoint
-     * 
-     * @param array $data Response data
-     * @param \WP_REST_Request $request Original request
-     * @return \WP_REST_Response Response object
-     */
-    private function create_response( $data, $request ) {
-        // Generate secure encryption key using request entropy
-        $key_data = $this->generate_secure_encryption_key( $request );
-        
-        if ( empty( $key_data['encryption_key'] ) ) {
-            $this->logger->error( 'Secure config encryption failed: no encryption key could be generated' );
-            return new \WP_REST_Response( array( 'error' => 'Encryption required but unavailable' ), 500 );
-        }
-        
-        try {
-            $encrypted_data = GA4_Encryption_Util::create_encrypted_response( $data, $key_data['encryption_key'] );
-            
-            // Include client entropy in response for key reconstruction
-            $response_data = array_merge( $encrypted_data, [
-                'client_fingerprint' => $key_data['client_fingerprint'],
-                'server_entropy' => $key_data['server_entropy'],
-                'time_slot' => $key_data['time_slot']
-            ] );
-            
-            return new \WP_REST_Response( $response_data, 200 );
-            
-        } catch ( \Exception $e ) {
-            $this->logger->error( 'Failed to encrypt secure config: ' . $e->getMessage(), array(
-                'ip' => $this->get_client_ip( $request )
-            ) );
-            
-            // Return error instead of unencrypted fallback
-            return new \WP_REST_Response( array( 'error' => 'Encryption failed' ), 500 );
-        }
-    }
 
     /**
      * Enhanced security validation with stricter checks.
@@ -599,8 +591,8 @@ class GA4_Server_Side_Tagging_Endpoint {
             $this->logger->error( "Debug headers - Accept-Language: '{$accept_language}', Accept-Encoding: '{$accept_encoding}'" );
         }
 
-        // 4. Check request method is GET only
-        if ( $request->get_method() !== 'GET' ) {
+        // 4. Check request method is POST only
+        if ( $request->get_method() !== 'POST' ) {
             $this->logger->error( 'Enhanced security failed: Invalid request method: ' . $request->get_method() );
             return false;
         }
@@ -620,117 +612,72 @@ class GA4_Server_Side_Tagging_Endpoint {
 
 
 
+
+
+
+
+
     /**
-     * Secure key transmission using XOR-based obfuscation (reversible).
+     * Forward event to Cloudflare Worker.
      *
      * @since    1.0.0
-     * @param    string    $original_key    The original key to secure.
-     * @return   string                    The secured key for transmission.
+     * @param    array     $event_payload      The event data.
+     * @param    string    $cloudflare_url     The Cloudflare Worker URL.
+     * @param    string    $worker_api_key     The Worker API key.
+     * @param    bool      $encryption_enabled Whether encryption is enabled.
+     * @param    string    $encryption_key     The encryption key.
+     * @return   array                         Success/failure result.
      */
-    private function secure_key_transmission( $original_key ) {
-        if ( empty( $original_key ) ) {
-            return '';
+    private function forward_to_cloudflare( $event_payload, $cloudflare_url, $worker_api_key, $encryption_enabled, $encryption_key ) {
+        try {
+            $headers = array(
+                'Content-Type' => 'application/json',
+                'Authorization' => 'Bearer ' . $worker_api_key
+            );
+
+            $body = $event_payload;
+
+            // Encrypt payload if encryption is enabled
+            if ( $encryption_enabled && !empty( $encryption_key ) ) {
+                try {
+                    // Use the configured encryption key from backend settings
+                    $encrypted_payload = GA4_Encryption_Util::create_encrypted_response( $body, $encryption_key );
+                    $body = $encrypted_payload;
+                } catch ( \Exception $e ) {
+                    $this->logger->error( 'Event encryption failed: ' . $e->getMessage() );
+                    // Continue with unencrypted payload as fallback
+                }
+            }
+
+            // Send to Cloudflare Worker
+            $response = wp_remote_post( $cloudflare_url, array(
+                'timeout' => 30,
+                'headers' => $headers,
+                'body' => wp_json_encode( $body )
+            ) );
+
+            if ( is_wp_error( $response ) ) {
+                return array( 'success' => false, 'error' => $response->get_error_message() );
+            }
+
+            $response_code = wp_remote_retrieve_response_code( $response );
+            $response_body = wp_remote_retrieve_body( $response );
+            
+            if ( $response_code >= 200 && $response_code < 300 ) {
+                // Parse response body if it's JSON
+                $parsed_response = json_decode( $response_body, true );
+                if ( json_last_error() === JSON_ERROR_NONE ) {
+                    return array( 'success' => true, 'worker_response' => $parsed_response );
+                } else {
+                    return array( 'success' => true, 'worker_response' => $response_body );
+                }
+            } else {
+                return array( 'success' => false, 'error' => 'HTTP ' . $response_code . ': ' . $response_body );
+            }
+
+        } catch ( \Exception $e ) {
+            return array( 'success' => false, 'error' => $e->getMessage() );
         }
-
-        // Get the derivation salt (will be used as XOR key)
-        $salt = $this->get_key_derivation_salt();
-        
-        // XOR obfuscation - reversible by XORing again with same salt
-        $obfuscated_key = $this->xor_obfuscate( $original_key, $salt );
-        
-        // Base64 encode for safe transmission
-        return base64_encode( $obfuscated_key );
     }
 
-    /**
-     * XOR obfuscation function (reversible).
-     *
-     * @since    1.0.0
-     * @param    string    $data    The data to obfuscate.
-     * @param    string    $key     The XOR key.
-     * @return   string            The obfuscated data.
-     */
-    private function xor_obfuscate( $data, $key ) {
-        $data_len = strlen( $data );
-        $key_len = strlen( $key );
-        $obfuscated = '';
-        
-        for ( $i = 0; $i < $data_len; $i++ ) {
-            $obfuscated .= chr( ord( $data[ $i ] ) ^ ord( $key[ $i % $key_len ] ) );
-        }
-        
-        return $obfuscated;
-    }
-
-    /**
-     * Get or create key derivation salt.
-     *
-     * @since    1.0.0
-     * @return   string    The key derivation salt.
-     */
-    private function get_key_derivation_salt() {
-        // Create a salt based on site URL and current hour
-        // This changes hourly but is predictable on client side
-        $current_hour = gmdate( 'Y-m-d-H' ); // UTC hour for consistency
-        $site_url = get_site_url();
-        
-        // Create deterministic salt that changes hourly
-        $salt = hash( 'sha256', $site_url . $current_hour . 'ga4-key-derivation' );
-        
-        return $salt;
-    }
-
-    /**
-     * Generate secure encryption key using request entropy (non-predictable).
-     *
-     * @since    1.0.0
-     * @param    \WP_REST_Request    $request    The request object.
-     * @return   array                         Array with encryption key and client entropy.
-     */
-    private function generate_secure_encryption_key( $request ) {
-        // Get client-specific entropy
-        $client_ip = $this->get_client_ip( $request );
-        $user_agent = $request->get_header( 'user-agent' );
-        $timestamp = time();
-        
-        // Create 5-minute time slot for key rotation
-        $time_slot = floor( $timestamp / 300 ); // 300 seconds = 5 minutes
-        
-        // Generate server entropy (cryptographically secure)
-        $server_entropy = bin2hex( random_bytes( 16 ) ); // 32 hex chars
-        
-        // Create client fingerprint (non-sensitive, can be shared)
-        $client_fingerprint = hash( 'sha256', $client_ip . $user_agent . $time_slot . 'ga4-client-fp' );
-        
-        // Combine all entropy sources for key derivation
-        $key_material = hash( 'sha256', 
-            get_site_url() . 
-            $time_slot . 
-            $client_fingerprint . 
-            $server_entropy . 
-            'ga4-secure-encryption'
-        );
-        
-        return [
-            'encryption_key' => $key_material,
-            'client_fingerprint' => $client_fingerprint,
-            'server_entropy' => $server_entropy,
-            'time_slot' => $time_slot
-        ];
-    }
-
-    /**
-     * Legacy method for backward compatibility - now redirects to secure version.
-     *
-     * @since    1.0.0
-     * @return   string    The temporary encryption key (64 characters hex).
-     */
-    private function get_temporary_encryption_key() {
-        // This method is kept for backward compatibility but should not be used
-        // for new implementations. It creates a basic time-based key.
-        $current_5min_slot = floor( time() / 300 );
-        $site_url = get_site_url();
-        $temp_key_seed = hash( 'sha256', $site_url . $current_5min_slot . 'ga4-temp-encryption' );
-        return $temp_key_seed;
-    }
 } 
