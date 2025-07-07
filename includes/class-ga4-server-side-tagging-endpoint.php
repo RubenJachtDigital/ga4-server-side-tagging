@@ -385,7 +385,7 @@ class GA4_Server_Side_Tagging_Endpoint
             }
 
             // Check for event name (accept both 'name' and 'event_name' fields)
-            if (empty($request_data['name']) && empty($request_data['event_name'])) {
+            if (empty($request_data['name']) || empty($request_data['event_name'])) {
                 return new \WP_REST_Response(array('error' => 'Missing required field: event name'), 400);
             }
 
