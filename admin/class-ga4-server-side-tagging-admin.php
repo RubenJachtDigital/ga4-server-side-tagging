@@ -636,25 +636,19 @@ class GA4_Server_Side_Tagging_Admin
         if (isset($_POST['ga4_worker_api_key'])) {
             $api_key = sanitize_text_field(wp_unslash($_POST['ga4_worker_api_key']));
             if (!empty($api_key)) {
-                // Check if this key is different from what's already stored
-                $current_key = \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::retrieve_encrypted_key('ga4_worker_api_key') ?: get_option('ga4_worker_api_key', '');
-                
-                if ($api_key !== $current_key) {
-                    // Only store if the key has actually changed
-                    $stored = \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::store_encrypted_key($api_key, 'ga4_worker_api_key');
-                    if ($stored) {
-                        $this->logger->info('Worker API key updated and encrypted successfully in database');
-                    } else {
-                        $this->logger->error('Failed to encrypt and store updated worker API key');
-                        add_settings_error(
-                            'ga4_server_side_tagging_settings',
-                            'api_key_storage_failed',
-                            'Failed to securely store API key. Please check your WordPress security configuration.',
-                            'error'
-                        );
-                    }
+                // Always store the API key encrypted, even if it's the same value
+                // This ensures any plain text keys get encrypted on every save
+                $stored = \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::store_encrypted_key($api_key, 'ga4_worker_api_key');
+                if ($stored) {
+                    $this->logger->info('Worker API key encrypted and stored successfully in database');
                 } else {
-                    $this->logger->info('Worker API key unchanged, no update needed');
+                    $this->logger->error('Failed to encrypt and store worker API key');
+                    add_settings_error(
+                        'ga4_server_side_tagging_settings',
+                        'api_key_storage_failed',
+                        'Failed to securely store API key. Please check your WordPress security configuration.',
+                        'error'
+                    );
                 }
             } else {
                 // Clear the API key if empty
@@ -678,25 +672,19 @@ class GA4_Server_Side_Tagging_Admin
                     update_option('ga4_jwt_encryption_key', '');
                     $this->logger->info('JWT encryption key cleared from database');
                 } else {
-                    // Check if this key is different from what's already stored
-                    $current_encryption_key = \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::retrieve_encrypted_key('ga4_jwt_encryption_key') ?: '';
-                    
-                    if ($encryption_key !== $current_encryption_key) {
-                        // Only store if the key has actually changed
-                        $stored = \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::store_encrypted_key($encryption_key, 'ga4_jwt_encryption_key');
-                        if ($stored) {
-                            $this->logger->info('JWT encryption key updated and encrypted successfully in database');
-                        } else {
-                            $this->logger->error('Failed to encrypt and store updated JWT encryption key');
-                            add_settings_error(
-                                'ga4_server_side_tagging_settings',
-                                'encryption_key_storage_failed',
-                                'Failed to securely store encryption key. Please check your WordPress security salts.',
-                                'error'
-                            );
-                        }
+                    // Always store the encryption key encrypted, even if it's the same value
+                    // This ensures any plain text keys get encrypted on every save
+                    $stored = \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::store_encrypted_key($encryption_key, 'ga4_jwt_encryption_key');
+                    if ($stored) {
+                        $this->logger->info('JWT encryption key encrypted and stored successfully in database');
                     } else {
-                        $this->logger->info('JWT encryption key unchanged, no update needed');
+                        $this->logger->error('Failed to encrypt and store JWT encryption key');
+                        add_settings_error(
+                            'ga4_server_side_tagging_settings',
+                            'encryption_key_storage_failed',
+                            'Failed to securely store encryption key. Please check your WordPress security salts.',
+                            'error'
+                        );
                     }
                 }
             } else {

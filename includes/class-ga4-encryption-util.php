@@ -357,6 +357,38 @@ class GA4_Encryption_Util
     }
 
     /**
+     * Check if a value is in encrypted format (base64 encoded JSON with data/iv/tag structure)
+     * 
+     * @param string $value Value to check
+     * @return bool True if value appears to be encrypted
+     */
+    public static function is_encrypted_format($value)
+    {
+        try {
+            // Try to decode as base64
+            $decoded = base64_decode($value, true);
+            if ($decoded === false) {
+                return false;
+            }
+            
+            // Try to parse as JSON
+            $json_data = json_decode($decoded, true);
+            if (json_last_error() !== JSON_ERROR_NONE) {
+                return false;
+            }
+            
+            // Check if it has the expected encrypted structure
+            if (is_array($json_data) && isset($json_data['data'], $json_data['iv'], $json_data['tag'])) {
+                return true;
+            }
+            
+            return false;
+        } catch (\Exception $e) {
+            return false;
+        }
+    }
+
+    /**
      * Encrypt encryption key for database storage using WordPress salts
      * 
      * @param string $key_hex Raw encryption key (64 hex characters)
@@ -439,6 +471,41 @@ class GA4_Encryption_Util
     }
 
     /**
+     * Encrypt general key (like API key) for database storage using WordPress salts
+     * This method works with any string format, unlike encrypt_key_for_storage which only works with 64-char hex
+     * 
+     * @param string $key_value Raw key value (any format)
+     * @return string Encrypted key for database storage
+     */
+    public static function encrypt_general_key_for_storage($key_value)
+    {
+        if (empty($key_value)) {
+            throw new \Exception('Empty key value provided for encryption');
+        }
+        
+        // Use WordPress option values as additional entropy
+        $salt = get_option('ga4_time_based_salt', '');
+        $auth_key = get_option('ga4_time_based_auth_key', '');
+        
+        if (empty($salt) || empty($auth_key)) {
+            throw new \Exception('WordPress time-based encryption options not configured');
+        }
+        
+        // Create derived key from WordPress salts
+        $derived_key = hash_pbkdf2('sha256', $auth_key, $salt, 10000, 32, true);
+        
+        // Encrypt the key using AES-256-GCM
+        $encrypted_result = self::encrypt_aes_gcm($key_value, $derived_key);
+        
+        // Return base64 encoded encrypted data with IV and tag
+        return base64_encode(json_encode(array(
+            'data' => base64_encode($encrypted_result['encrypted']),
+            'iv' => base64_encode($encrypted_result['iv']),
+            'tag' => base64_encode($encrypted_result['tag'])
+        )));
+    }
+
+    /**
      * Securely store encryption key in WordPress options
      * 
      * @param string $key_hex Raw encryption key (64 hex characters)
@@ -448,7 +515,14 @@ class GA4_Encryption_Util
     public static function store_encrypted_key($key_hex, $option_name)
     {
         try {
-            $encrypted_key = self::encrypt_key_for_storage($key_hex);
+            // Check if this is a JWT encryption key (64 hex chars) or other key type
+            if (self::validate_encryption_key($key_hex)) {
+                // This is a JWT encryption key - use the strict validation
+                $encrypted_key = self::encrypt_key_for_storage($key_hex);
+            } else {
+                // This is another type of key (like API key) - use general encryption
+                $encrypted_key = self::encrypt_general_key_for_storage($key_hex);
+            }
             return update_option($option_name, $encrypted_key);
         } catch (\Exception $e) {
             error_log('GA4 Key Storage Error: ' . $e->getMessage());
@@ -470,13 +544,16 @@ class GA4_Encryption_Util
             return false;
         }
         
-        // If key is already in plaintext format (legacy), return as-is
-        if (self::validate_encryption_key($encrypted_key)) {
+        // Check if this looks like an encrypted value (base64 encoded JSON)
+        $is_encrypted_format = self::is_encrypted_format($encrypted_key);
+        
+        if ($is_encrypted_format) {
+            // This is encrypted data, decrypt it
+            return self::decrypt_key_from_storage($encrypted_key);
+        } else {
+            // This appears to be plaintext (legacy format), return as-is
             return $encrypted_key;
         }
-        
-        // Otherwise decrypt from storage
-        return self::decrypt_key_from_storage($encrypted_key);
     }
 
     /**
