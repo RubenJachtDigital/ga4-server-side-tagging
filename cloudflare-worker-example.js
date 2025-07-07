@@ -331,6 +331,36 @@ function hexToBytes(hex) {
   return bytes;
 }
 
+/**
+ * =============================================================================
+ * API KEY JWT UTILITIES
+ * =============================================================================
+ */
+
+/**
+ * Verify and decrypt JWT encrypted API key using static encryption key
+ * @param {string} jwtToken - JWT token to verify
+ * @return {Promise<string|null>} Decrypted API key or null on failure
+ */
+async function verifyJWTApiKey(jwtToken) {
+  if (!ENCRYPTION_KEY) {
+    throw new Error('ENCRYPTION_KEY not configured for JWT decryption');
+  }
+  
+  try {
+    // Use the static encryption key to decrypt the JWT token
+    const decryptedData = await verifyJWTToken(jwtToken, ENCRYPTION_KEY);
+    
+    // The decrypted data should be the plain API key string
+    return decryptedData;
+  } catch (error) {
+    if (DEBUG_MODE) {
+      console.log('JWT API key verification failed with static encryption key:', error.message);
+    }
+    throw new Error('JWT API key verification failed: ' + error.message);
+  }
+}
+
 
 /**
  * =============================================================================
@@ -1078,6 +1108,19 @@ async function detectAndDecodeApiKey(apiKey) {
   
   // 1. Check if it's a JWT token (3 parts separated by dots)
   if (apiKey.includes('.') && apiKey.split('.').length === 3) {
+    // 1a. First try JWT API key decryption using static encryption key
+    try {
+      const jwtDecryptedApiKey = await verifyJWTApiKey(apiKey);
+      if (jwtDecryptedApiKey) {
+        return { key: jwtDecryptedApiKey, format: 'JWT (Static Key)' };
+      }
+    } catch (jwtError) {
+      if (DEBUG_MODE) {
+        console.log("JWT API key decryption failed:", jwtError.message);
+      }
+    }
+    
+    // 1b. Fall back to regular JWT decryption
     if (JWT_ENCRYPTION_ENABLED && ENCRYPTION_KEY) {
       try {
         const decryptedKey = await decrypt(apiKey, ENCRYPTION_KEY);

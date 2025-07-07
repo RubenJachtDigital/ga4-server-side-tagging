@@ -715,9 +715,26 @@ class GA4_Server_Side_Tagging_Endpoint {
             if ( ! empty( $cloudflare_url ) && strpos( $cloudflare_url, 'https://' ) !== 0 ) {
                 return array( 'success' => false, 'error' => 'Cloudflare Worker URL must use HTTPS protocol for security' );
             }
+            // Encrypt API key if encryption is enabled
+            $auth_header_value = $worker_api_key;
+            if ( $encryption_enabled && !empty( $encryption_key ) ) {
+                try {
+                    // Use static encryption key for API key encryption
+                    $encrypted_api_key = GA4_Encryption_Util::encrypt( $worker_api_key, $encryption_key );
+                    if ( $encrypted_api_key !== false ) {
+                        $auth_header_value = $encrypted_api_key;
+                        
+                        $this->logger->info( 'API key encrypted with static JWT for Cloudflare transmission' );
+                    }
+                } catch ( \Exception $e ) {
+                    $this->logger->warning( 'API key encryption failed, using plain text: ' . $e->getMessage() );
+                    // Continue with plain text API key as fallback
+                }
+            }
+            
             $headers = array(
                 'Content-Type' => 'application/json',
-                'Authorization' => 'Bearer ' . $worker_api_key
+                'Authorization' => 'Bearer ' . $auth_header_value
             );
 
             // Forward Origin, Referer, and User-Agent headers from the original request to Cloudflare Worker
