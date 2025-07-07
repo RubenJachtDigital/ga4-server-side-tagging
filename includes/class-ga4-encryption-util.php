@@ -355,4 +355,244 @@ class GA4_Encryption_Util
     {
         return !empty($key_hex) && strlen($key_hex) === 64 && ctype_xdigit($key_hex);
     }
+
+    /**
+     * Encrypt encryption key for database storage using WordPress salts
+     * 
+     * @param string $key_hex Raw encryption key (64 hex characters)
+     * @return string Encrypted key for database storage
+     */
+    public static function encrypt_key_for_storage($key_hex)
+    {
+        if (!self::validate_encryption_key($key_hex)) {
+            throw new \Exception('Invalid encryption key format for storage');
+        }
+        
+        // Use WordPress option values as additional entropy
+        $salt = get_option('ga4_time_based_salt', '');
+        $auth_key = get_option('ga4_time_based_auth_key', '');
+        
+        if (empty($salt) || empty($auth_key)) {
+            throw new \Exception('WordPress time-based encryption options not configured');
+        }
+        
+        // Create derived key from WordPress salts
+        $derived_key = hash_pbkdf2('sha256', $auth_key, $salt, 10000, 32, true);
+        
+        // Encrypt the key using AES-256-GCM
+        $encrypted_result = self::encrypt_aes_gcm($key_hex, $derived_key);
+        
+        // Return base64 encoded encrypted data with IV and tag
+        return base64_encode(json_encode(array(
+            'data' => base64_encode($encrypted_result['encrypted']),
+            'iv' => base64_encode($encrypted_result['iv']),
+            'tag' => base64_encode($encrypted_result['tag'])
+        )));
+    }
+
+    /**
+     * Decrypt encryption key from database storage using WordPress salts
+     * 
+     * @param string $encrypted_key Encrypted key from database
+     * @return string|false Decrypted key (64 hex characters) or false on failure
+     */
+    public static function decrypt_key_from_storage($encrypted_key)
+    {
+        try {
+            // Use WordPress option values as additional entropy
+            $salt = get_option('ga4_time_based_salt', '');
+            $auth_key = get_option('ga4_time_based_auth_key', '');
+            
+            if (empty($salt) || empty($auth_key)) {
+                throw new \Exception('WordPress time-based encryption options not configured');
+            }
+            
+            // Create derived key from WordPress salts
+            $derived_key = hash_pbkdf2('sha256', $auth_key, $salt, 10000, 32, true);
+            
+            // Decode the encrypted data
+            $encrypted_data = json_decode(base64_decode($encrypted_key), true);
+            
+            if (!$encrypted_data || !isset($encrypted_data['data'], $encrypted_data['iv'], $encrypted_data['tag'])) {
+                throw new \Exception('Invalid encrypted key format');
+            }
+            
+            // Decrypt the key using AES-256-GCM
+            $decrypted_key = self::decrypt_aes_gcm(
+                base64_decode($encrypted_data['data']),
+                base64_decode($encrypted_data['iv']),
+                base64_decode($encrypted_data['tag']),
+                $derived_key
+            );
+            
+            // Validate decrypted key format
+            if (!self::validate_encryption_key($decrypted_key)) {
+                throw new \Exception('Decrypted key format validation failed');
+            }
+            
+            return $decrypted_key;
+            
+        } catch (\Exception $e) {
+            error_log('GA4 Key Decryption Error: ' . $e->getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Securely store encryption key in WordPress options
+     * 
+     * @param string $key_hex Raw encryption key (64 hex characters)
+     * @param string $option_name WordPress option name
+     * @return bool True on success, false on failure
+     */
+    public static function store_encrypted_key($key_hex, $option_name)
+    {
+        try {
+            $encrypted_key = self::encrypt_key_for_storage($key_hex);
+            return update_option($option_name, $encrypted_key);
+        } catch (\Exception $e) {
+            error_log('GA4 Key Storage Error: ' . $e->getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Securely retrieve encryption key from WordPress options
+     * 
+     * @param string $option_name WordPress option name
+     * @return string|false Decrypted key or false on failure
+     */
+    public static function retrieve_encrypted_key($option_name)
+    {
+        $encrypted_key = get_option($option_name, '');
+        
+        if (empty($encrypted_key)) {
+            return false;
+        }
+        
+        // If key is already in plaintext format (legacy), return as-is
+        if (self::validate_encryption_key($encrypted_key)) {
+            return $encrypted_key;
+        }
+        
+        // Otherwise decrypt from storage
+        return self::decrypt_key_from_storage($encrypted_key);
+    }
+
+    /**
+     * Generate time-based key for client-server encryption (5-minute slots)
+     * Same function used on both client and server side
+     * 
+     * @return string 64-character hex key
+     */
+    public static function generate_time_based_key()
+    {
+        // Get current 5-minute slot
+        $five_minute_slot = floor(time() / 300) * 300;
+        
+        // Use self-generating values (same as JavaScript)
+        $site_url = self::normalize_site_url();
+        $auth_key = 'ga4_time_based_auth_2024'; // Fixed auth key (same as JS)
+        $salt = 'ga4_time_based_salt_2024'; // Fixed salt (same as JS)
+        
+        // Create deterministic key from time slot and site-specific data
+        $key_material = $auth_key . $site_url . $five_minute_slot . $salt;
+        $temp_key = hash('sha256', $key_material, true);
+        
+        return bin2hex($temp_key);
+    }
+
+    /**
+     * Normalize site URL to match JavaScript window.location.origin format
+     * 
+     * @return string Normalized site URL without trailing slash
+     */
+    private static function normalize_site_url()
+    {
+        $site_url = get_site_url();
+        
+        // Remove trailing slash to match JavaScript behavior
+        $site_url = rtrim($site_url, '/');
+        
+        return $site_url;
+    }
+
+    /**
+     * Create time-based JWT token for client-server communication
+     * 
+     * @param array $payload Data to encrypt
+     * @return string JWT token
+     */
+    public static function create_time_based_jwt($payload)
+    {
+        $time_based_key = self::generate_time_based_key();
+        $json_payload = wp_json_encode($payload);
+        
+        return self::create_jwt_token($json_payload, hex2bin($time_based_key));
+    }
+
+    /**
+     * Verify and decrypt time-based JWT token with clock tolerance
+     * 
+     * @param string $jwt_token JWT token to verify
+     * @return array|false Decrypted payload or false on failure
+     */
+    public static function verify_time_based_jwt($jwt_token)
+    {
+        // Try current time slot first
+        try {
+            $time_based_key = self::generate_time_based_key();
+            $decrypted_json = self::verify_jwt_token($jwt_token, hex2bin($time_based_key));
+            
+            $decrypted_data = json_decode($decrypted_json, true);
+            
+            if (json_last_error() !== JSON_ERROR_NONE) {
+                throw new \Exception('Failed to parse decrypted JSON');
+            }
+            
+            return $decrypted_data;
+            
+        } catch (\Exception $e) {
+            // If current slot fails, try previous slot (for clock skew tolerance)
+            try {
+                error_log('GA4 Time-based JWT: Current slot failed, trying previous slot. Error: ' . $e->getMessage());
+                
+                $previous_slot_key = self::generate_time_based_key_for_slot(floor(time() / 300) * 300 - 300);
+                $decrypted_json = self::verify_jwt_token($jwt_token, hex2bin($previous_slot_key));
+                
+                $decrypted_data = json_decode($decrypted_json, true);
+                
+                if (json_last_error() !== JSON_ERROR_NONE) {
+                    throw new \Exception('Failed to parse decrypted JSON from previous slot');
+                }
+                
+                error_log('GA4 Time-based JWT: Successfully decrypted with previous slot');
+                return $decrypted_data;
+                
+            } catch (\Exception $e2) {
+                error_log('GA4 Time-based JWT Verification Error (both slots failed): Current=' . $e->getMessage() . ', Previous=' . $e2->getMessage());
+                return false;
+            }
+        }
+    }
+
+    /**
+     * Generate time-based key for a specific time slot
+     * 
+     * @param int $time_slot Specific 5-minute time slot
+     * @return string 64-character hex key
+     */
+    private static function generate_time_based_key_for_slot($time_slot)
+    {
+        // Use self-generating values (same as JavaScript)
+        $site_url = self::normalize_site_url();
+        $auth_key = 'ga4_time_based_auth_2024'; // Fixed auth key (same as JS)
+        $salt = 'ga4_time_based_salt_2024'; // Fixed salt (same as JS)
+        
+        // Create deterministic key from specific time slot and site-specific data
+        $key_material = $auth_key . $site_url . $time_slot . $salt;
+        $temp_key = hash('sha256', $key_material, true);
+        
+        return bin2hex($temp_key);
+    }
 }

@@ -1324,40 +1324,60 @@ async function handleRequest(request, env) {
 
     // Check if the request uses JWT encryption
     const isJWTEncrypted = request.headers.get('X-Encrypted') === 'true';
-    console.log("Is JWT encrypted: " + isJWTEncrypted);
-    if (isJWTEncrypted && JWT_ENCRYPTION_ENABLED && ENCRYPTION_KEY) {
-      if (DEBUG_MODE) {
-        console.log("🔒 Processing JWT encrypted request");
-      }
-      
-      try {
-        if (payload.jwt) {
-          const decryptedData = await decrypt(payload.jwt, ENCRYPTION_KEY);
-          payload = JSON.parse(decryptedData);
-          
-          if (DEBUG_MODE) {
-            console.log("🔓 JWT request successfully verified and decrypted");
-            console.log("Decrypted payload:", JSON.stringify(payload));
-          }
-        } else {
-          console.warn("Request marked as JWT encrypted but no JWT token found");
+    if (DEBUG_MODE) {
+      console.log("🔍 Encryption Debug Info:");
+      console.log("- X-Encrypted header:", isJWTEncrypted);
+      console.log("- JWT_ENCRYPTION_ENABLED:", JWT_ENCRYPTION_ENABLED);
+      console.log("- ENCRYPTION_KEY exists:", !!ENCRYPTION_KEY);
+      console.log("- ENCRYPTION_KEY length:", ENCRYPTION_KEY ? ENCRYPTION_KEY.length : 0);
+      console.log("- Payload keys:", Object.keys(payload));
+      console.log("- Has jwt field:", !!payload.jwt);
+    }
+    
+    if (isJWTEncrypted) {
+      if (!JWT_ENCRYPTION_ENABLED) {
+        console.warn("❌ X-Encrypted header present but JWT_ENCRYPTION_ENABLED is false");
+      } else if (!ENCRYPTION_KEY) {
+        console.warn("❌ X-Encrypted header present but ENCRYPTION_KEY is not set");
+      } else {
+        if (DEBUG_MODE) {
+          console.log("🔒 Processing JWT encrypted request");
         }
-      } catch (decryptError) {
-        console.error("Failed to verify JWT token:", decryptError);
-        return new Response(
-          JSON.stringify({
-            success: false,
-            error: "JWT verification failed",
-            details: decryptError.message
-          }),
-          {
-            status: 400,
-            headers: {
-              "Content-Type": "application/json",
-              ...getCORSHeaders(request),
-            },
+        
+        try {
+          // Check for legacy JWT format first
+          if (payload.jwt) {
+            const decryptedData = await decrypt(payload.jwt, ENCRYPTION_KEY);
+            payload = JSON.parse(decryptedData);
+            
+            if (DEBUG_MODE) {
+              console.log("🔓 JWT request successfully verified and decrypted");
+              console.log("Decrypted payload:", JSON.stringify(payload));
+            }
+          } else {
+            console.warn("❌ Request marked as JWT encrypted but no JWT token found");
+            if (DEBUG_MODE) {
+              console.log("Available payload fields:", Object.keys(payload));
+              console.log("Full payload:", JSON.stringify(payload));
+            }
           }
-        );
+        } catch (decryptError) {
+          console.error("❌ Failed to verify JWT token:", decryptError);
+          return new Response(
+            JSON.stringify({
+              success: false,
+              error: "JWT verification failed",
+              details: decryptError.message
+            }),
+            {
+              status: 400,
+              headers: {
+                "Content-Type": "application/json",
+                ...getCORSHeaders(request),
+              },
+            }
+          );
+        }
       }
     }
 
@@ -1468,8 +1488,8 @@ async function handleGA4Event(payload, request) {
     console.log("Consent status:", JSON.stringify(consentInfo));
   }
 
-  // Validate required parameters
-  if (!processedData.name) {
+  // Validate required parameters - check for both 'name' and 'event_name' fields
+  if (!processedData.name && !processedData.event_name) {
     return new Response(JSON.stringify({ "error": "Missing event name" }), {
       status: 400,
       headers: {
@@ -1477,6 +1497,11 @@ async function handleGA4Event(payload, request) {
         ...getCORSHeaders(request),
       },
     });
+  }
+  
+  // Normalize event name field - use 'name' field consistently
+  if (!processedData.name && processedData.event_name) {
+    processedData.name = processedData.event_name;
   }
 
   // Extract location data from params before preparing GA4 payload

@@ -123,6 +123,7 @@ class GA4_Server_Side_Tagging_Public
             'currency' => function_exists('get_woocommerce_currency') ? get_woocommerce_currency() : 'EUR',
             'siteName' => get_bloginfo('name'),
             'encryptionEnabled' => get_option('ga4_jwt_encryption_enabled', false),
+            
 
             // GDPR Consent settings (enhanced)
             'consentSettings' => array(
@@ -792,6 +793,31 @@ class GA4_Server_Side_Tagging_Public
         return array_filter($product_data, function ($value) {
             return $value !== '' && $value !== null && $value !== 0;
         });
+    }
+
+    /**
+     * Check if time-based encryption is available (WordPress salts configured)
+     * 
+     * @return bool True if time-based encryption is available
+     */
+    private function is_time_based_encryption_available()
+    {
+        try {
+            // Check if WordPress option values are configured
+            $auth_key = get_option('ga4_time_based_auth_key', '');
+            $salt = get_option('ga4_time_based_salt', '');
+            $auth_key_available = !empty($auth_key);
+            $salt_available = !empty($salt);
+            
+            // Also check if user has explicitly enabled it (default to false for safety)
+            $user_enabled = get_option('ga4_time_based_encryption_enabled', false);
+            
+            return $auth_key_available && $salt_available && $user_enabled;
+        } catch (\Exception $e) {
+            // Log the error and return false as safe default
+            error_log('GA4 Time-based encryption check failed: ' . $e->getMessage());
+            return false;
+        }
     }
 
 }

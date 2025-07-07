@@ -529,7 +529,7 @@ class GA4_Server_Side_Tagging_Admin
 
         // JWT Encryption settings
         $jwt_encryption_enabled = get_option('ga4_jwt_encryption_enabled', false);
-        $jwt_encryption_key = get_option('ga4_jwt_encryption_key', '');
+        $jwt_encryption_key = \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::retrieve_encrypted_key('ga4_jwt_encryption_key') ?: '';
         
         $yith_raq_form_id = get_option('ga4_yith_raq_form_id', '');
         $conversion_form_ids = get_option('ga4_conversion_form_ids', '');
@@ -633,7 +633,20 @@ class GA4_Server_Side_Tagging_Admin
             $encryption_key = sanitize_text_field(wp_unslash($_POST['ga4_jwt_encryption_key']));
             // Validate encryption key (should be 64 hex characters for 256-bit key)
             if (empty($encryption_key) || (strlen($encryption_key) === 64 && ctype_xdigit($encryption_key))) {
-                update_option('ga4_jwt_encryption_key', $encryption_key);
+                // Store encryption key encrypted in database
+                if (empty($encryption_key)) {
+                    update_option('ga4_jwt_encryption_key', '');
+                } else {
+                    $stored = \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::store_encrypted_key($encryption_key, 'ga4_jwt_encryption_key');
+                    if (!$stored) {
+                        add_settings_error(
+                            'ga4_server_side_tagging_settings',
+                            'encryption_key_storage_failed',
+                            'Failed to securely store encryption key. Please check your WordPress security salts.',
+                            'error'
+                        );
+                    }
+                }
             } else {
                 add_settings_error(
                     'ga4_server_side_tagging_settings',
@@ -642,6 +655,9 @@ class GA4_Server_Side_Tagging_Admin
                     'error'
                 );
             }
+        } else {
+            // Even if no new key is provided, ensure any existing plain text key gets encrypted
+            $this->ensure_encryption_key_is_encrypted();
         }
 
         if (isset($_POST['ga4_yith_raq_form_id'])) {
@@ -840,7 +856,7 @@ class GA4_Server_Side_Tagging_Admin
 
             // Handle JWT encryption if enabled
             $jwt_encryption_enabled = get_option('ga4_jwt_encryption_enabled', false);
-            $jwt_encryption_key = get_option('ga4_jwt_encryption_key', '');
+            $jwt_encryption_key = \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::retrieve_encrypted_key('ga4_jwt_encryption_key');
             $request_body = wp_json_encode($cloudflare_payload);
             
             if ($jwt_encryption_enabled && !empty($jwt_encryption_key)) {
@@ -1197,8 +1213,11 @@ class GA4_Server_Side_Tagging_Admin
             // Generate new encryption key (256-bit = 64 hex characters)
             $new_encryption_key = $this->generate_encryption_key();
             
-            // Save it to options
-            update_option('ga4_jwt_encryption_key', $new_encryption_key);
+            // Save it to options encrypted
+            $stored = \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::store_encrypted_key($new_encryption_key, 'ga4_jwt_encryption_key');
+            if (!$stored) {
+                throw new \Exception('Failed to securely store encryption key');
+            }
             
             // Return success response
             wp_send_json_success(array(
@@ -1207,6 +1226,41 @@ class GA4_Server_Side_Tagging_Admin
             ));
         } catch (\Exception $e) {
             wp_send_json_error(array('message' => 'Error generating encryption key: ' . $e->getMessage()));
+        }
+    }
+
+    /**
+     * Ensure any existing plain text encryption key gets encrypted
+     * This runs automatically on settings save to upgrade plain text keys
+     */
+    private function ensure_encryption_key_is_encrypted()
+    {
+        try {
+            // Get the raw option value (not through the utility which auto-decrypts)
+            $raw_key = get_option('ga4_jwt_encryption_key', '');
+            
+            if (empty($raw_key)) {
+                return; // No key to encrypt
+            }
+            
+            // Check if it's already encrypted (encrypted keys are base64 JSON structures)
+            if (!ctype_xdigit($raw_key) || strlen($raw_key) !== 64) {
+                return; // Not a plain text hex key, likely already encrypted or invalid
+            }
+            
+            // Validate it's a proper 64-character hex key
+            if (\GA4ServerSideTagging\Utilities\GA4_Encryption_Util::validate_encryption_key($raw_key)) {
+                // This is a plain text key, encrypt it
+                $stored = \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::store_encrypted_key($raw_key, 'ga4_jwt_encryption_key');
+                
+                if ($stored) {
+                    $this->logger->info('Encryption key automatically upgraded from plain text to encrypted storage');
+                } else {
+                    $this->logger->warning('Failed to automatically encrypt existing plain text encryption key');
+                }
+            }
+        } catch (\Exception $e) {
+            $this->logger->error('Error during automatic encryption key upgrade: ' . $e->getMessage());
         }
     }
 }

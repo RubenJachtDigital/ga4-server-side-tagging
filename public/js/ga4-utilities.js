@@ -2371,16 +2371,46 @@
 
         var headers = {
           "Content-Type": "application/json",
+          "Origin": window.location.origin,
+          "Referer": window.location.href
         };
 
         var requestBody = JSON.stringify(payload);
 
-        // Add nonce for WordPress REST API endpoints
+        // Add nonce for WordPress REST API endpoints and handle encryption
         if (config && config.apiEndpoint && endpoint.startsWith(config.apiEndpoint)) {
           headers["X-WP-Nonce"] = config.nonce || "";
           
-          // Note: Encryption is handled server-side by WordPress when forwarding to Cloudflare Worker
-          // Client sends unencrypted data to WordPress REST API for security
+          // Check if this is the send-event endpoint and encryption is enabled
+          if (endpoint.includes('/send-event') && config.encryptionEnabled) {
+            try {
+              // Generate time-based JWT token using site URL and current time
+              const timeBasedJWT = await GA4Utils.encryption.createSelfGeneratedTimeBasedJWT(payload);
+              
+              requestBody = JSON.stringify({
+                time_jwt: timeBasedJWT
+              });
+              
+              // Add encryption header to inform WordPress endpoint
+              headers["X-Encrypted"] = "true";
+              
+              GA4Utils.helpers.log(
+                "🔐 Payload encrypted with self-generated time-based JWT",
+                { jwt_length: timeBasedJWT.length },
+                config,
+                logPrefix
+              );
+              
+            } catch (encryptError) {
+              GA4Utils.helpers.log(
+                "⚠️ Time-based JWT encryption failed, sending unencrypted",
+                encryptError,
+                config,
+                logPrefix
+              );
+              // Continue with unencrypted payload if encryption fails
+            }
+          }
         }
 
 
@@ -3624,6 +3654,120 @@
         };
       },
 
+      /**
+       * Generate time-based key for client-server encryption (5-minute slots)
+       * Same function used on both client and server side
+       * @param {string} siteUrl - Site URL for key derivation
+       * @param {string} authKey - WordPress option value for auth key
+       * @param {string} salt - WordPress option value for salt
+       * @returns {Promise<string>} - 64-character hex key
+       */
+      generateTimeBasedKey: async function(siteUrl, authKey, salt) {
+        // Get current 5-minute slot (same logic as PHP)
+        const fiveMinuteSlot = Math.floor(Date.now() / 1000 / 300) * 300;
+        
+        // Create deterministic key from time slot and site-specific data
+        const keyMaterial = authKey + siteUrl + fiveMinuteSlot + salt;
+        
+        // Use SHA-256 to generate the key (same as PHP)
+        const hashBuffer = await this.sha256(keyMaterial);
+        return this.arrayBufferToHex(hashBuffer);
+      },
+
+      /**
+       * Create time-based JWT token for client-server communication
+       * @param {Object} payload - Data to encrypt
+       * @param {string} siteUrl - Site URL for key derivation
+       * @param {string} authKey - WordPress option value for auth key
+       * @param {string} salt - WordPress option value for salt
+       * @returns {Promise<string>} - JWT token
+       */
+      createTimeBasedJWT: async function(payload, siteUrl, authKey, salt) {
+        const timeBasedKey = await this.generateTimeBasedKey(siteUrl, authKey, salt);
+        const jsonPayload = JSON.stringify(payload);
+        
+        return await this.createJWTToken(jsonPayload, timeBasedKey);
+      },
+
+      /**
+       * Normalize site URL to match PHP get_site_url() format
+       * @returns {string} - Normalized site URL without trailing slash
+       */
+      normalizeSiteUrl: function() {
+        let siteUrl = window.location.origin;
+        
+        // Remove trailing slash to match PHP get_site_url() behavior
+        if (siteUrl.endsWith('/')) {
+          siteUrl = siteUrl.slice(0, -1);
+        }
+        
+        return siteUrl;
+      },
+
+      /**
+       * Generate self-contained time-based key using window location and current time
+       * Same algorithm used on both client and server
+       * @returns {Promise<string>} - 64-character hex key
+       */
+      generateSelfGeneratedTimeBasedKey: async function() {
+        // Get current 5-minute slot (same logic as PHP)
+        const fiveMinuteSlot = Math.floor(Date.now() / 1000 / 300) * 300;
+        
+        // Use normalized site URL and fixed values
+        const siteUrl = this.normalizeSiteUrl();
+        const authKey = 'ga4_time_based_auth_2024'; // Fixed auth key
+        const salt = 'ga4_time_based_salt_2024'; // Fixed salt
+        
+        // Create deterministic key from time slot and site-specific data
+        const keyMaterial = authKey + siteUrl + fiveMinuteSlot + salt;
+        
+        // Use SHA-256 to generate the key (same as PHP)
+        const hashBuffer = await this.sha256(keyMaterial);
+        return this.arrayBufferToHex(hashBuffer);
+      },
+
+      /**
+       * Create self-generated time-based JWT token for client-server communication
+       * @param {Object} payload - Data to encrypt
+       * @returns {Promise<string>} - JWT token
+       */
+      createSelfGeneratedTimeBasedJWT: async function(payload) {
+        const timeBasedKey = await this.generateSelfGeneratedTimeBasedKey();
+        const jsonPayload = JSON.stringify(payload);
+        
+        return await this.createJWTToken(jsonPayload, timeBasedKey);
+      },
+
+      /**
+       * SHA-256 hash function
+       * @param {string} message - Message to hash
+       * @returns {Promise<ArrayBuffer>} - Hash result
+       */
+      sha256: async function(message) {
+        const msgBuffer = new TextEncoder().encode(message);
+        const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
+        return hashBuffer;
+      },
+
+      /**
+       * Convert ArrayBuffer to hex string
+       * @param {ArrayBuffer} buffer - Buffer to convert
+       * @returns {string} - Hex string
+       */
+      arrayBufferToHex: function(buffer) {
+        return Array.from(new Uint8Array(buffer))
+          .map(b => b.toString(16).padStart(2, '0'))
+          .join('');
+      },
+
+      /**
+       * Base64 encode (standard, not URL-safe)
+       * @param {Uint8Array} data - Data to encode
+       * @returns {string} - Base64 encoded string
+       */
+      base64Encode: function(data) {
+        return btoa(String.fromCharCode(...data));
+      }
 
     },
 

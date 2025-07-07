@@ -151,12 +151,15 @@ class GA4_Server_Side_Tagging_Endpoint {
             return true; // Missing or suspiciously short user agent
         }
         
-        // Comprehensive bot patterns based on client-side detection
+        // Comprehensive bot patterns (synchronized with Cloudflare Worker)
         $bot_patterns = array(
+            // Common bots
             '/bot\b/i',
             '/crawl/i',
             '/spider/i',
             '/scraper/i',
+            
+            // Search engine bots - ENHANCED
             '/googlebot/i',
             '/bingbot/i',
             '/yahoo/i',
@@ -164,27 +167,50 @@ class GA4_Server_Side_Tagging_Endpoint {
             '/baiduspider/i',
             '/yandexbot/i',
             '/sogou/i',
+            '/applebot/i', // Added - Apple's web crawler
+            
+            // Social media bots
             '/facebookexternalhit/i',
             '/twitterbot/i',
             '/linkedinbot/i',
             '/whatsapp/i',
             '/telegrambot/i',
+            '/discordbot/i', // Added
+            
+            // SEO/monitoring tools
             '/semrushbot/i',
             '/ahrefsbot/i',
             '/mj12bot/i',
             '/dotbot/i',
             '/screaming frog/i',
             '/seobility/i',
+            '/serpstatbot/i', // Added
+            '/ubersuggest/i', // Added
+            '/sistrix/i', // Added
+            
+            // Headless browsers and automation
             '/headlesschrome/i',
             '/phantomjs/i',
             '/slimerjs/i',
             '/htmlunit/i',
             '/selenium/i',
+            '/webdriver/i', // Added
+            '/puppeteer/i', // Added
+            '/playwright/i', // Added
+            '/cypress/i', // Added
+            
+            // Monitoring services
             '/pingdom/i',
             '/uptimerobot/i',
             '/statuscake/i',
             '/site24x7/i',
             '/newrelic/i',
+            '/gtmetrix/i', // Added
+            '/pagespeed/i',
+            '/lighthouse/i', // Added
+            '/chrome-lighthouse/i',
+            
+            // Generic automation and tools
             '/python/i',
             '/requests/i',
             '/curl/i',
@@ -192,16 +218,32 @@ class GA4_Server_Side_Tagging_Endpoint {
             '/apache-httpclient/i',
             '/java\//i',
             '/okhttp/i',
-            '/^mozilla\/5\.0$/i',
-            '/compatible;\s*$/i',
-            '/chrome-lighthouse/i',
-            '/pagespeed/i',
-            '/prerender/i',
             '/node\.js/i',
             '/go-http-client/i',
+            '/http_request/i', // Added
             '/ruby/i',
             '/perl/i',
-            '/libwww/i'
+            '/libwww/i',
+            
+            // AI/ML crawlers
+            '/gptbot/i', // Added
+            '/chatgpt/i', // Added
+            '/claudebot/i', // Added
+            '/anthropic/i', // Added
+            '/openai/i', // Added
+            '/perplexity/i', // Added
+            '/cohere/i', // Added
+            
+            // Academic and research bots
+            '/researchbot/i', // Added
+            '/academicbot/i', // Added
+            '/university/i', // Added
+            
+            // Suspicious patterns
+            '/^mozilla\/5\.0$/i', // Just "Mozilla/5.0"
+            '/compatible;?\s*$/i', // Ends with just "compatible"
+            '/^\s*$/i', // Empty or whitespace only
+            '/prerender/i'
         );
         
         foreach ( $bot_patterns as $pattern ) {
@@ -311,31 +353,44 @@ class GA4_Server_Side_Tagging_Endpoint {
      */
     public function send_event( $request ) {
         try {
-            // Handle encrypted request if present
+            // Handle encrypted request if present (now supports temporary key encryption)
             $request_data = $this->handle_encrypted_request( $request );
             
-            if ( empty( $request_data ) || !isset( $request_data['event_name'] ) ) {
-                return new \WP_REST_Response( array( 'error' => 'Invalid event data' ), 400 );
+            // Validate required fields without modifying the payload
+            if ( empty( $request_data ) ) {
+                return new \WP_REST_Response( array( 'error' => 'Invalid request data' ), 400 );
+            }
+            
+            // Check for event name (accept both 'name' and 'event_name' fields)
+            if ( empty( $request_data['name'] ) && empty( $request_data['event_name'] ) ) {
+                return new \WP_REST_Response( array( 'error' => 'Missing required field: event name' ), 400 );
+            }
+            
+            // Check for required client_id and session_id in params
+            $params = $request_data['params'] ?? array();
+            if ( empty( $params['client_id'] ) ) {
+                return new \WP_REST_Response( array( 'error' => 'Missing required field: client_id' ), 400 );
+            }
+            
+            if ( empty( $params['session_id'] ) ) {
+                return new \WP_REST_Response( array( 'error' => 'Missing required field: session_id' ), 400 );
             }
             
             // Get configuration
             $cloudflare_url = get_option( 'ga4_cloudflare_worker_url', '' );
             $worker_api_key = get_option( 'ga4_worker_api_key', '' );
             $encryption_enabled = (bool) get_option( 'ga4_jwt_encryption_enabled', false );
-            $encryption_key = get_option( 'ga4_jwt_encryption_key', '' );
+            $encryption_key = \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::retrieve_encrypted_key( 'ga4_jwt_encryption_key' ) ?: '';
             
             if ( empty( $cloudflare_url ) || empty( $worker_api_key ) ) {
                 return new \WP_REST_Response( array( 'error' => 'Configuration incomplete' ), 500 );
             }
             
-            // Prepare event payload
-            $event_payload = array(
-                'name' => $request_data['event_name'],
-                'params' => $request_data['params'] ?? array()
-            );
+            // Forward the complete original payload to Cloudflare (no modifications)
+            $event_payload = $request_data;
             
             // Send to Cloudflare Worker
-            $result = $this->forward_to_cloudflare( $event_payload, $cloudflare_url, $worker_api_key, $encryption_enabled, $encryption_key );
+            $result = $this->forward_to_cloudflare( $event_payload, $cloudflare_url, $worker_api_key, $encryption_enabled, $encryption_key, $request );
             
             if ( $result['success'] ) {
                 // Include worker response in the response back to client
@@ -354,6 +409,7 @@ class GA4_Server_Side_Tagging_Endpoint {
             return new \WP_REST_Response( array( 'error' => 'Processing error' ), 500 );
         }
     }
+
 
     /**
      * Log security failures to the main log file.
@@ -514,18 +570,42 @@ class GA4_Server_Side_Tagging_Endpoint {
      * @return array|null Decrypted request data or original data
      */
     private function handle_encrypted_request( $request ) {
-        // Check if encryption is enabled and request is encrypted
+        $request_body = $request->get_json_params();
+        
+        
+        // Check for time-based JWT encryption first
+        if ( isset( $request_body['time_jwt'] ) && !empty( $request_body['time_jwt'] ) ) {
+            // This is a time-based JWT encrypted request
+            try {
+                $decrypted_data = \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::verify_time_based_jwt( $request_body['time_jwt'] );
+                if ( $decrypted_data === false ) {
+                    throw new \Exception( 'Time-based JWT verification failed' );
+                }
+                
+                $this->logger->info( 'Time-based JWT request verified successfully', array(
+                    'ip' => $this->get_client_ip( $request )
+                ) );
+                
+                return $decrypted_data;
+            } catch ( \Exception $e ) {
+                $this->logger->error( 'Failed to verify time-based JWT request: ' . $e->getMessage(), array(
+                    'ip' => $this->get_client_ip( $request )
+                ) );
+                throw new \Exception( 'Failed to verify time-based JWT request: ' . $e->getMessage() );
+            }
+        }
+        
+        // Fall back to legacy JWT encryption
         $encryption_enabled = get_option( 'ga4_jwt_encryption_enabled', false );
         $is_encrypted = GA4_Encryption_Util::is_encrypted_request( $request );
         
         if ( ! $encryption_enabled || ! $is_encrypted ) {
             // Return original request body if not encrypted
-            return $request->get_json_params();
+            return $request_body;
         }
         
         // Use the configured encryption key from backend settings
-        $encryption_key = get_option( 'ga4_jwt_encryption_key', '' );
-        $request_body = $request->get_json_params();
+        $encryption_key = \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::retrieve_encrypted_key( 'ga4_jwt_encryption_key' ) ?: '';
         
         if ( empty( $encryption_key ) ) {
             throw new \Exception( 'Encryption is enabled but no encryption key is configured' );
@@ -626,14 +706,38 @@ class GA4_Server_Side_Tagging_Endpoint {
      * @param    string    $worker_api_key     The Worker API key.
      * @param    bool      $encryption_enabled Whether encryption is enabled.
      * @param    string    $encryption_key     The encryption key.
+     * @param    \WP_REST_Request $original_request The original client request.
      * @return   array                         Success/failure result.
      */
-    private function forward_to_cloudflare( $event_payload, $cloudflare_url, $worker_api_key, $encryption_enabled, $encryption_key ) {
+    private function forward_to_cloudflare( $event_payload, $cloudflare_url, $worker_api_key, $encryption_enabled, $encryption_key, $original_request = null ) {
         try {
+            // Ensure Cloudflare Worker URL uses HTTPS
+            if ( ! empty( $cloudflare_url ) && strpos( $cloudflare_url, 'https://' ) !== 0 ) {
+                return array( 'success' => false, 'error' => 'Cloudflare Worker URL must use HTTPS protocol for security' );
+            }
             $headers = array(
                 'Content-Type' => 'application/json',
                 'Authorization' => 'Bearer ' . $worker_api_key
             );
+
+            // Forward Origin, Referer, and User-Agent headers from the original request to Cloudflare Worker
+            if ( $original_request ) {
+                $origin = $original_request->get_header( 'origin' );
+                $referer = $original_request->get_header( 'referer' );
+                $user_agent = $original_request->get_header( 'user-agent' );
+                
+                if ( $origin ) {
+                    $headers['Origin'] = $origin;
+                }
+                
+                if ( $referer ) {
+                    $headers['Referer'] = $referer;
+                }
+                
+                if ( $user_agent ) {
+                    $headers['User-Agent'] = $user_agent;
+                }
+            }
 
             $body = $event_payload;
 
@@ -643,6 +747,9 @@ class GA4_Server_Side_Tagging_Endpoint {
                     // Use the configured encryption key from backend settings
                     $encrypted_payload = GA4_Encryption_Util::create_encrypted_response( $body, $encryption_key );
                     $body = $encrypted_payload;
+                    
+                    // Add encryption header for Cloudflare Worker
+                    $headers['X-Encrypted'] = 'true';
                 } catch ( \Exception $e ) {
                     $this->logger->error( 'Event encryption failed: ' . $e->getMessage() );
                     // Continue with unencrypted payload as fallback
@@ -667,7 +774,33 @@ class GA4_Server_Side_Tagging_Endpoint {
                 // Parse response body if it's JSON
                 $parsed_response = json_decode( $response_body, true );
                 if ( json_last_error() === JSON_ERROR_NONE ) {
-                    return array( 'success' => true, 'worker_response' => $parsed_response );
+                    // Check if response is encrypted (JWT format)
+                    if ( isset( $parsed_response['jwt'] ) && $encryption_enabled && !empty( $encryption_key ) ) {
+                        try {
+                            // Decrypt the JWT response from Cloudflare Worker
+                            $decrypted_response = GA4_Encryption_Util::decrypt( $parsed_response['jwt'], $encryption_key );
+                            if ( $decrypted_response !== false ) {
+                                // Parse the decrypted JSON
+                                $decrypted_data = json_decode( $decrypted_response, true );
+                                if ( json_last_error() === JSON_ERROR_NONE ) {
+                                    return array( 'success' => true, 'worker_response' => $decrypted_data );
+                                } else {
+                                    return array( 'success' => true, 'worker_response' => $decrypted_response );
+                                }
+                            } else {
+                                // Decryption failed, return original encrypted response
+                                $this->logger->warning( 'Failed to decrypt response from Cloudflare Worker' );
+                                return array( 'success' => true, 'worker_response' => $parsed_response );
+                            }
+                        } catch ( \Exception $e ) {
+                            // Decryption error, return original response
+                            $this->logger->error( 'Error decrypting Cloudflare response: ' . $e->getMessage() );
+                            return array( 'success' => true, 'worker_response' => $parsed_response );
+                        }
+                    } else {
+                        // Response is not encrypted or encryption not enabled
+                        return array( 'success' => true, 'worker_response' => $parsed_response );
+                    }
                 } else {
                     return array( 'success' => true, 'worker_response' => $response_body );
                 }
