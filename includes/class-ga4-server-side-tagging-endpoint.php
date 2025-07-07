@@ -353,6 +353,19 @@ class GA4_Server_Side_Tagging_Endpoint {
      */
     public function send_event( $request ) {
         try {
+            // Rate limiting check - 100 requests per minute per IP
+            $rate_limit_check = $this->check_rate_limit( $request );
+            if ( ! $rate_limit_check['allowed'] ) {
+                return new \WP_REST_Response( 
+                    array( 
+                        'error' => 'Rate limit exceeded', 
+                        'details' => 'Maximum 100 requests per minute allowed',
+                        'retry_after' => $rate_limit_check['retry_after']
+                    ), 
+                    429 
+                );
+            }
+            
             // Handle encrypted request if present (now supports temporary key encryption)
             $request_data = $this->handle_encrypted_request( $request );
             
@@ -828,6 +841,73 @@ class GA4_Server_Side_Tagging_Endpoint {
         } catch ( \Exception $e ) {
             return array( 'success' => false, 'error' => $e->getMessage() );
         }
+    }
+
+    /**
+     * Check rate limit for send-event endpoint (100 requests per minute per IP)
+     *
+     * @since    1.0.0
+     * @param    \WP_REST_Request    $request    The request object.
+     * @return   array                         Rate limit check result.
+     */
+    private function check_rate_limit( $request ) {
+        $client_ip = $this->get_client_ip( $request );
+        $current_time = time();
+        $rate_limit_window = 60; // 1 minute in seconds
+        $max_requests = 100; // Maximum requests per minute
+        
+        // Get rate limit data from transients (temporary storage)
+        $transient_key = 'ga4_rate_limit_' . md5( $client_ip );
+        $rate_data = get_transient( $transient_key );
+        
+        if ( $rate_data === false ) {
+            // First request from this IP in the current window
+            $rate_data = array(
+                'count' => 1,
+                'window_start' => $current_time,
+                'requests' => array( $current_time )
+            );
+            set_transient( $transient_key, $rate_data, $rate_limit_window );
+            return array( 'allowed' => true, 'remaining' => $max_requests - 1, 'retry_after' => 0 );
+        }
+        
+        // Clean up old requests outside the current window
+        $window_start = $current_time - $rate_limit_window;
+        $rate_data['requests'] = array_filter( $rate_data['requests'], function( $timestamp ) use ( $window_start ) {
+            return $timestamp > $window_start;
+        });
+        
+        // Update count based on cleaned requests
+        $rate_data['count'] = count( $rate_data['requests'] );
+        
+        // Check if rate limit exceeded
+        if ( $rate_data['count'] >= $max_requests ) {
+            // Calculate retry after time (seconds until oldest request expires)
+            $oldest_request = min( $rate_data['requests'] );
+            $retry_after = max( 0, $oldest_request + $rate_limit_window - $current_time );
+            
+            // Log rate limit violation
+            $this->logger->warning( 'Rate limit exceeded for IP: ' . $client_ip . ' (' . $rate_data['count'] . ' requests in last minute)' );
+            
+            return array( 
+                'allowed' => false, 
+                'remaining' => 0, 
+                'retry_after' => $retry_after 
+            );
+        }
+        
+        // Add current request to the list
+        $rate_data['requests'][] = $current_time;
+        $rate_data['count'] = count( $rate_data['requests'] );
+        
+        // Update transient with new data
+        set_transient( $transient_key, $rate_data, $rate_limit_window );
+        
+        return array( 
+            'allowed' => true, 
+            'remaining' => $max_requests - $rate_data['count'], 
+            'retry_after' => 0 
+        );
     }
 
 } 
