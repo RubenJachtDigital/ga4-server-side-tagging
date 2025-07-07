@@ -385,9 +385,6 @@ function processGDPRConsent(payload) {
   
   if (DEBUG_MODE) {
     console.log("Processing GDPR consent:", JSON.stringify(processedConsent));
-    if (Object.keys(consent).length === 0) {
-      console.log("No consent data provided - defaulting to DENIED values for GDPR compliance");
-    }
   }
 
   // Apply consent-based data filtering based on processed consent
@@ -1367,16 +1364,6 @@ async function handleRequest(request, env) {
 
     // Check if the request uses JWT encryption
     const isJWTEncrypted = request.headers.get('X-Encrypted') === 'true';
-    if (DEBUG_MODE) {
-      console.log("🔍 Encryption Debug Info:");
-      console.log("- X-Encrypted header:", isJWTEncrypted);
-      console.log("- JWT_ENCRYPTION_ENABLED:", JWT_ENCRYPTION_ENABLED);
-      console.log("- ENCRYPTION_KEY exists:", !!ENCRYPTION_KEY);
-      console.log("- ENCRYPTION_KEY length:", ENCRYPTION_KEY ? ENCRYPTION_KEY.length : 0);
-      console.log("- Payload keys:", Object.keys(payload));
-      console.log("- Has jwt field:", !!payload.jwt);
-    }
-    
     if (isJWTEncrypted) {
       if (!JWT_ENCRYPTION_ENABLED) {
         console.warn("❌ X-Encrypted header present but JWT_ENCRYPTION_ENABLED is false");
@@ -1422,10 +1409,6 @@ async function handleRequest(request, env) {
           );
         }
       }
-    }
-
-    if (DEBUG_MODE) {
-      console.log("Final payload (after decryption if applicable):", JSON.stringify(payload));
     }
 
     // CONSENT PROCESSING - Process consent data or default to DENIED
@@ -1523,9 +1506,7 @@ async function handleGA4Event(payload, request) {
   // Process the event data
   const processedData = processEventData(payload, request);
   // Log the incoming event data
-  if (DEBUG_MODE) {
-    console.log("Received GA4 event:", JSON.stringify(payload));
-    
+  if (DEBUG_MODE) {    
     // Log consent status
     const consentInfo = processedData.params?.consent || {};
     console.log("Consent status:", JSON.stringify(consentInfo));
@@ -1697,27 +1678,6 @@ async function handleGA4Event(payload, request) {
     // Log consent mode for tracking
     const consentMode = ga4Payload.consent?.ad_user_data || 'unknown';
     console.log("Sending event with consent mode:", consentMode);
-  }
-  
-  if (DEBUG_MODE) {
-    console.log("Finished payload structure:", JSON.stringify({
-      client_id: ga4Payload.client_id ? "present" : "missing",
-      user_id: ga4Payload.user_id ? "present" : "missing",
-      engaged_session: ga4Payload.engaged_session ? "true" : "false",
-      ip_override: ga4Payload.ip_override ? "present" : "missing",
-      validation_code: ga4Payload.validation_code ? "present" : "missing",
-      app_name: ga4Payload.app_name ? "present" : "missing",
-      app_version: ga4Payload.app_version ? "present" : "missing",
-      app_id: ga4Payload.app_id ? "present" : "missing",
-      transaction_id: ga4Payload.transaction_id ? "present" : "missing",
-      consent: ga4Payload.consent ? Object.keys(ga4Payload.consent) : "missing",
-      device: ga4Payload.device ? Object.keys(ga4Payload.device) : "missing",
-      user_agent: ga4Payload.user_agent ? "present" : "missing",
-      user_location: ga4Payload.user_location ? Object.keys(ga4Payload.user_location) : "missing",
-      events_count: ga4Payload.events.length,
-      event_params_count: Object.keys(ga4Payload.events[0].params).length
-    }));
-    console.log("Full payload:" + JSON.stringify(ga4Payload));
   }
     
   // Send the event to GA4
@@ -2277,9 +2237,6 @@ function extractLocationData(params) {
   const nonStandardParams = ['geo_continent', 'geo_country_tz', 'geo_city_tz', 'timezone'];
   nonStandardParams.forEach(param => {
     if (params[param]) {
-      if (DEBUG_MODE) {
-        console.log(`Removing non-standard GA4 parameter: ${param} = ${params[param]}`);
-      }
       delete params[param];
     }
   });
