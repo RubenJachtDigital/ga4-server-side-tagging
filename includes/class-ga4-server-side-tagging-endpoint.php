@@ -401,7 +401,7 @@ class GA4_Server_Side_Tagging_Endpoint
 
             // Get configuration
             $cloudflare_url = get_option('ga4_cloudflare_worker_url', '');
-            $worker_api_key = get_option('ga4_worker_api_key', '');
+            $worker_api_key = \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::retrieve_encrypted_key('ga4_worker_api_key') ?: get_option('ga4_worker_api_key', '');
             $encryption_enabled = (bool) get_option('ga4_jwt_encryption_enabled', false);
             $encryption_key = \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::retrieve_encrypted_key('ga4_jwt_encryption_key') ?: '';
 
