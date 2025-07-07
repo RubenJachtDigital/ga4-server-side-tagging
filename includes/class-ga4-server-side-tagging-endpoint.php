@@ -404,6 +404,43 @@ class GA4_Server_Side_Tagging_Endpoint
             $worker_api_key = \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::retrieve_encrypted_key('ga4_worker_api_key') ?: get_option('ga4_worker_api_key', '');
             $encryption_enabled = (bool) get_option('ga4_jwt_encryption_enabled', false);
             $encryption_key = \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::retrieve_encrypted_key('ga4_jwt_encryption_key') ?: '';
+            
+            // Debug logging: Check if keys from get_option are in encrypted format
+            $raw_encryption_key_from_option = get_option('ga4_jwt_encryption_key', '');
+            if (!empty($raw_encryption_key_from_option)) {
+                // Check if the raw value looks like encrypted data (base64 encoded JSON)
+                $is_encrypted_format = $this->is_key_in_encrypted_format($raw_encryption_key_from_option);
+                if ($is_encrypted_format) {
+                    $this->logger->info('Encryption key from get_option is in encrypted format (good - using retrieve_encrypted_key)');
+                } else {
+                    // Check if it's a valid hex key (plain text)
+                    if (strlen($raw_encryption_key_from_option) === 64 && ctype_xdigit($raw_encryption_key_from_option)) {
+                        $this->logger->warning('Encryption key from get_option is in plain text format (should be encrypted)');
+                    } else {
+                        $this->logger->error('Encryption key from get_option has invalid format: length=' . strlen($raw_encryption_key_from_option));
+                    }
+                }
+            } else {
+                $this->logger->info('No encryption key found in get_option (ga4_jwt_encryption_key is empty)');
+            }
+            
+            // Debug logging: Check API key format too
+            $raw_api_key_from_option = get_option('ga4_worker_api_key', '');
+            if (!empty($raw_api_key_from_option)) {
+                $is_api_key_encrypted = $this->is_key_in_encrypted_format($raw_api_key_from_option);
+                if ($is_api_key_encrypted) {
+                    $this->logger->info('Worker API key from get_option is in encrypted format (good - using retrieve_encrypted_key)');
+                } else {
+                    // Check if it looks like a valid API key (32+ chars, alphanumeric/dashes)
+                    if (strlen($raw_api_key_from_option) >= 32 && preg_match('/^[a-zA-Z0-9\-_]+$/', $raw_api_key_from_option)) {
+                        $this->logger->warning('Worker API key from get_option is in plain text format (should be encrypted)');
+                    } else {
+                        $this->logger->error('Worker API key from get_option has invalid format: length=' . strlen($raw_api_key_from_option));
+                    }
+                }
+            } else {
+                $this->logger->info('No worker API key found in get_option (ga4_worker_api_key is empty)');
+            }
 
             if (empty($cloudflare_url) || empty($worker_api_key)) {
                 return new \WP_REST_Response(array('error' => 'Configuration incomplete'), 500);
@@ -920,6 +957,39 @@ class GA4_Server_Side_Tagging_Endpoint
             'remaining' => $max_requests - $rate_data['count'],
             'retry_after' => 0
         );
+    }
+
+    /**
+     * Check if a key is in encrypted format (base64 encoded JSON)
+     *
+     * @since    1.0.0
+     * @param    string    $key    The key to check.
+     * @return   bool             True if key appears to be encrypted.
+     */
+    private function is_key_in_encrypted_format( $key ) {
+        // Encrypted keys are base64 encoded JSON with specific structure
+        try {
+            // Try to decode as base64
+            $decoded = base64_decode( $key, true );
+            if ( $decoded === false ) {
+                return false;
+            }
+            
+            // Try to parse as JSON
+            $json_data = json_decode( $decoded, true );
+            if ( json_last_error() !== JSON_ERROR_NONE ) {
+                return false;
+            }
+            
+            // Check if it has the expected encrypted key structure
+            if ( is_array( $json_data ) && isset( $json_data['data'], $json_data['iv'], $json_data['tag'] ) ) {
+                return true;
+            }
+            
+            return false;
+        } catch ( \Exception $e ) {
+            return false;
+        }
     }
 
 }
