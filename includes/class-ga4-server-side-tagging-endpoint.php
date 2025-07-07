@@ -778,20 +778,21 @@ class GA4_Server_Side_Tagging_Endpoint
             if (!empty($cloudflare_url) && strpos($cloudflare_url, 'https://') !== 0) {
                 return array('success' => false, 'error' => 'Cloudflare Worker URL must use HTTPS protocol for security');
             }
-            // Encrypt API key if encryption is enabled
+            // Use the API key as-is for Authorization header (already decrypted from database)
             $auth_header_value = $worker_api_key;
-            if ($encryption_enabled && !empty($encryption_key)) {
-                try {
-                    // Use static encryption key for API key encryption
-                    $encrypted_api_key = GA4_Encryption_Util::encrypt($worker_api_key, $encryption_key);
-                    if ($encrypted_api_key !== false) {
-                        $auth_header_value = $encrypted_api_key;
-                    }
-                } catch (\Exception $e) {
-                    $this->logger->warning('API key encryption failed, using plain text: ' . $e->getMessage());
-                    // Continue with plain text API key as fallback
-                }
+            
+            // Debug logging: Log the exact API key being sent to Cloudflare (first 20 characters for security)
+            $this->logger->info('Sending API key to Cloudflare - Full length: ' . strlen($auth_header_value) . ', Preview: ' . substr($auth_header_value, 0, 20) . '...');
+            
+            // Check if the API key looks like it might still be encrypted (base64 JSON format)
+            if (strlen($auth_header_value) > 100 || strpos($auth_header_value, 'eyJ') === 0) {
+                $this->logger->warning('API key appears to still be in encrypted/JWT format when sending to Cloudflare');
+                $this->logger->warning('This suggests the key was not properly decrypted from database storage');
             }
+            
+            // Also log what we got from the database before decryption
+            $raw_api_key_from_db = get_option('ga4_worker_api_key', '');
+            $this->logger->info('Raw API key from database - Length: ' . strlen($raw_api_key_from_db) . ', Preview: ' . substr($raw_api_key_from_db, 0, 20) . '...');
 
             $headers = array(
                 'Content-Type' => 'application/json',
