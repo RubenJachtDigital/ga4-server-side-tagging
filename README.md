@@ -46,13 +46,116 @@ A comprehensive WordPress plugin that provides advanced server-side tagging for 
 - **🔒 CORS protection** with explicit header allowlisting
 - **🔗 Cross-platform encryption** compatible across PHP, JavaScript, and Cloudflare Worker
 
+## 🔄 Data Flow & Encryption Architecture
+
+### Complete Data Flow Pipeline
+
+```
+Client Browser → WordPress API → Cloudflare Worker → Google Analytics 4
+     ↓              ↓               ↓                ↓
+1. Event Generated → 2. Security Validation → 3. Server Processing → 4. GA4 Delivery
+   • Attribution     • Rate Limiting (100/min)  • Bot Detection      • Clean Events
+   • Consent Check   • Bot Detection           • GDPR Processing    • Proper Consent
+   • Encryption      • Origin Validation       • Event Enhancement  • Attribution Data
+   • Client Data     • API Key Encryption      • Response Decryption
+```
+
+### 🔐 End-to-End Encryption Flow
+
+**1. Client-Side Event Encryption (Optional):**
+```javascript
+Event Data → Time-based JWT → Encrypted Payload → WordPress API
+     ↓
+{
+  "time_jwt": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...",  // Encrypted event data
+  "X-Encrypted": "true"                                    // Encryption indicator
+}
+```
+
+**2. WordPress Processing & API Key Encryption:**
+```php
+Encrypted Event → Decryption → Validation → API Key Encryption → Cloudflare
+     ↓               ↓           ↓              ↓
+Time-based JWT  → Event Data → Rate Limit → Bearer JWT Token → Worker
+Static JWT      → Validation → Origin Check → (Encrypted API key)
+```
+
+**3. Cloudflare Worker Security & Decryption:**
+```javascript
+Request → API Key Decryption → Bot Detection → Event Processing → GA4
+   ↓          ↓                  ↓              ↓               ↓
+Headers → JWT Verification → Pattern Analysis → GDPR Rules → Clean Events
+Payload → Format Detection → Behavior Scoring → Attribution → GA4 API
+```
+
+### 🔑 Encryption Key Types & Usage
+
+| Encryption Type | Key Source | Usage | Rotation |
+|------------------|------------|--------|----------|
+| **Time-based JWT** | Self-generating (5-min slots) | Client ↔ WordPress | Automatic |
+| **Static JWT** | Admin-generated | WordPress ↔ Cloudflare | Manual |
+| **API Key JWT** | Static encryption key | API authentication | Manual |
+| **Storage Encryption** | WordPress salts | Database storage | Site-specific |
+
+### 🛡️ Security Validation Layers
+
+**WordPress Endpoint (`/send-event`):**
+1. **Rate Limiting**: 100 requests/minute per IP
+2. **Origin Validation**: Same-domain CORS check
+3. **Bot Detection**: 70+ user agent patterns
+4. **HTTPS Enforcement**: TLS 1.2+ required
+5. **Header Validation**: Essential headers required
+6. **Field Validation**: Required GA4 fields check
+
+**Cloudflare Worker Security:**
+1. **API Key Authentication**: JWT encrypted Bearer tokens
+2. **Domain Whitelisting**: Configurable allowed domains
+3. **Advanced Bot Detection**: Multi-layer analysis
+4. **Rate Limiting**: IP-based request throttling
+5. **Payload Validation**: Size and structure checks
+6. **Origin Verification**: Header consistency validation
+
+### 📊 What Gets Encrypted
+
+**🔐 Always Encrypted:**
+- API keys (WordPress → Cloudflare)
+- Sensitive configuration data
+- Event payloads (when encryption enabled)
+- Database-stored encryption keys
+
+**📋 Optionally Encrypted:**
+- Event data (Client → WordPress)
+- Response data (Cloudflare → WordPress)
+- Attribution parameters
+- User identification data
+
+**🔓 Never Encrypted:**
+- HTTP headers (for routing)
+- Rate limiting data
+- Basic validation responses
+- CORS preflight responses
+
+### ⚡ Rate Limiting Implementation
+
+**WordPress (`/send-event`):**
+- **Limit**: 100 requests per minute per IP
+- **Method**: Sliding window with WordPress transients
+- **Response**: HTTP 429 with `retry_after` header
+- **Storage**: Temporary memory cache (60-second TTL)
+
+**Cloudflare Worker:**
+- **Configurable**: RATE_LIMIT_REQUESTS per IP
+- **Method**: Cloudflare KV storage
+- **Integration**: Built-in DDoS protection
+- **Escalation**: Automatic IP blocking
+
 ## 📋 Requirements
 
 - WordPress 5.2 or higher
-- PHP 7.2 or higher
+- PHP 7.2 or higher with OpenSSL extension
 - WooCommerce 4.0 or higher (for e-commerce tracking)
 - Google Analytics 4 property with Measurement ID and API Secret
-- Cloudflare account (optional, for server-side tagging)
+- Cloudflare account (recommended, for server-side tagging)
 
 ## 🚀 Installation
 
@@ -139,29 +242,44 @@ let ALLOWED_DOMAINS = ["yourdomain.com", "www.yourdomain.com"]; // Your domains
 let ENCRYPTION_KEY = "your-256-bit-encryption-key-here"; // 64-character hex key from WordPress admin
 ```
 
-### 🔐 JWT Encryption Setup (NEW)
+### 🔐 JWT Encryption Setup (Enhanced)
 
 For enhanced security, enable **AES-256-GCM encryption** for all data transmission:
 
-1. **Generate Encryption Key**: Go to WordPress admin → GA4 Tagging settings
-2. **Click "Generate Encryption Key"**: Creates a secure 256-bit encryption key
-3. **Enable Encryption**: Check "Enable JWT Encryption" option
-4. **Copy Key to Cloudflare Worker**: Update `ENCRYPTION_KEY` constant with generated key
-5. **Enable Worker Encryption**: Set `JWT_ENCRYPTION_ENABLED = true` in worker
-6. **Deploy Worker**: Redeploy with new encryption settings
+**1. Generate Encryption Key:**
+1. Go to WordPress admin → GA4 Tagging settings
+2. Click "Generate Encryption Key" - Creates a secure 256-bit encryption key
+3. Key is automatically encrypted and stored in database using WordPress salts
+
+**2. Enable Encryption Features:**
+1. Check "Enable JWT Encryption" option
+2. Copy the generated key to Cloudflare Worker `ENCRYPTION_KEY` variable
+3. Set `JWT_ENCRYPTION_ENABLED = true` in worker
+4. Deploy worker with new encryption settings
+
+**3. Automatic API Key Encryption:**
+- API keys are automatically encrypted when sending to Cloudflare Worker
+- Uses static encryption key (not time-based) for API authentication
+- Cloudflare Worker automatically detects and decrypts JWT encrypted API keys
+- Fallback to plain text API keys if encryption fails
 
 **Encryption Key Management:**
 ```php
-// WordPress Admin - Automatic key generation
-$encryption_key = get_option('ga4_jwt_encryption_key'); // 64-character hex key
+// WordPress Admin - Automatic key generation and storage
+$encryption_key = GA4_Encryption_Util::retrieve_encrypted_key('ga4_jwt_encryption_key');
+// Returns decrypted 64-character hex key for use
+
+// Automatic key upgrade - existing plain text keys are encrypted on save
+$stored_key = GA4_Encryption_Util::store_encrypted_key($key, 'ga4_jwt_encryption_key');
 ```
 
-**Security Benefits:**
-- **🔒 End-to-end encryption** of all event data and sensitive payloads
-- **🛡️ AES-256-GCM encryption** with authentication tags for data integrity
-- **🔑 Cross-platform compatibility** between PHP, JavaScript, and Cloudflare Worker
-- **⚡ Automatic fallback** to XOR encryption for older browsers
-- **🔄 Key rotation support** with one-click regeneration
+**Multi-Layer Encryption Benefits:**
+- **🔒 Event Data Encryption**: Client ↔ WordPress (optional, time-based JWT)
+- **🔑 API Key Encryption**: WordPress ↔ Cloudflare (automatic, static JWT)  
+- **🛡️ Response Encryption**: Cloudflare ↔ WordPress (optional, static JWT)
+- **💾 Storage Encryption**: Database keys encrypted with WordPress salts
+- **🔄 Key Rotation**: One-click regeneration with automatic re-encryption
+- **⚡ Format Detection**: Automatic encryption format detection and handling
 
 ### A/B Testing Configuration
 
@@ -615,11 +733,23 @@ add_filter('ga4_purchase_data', function($purchase_data, $order) {
 - **🎯 Selective Encryption**: Headers remain in plaintext for HTTP routing, payload encrypted for security
 - **🔄 Key Rotation**: Easy encryption key rotation without service interruption
 
-### 🛡️ **Server-Side Security (Cloudflare Worker)**
-- **🔐 JWT Token Authentication**: Time-limited JWT tokens with 5-minute expiration
-- **🔑 API Key Authentication**: Secure X-API-Key header validation with configurable rotation
-- **🌍 Domain Whitelisting**: Only allowed domains can send events with origin validation
-- **⚡ Advanced Rate Limiting**: Configurable requests per IP per time window with automatic blocking
+### 🛡️ **Server-Side Security (Enhanced)**
+
+**WordPress Endpoint Security:**
+- **⚡ Rate Limiting**: 100 requests/minute per IP with sliding window algorithm
+- **🔐 API Key Encryption**: Automatic JWT encryption of API keys to Cloudflare Worker
+- **🛡️ Multi-Layer Bot Detection**: 70+ user agent patterns with behavioral analysis
+- **🌍 Origin Validation**: Strict same-domain CORS validation
+- **🔒 HTTPS Enforcement**: TLS 1.2+ required for all secure endpoints
+- **📋 Header Validation**: Essential browser headers required for authenticity
+- **🔍 Field Validation**: Complete GA4 required fields verification
+- **🚫 Query Parameter Filtering**: Blocks suspicious parameters (cmd, exec, eval, etc.)
+
+**Cloudflare Worker Security:**
+- **🔑 JWT API Key Decryption**: Automatic detection and decryption of encrypted API keys
+- **🔐 Multiple Authentication Formats**: JWT, Base64, and plain text API key support
+- **🌍 Domain Whitelisting**: Configurable allowed domains with origin validation
+- **⚡ Advanced Rate Limiting**: Configurable requests per IP per time window
 - **📏 Payload Size Validation**: Prevents oversized requests (default: 50KB max)
 - **🔒 CORS Protection**: Explicit header allowlisting with secure defaults
 - **🤖 Multi-Layer Bot Detection**: Comprehensive filtering with behavioral analysis and scoring
@@ -710,9 +840,41 @@ console.log('Bot Detection:', GA4Utils.botDetection.isBot(userAgent, session, be
 
 **Server-Side Issues:**
 - Check Cloudflare Worker logs for API key validation errors
-- Verify CORS headers include `X-API-Key`
+- Verify CORS headers include `Authorization` header
 - Ensure worker API key matches WordPress generated key
 - Check rate limiting and domain whitelisting
+
+**Rate Limiting Issues:**
+```javascript
+// Check rate limit status in browser console
+fetch('/wp-json/ga4-server-side-tagging/v1/send-event', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: 'test_event', params: { client_id: 'test', session_id: 'test' } })
+})
+.then(response => {
+    if (response.status === 429) {
+        console.log('Rate limited:', response.headers.get('retry-after'), 'seconds');
+    }
+    return response.json();
+})
+.then(data => console.log('Response:', data));
+```
+
+**API Key Encryption Issues:**
+```php
+// Test API key encryption in WordPress admin
+$worker_api_key = get_option('ga4_worker_api_key');
+$encryption_key = GA4_Encryption_Util::retrieve_encrypted_key('ga4_jwt_encryption_key');
+
+// Test encryption
+$encrypted = GA4_Encryption_Util::encrypt($worker_api_key, $encryption_key);
+echo "Encrypted API Key: " . $encrypted . "\n";
+
+// Test decryption
+$decrypted = GA4_Encryption_Util::decrypt($encrypted, $encryption_key);
+echo "Decrypted matches: " . ($decrypted === $worker_api_key ? 'Yes' : 'No') . "\n";
+```
 
 **🔐 Encryption Issues:**
 ```javascript
