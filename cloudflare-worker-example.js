@@ -1669,6 +1669,12 @@ async function handleGA4Event(payload, request) {
     const consentMode = ga4Payload.consent?.ad_user_data || 'unknown';
     console.log("Sending event with consent mode:", consentMode);
   }
+
+  // Log the complete payload being sent to Google Analytics
+  if (DEBUG_MODE) {
+    console.log("📤 Complete GA4 Payload being sent to Google Analytics:");
+    console.log(JSON.stringify(ga4Payload, null, 2));
+  }
     
   // Send the event to GA4
   const ga4Response = await fetch(
