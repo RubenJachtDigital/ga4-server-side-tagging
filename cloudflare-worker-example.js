@@ -1673,7 +1673,7 @@ async function handleGA4Event(payload, request) {
   // Log the complete payload being sent to Google Analytics
   if (DEBUG_MODE) {
     console.log("📤 Complete GA4 Payload being sent to Google Analytics:");
-    console.log(JSON.stringify(ga4Payload, null, 2));
+    console.log(JSON.stringify(ga4Payload));
   }
     
   // Send the event to GA4
