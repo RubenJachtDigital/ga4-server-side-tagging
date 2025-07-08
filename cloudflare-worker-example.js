@@ -1495,6 +1495,7 @@ async function handleRequest(request, env) {
 async function handleGA4Event(payload, request) {
   // Process the event data
   const processedData = processEventData(payload, request);
+  let payloadDebug = false;
   // Log the incoming event data
   if (DEBUG_MODE) {    
     // Log consent status
@@ -1675,7 +1676,10 @@ async function handleGA4Event(payload, request) {
     console.log("📤 Complete GA4 Payload being sent to Google Analytics:");
     console.log(JSON.stringify(ga4Payload));
   }
-    
+  
+  if(processedData.params.debug_mode == true){
+      payloadDebug = true;
+  }
   // Send the event to GA4
   const ga4Response = await fetch(
     `${GA4_ENDPOINT}?measurement_id=${GA4_MEASUREMENT_ID}&api_secret=${GA4_API_SECRET}`,
@@ -1709,7 +1713,7 @@ async function handleGA4Event(payload, request) {
     "event": processedData.name,
     "ga4_status": ga4Response.status,
     "ga4_response": DEBUG_MODE ? ga4ResponseBody : undefined,
-    "debug": ga4Payload,
+    "debug": payloadDebug ? ga4Payload : undefined,
     "consent_applied": ga4Payload.consent ? true : false,
     "consent_mode": ga4Payload.consent?.ad_user_data || 'unknown'
   };
