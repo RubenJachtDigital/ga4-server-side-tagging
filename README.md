@@ -216,7 +216,7 @@ GET /wp-json/ga4-server-side-tagging/v1/secure-config
 // Debug mode logs complete GA4 payloads
 if (DEBUG_MODE) {
   console.log("📤 Complete GA4 Payload being sent to Google Analytics:");
-  console.log(JSON.stringify(ga4Payload, null, 2));
+  console.log(JSON.stringify(ga4Payload));
 }
 ```
 
