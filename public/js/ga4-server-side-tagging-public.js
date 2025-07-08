@@ -534,14 +534,14 @@
         this.log('🧪 [A/B Testing] Found tests:', tests);
         
         tests.forEach(function(test, index) {
-          console.log(`Test ${index + 1}:`, test);
+          this.log(`Test ${index + 1}:`, test);
           
           // Check if elements exist
           var elemA = document.querySelector(test.class_a);
           var elemB = document.querySelector(test.class_b);
           
-          console.log(`  - Variant A (${test.class_a}):`, elemA ? 'FOUND' : 'NOT FOUND');
-          console.log(`  - Variant B (${test.class_b}):`, elemB ? 'FOUND' : 'NOT FOUND');
+          this.log(`  - Variant A (${test.class_a}):`, elemA ? 'FOUND' : 'NOT FOUND');
+          this.log(`  - Variant B (${test.class_b}):`, elemB ? 'FOUND' : 'NOT FOUND');
         });
         
       } catch (error) {
@@ -699,13 +699,13 @@
 
       // Handle cases where no attribution is determined yet
       if (!source && !medium) {
-        console.log("DEBUG: No attribution found, calling handleNoAttribution", {
+        this.log("DEBUG: No attribution found, calling handleNoAttribution", {
           isNewSession: isNewSession,
           ignore_referrer: ignore_referrer,
           referrerDomain: referrerDomain
         });
         var fallbackAttribution = this.handleNoAttribution(isNewSession);
-        console.log("DEBUG: fallbackAttribution result:", fallbackAttribution);
+        this.log("DEBUG: fallbackAttribution result:", fallbackAttribution);
         source = fallbackAttribution.source;
         medium = fallbackAttribution.medium;
         campaign = fallbackAttribution.campaign;
@@ -770,14 +770,14 @@
     handleNoAttribution: function (isNewSession) {
       // Always try to get stored attribution first (for session continuity)
       var storedAttribution = this.getStoredAttribution();
-      console.log("DEBUG: handleNoAttribution called", {
+      this.log("DEBUG: handleNoAttribution called", {
         isNewSession: isNewSession,
         storedAttribution: storedAttribution
       });
 
       // For continuing sessions with no attribution, mark as internal traffic
       if (!isNewSession) {
-        console.log("DEBUG: Returning internal attribution for continuing session");
+        this.log("DEBUG: Returning internal attribution for continuing session");
         return {
           source: "(internal)",
           medium: "internal",
@@ -865,7 +865,7 @@
         
         // Debug log for attribution storage
         if (this.config && this.config.debugMode) {
-          console.log('DEBUG: Storing new attribution data:', {
+          this.log('DEBUG: Storing new attribution data:', {
             isNewSession: isNewSession,
             attribution: attribution,
             previousStored: {
@@ -900,7 +900,7 @@
         // Debug log for attribution preservation
         if (this.config && this.config.debugMode) {
           var userData = GA4Utils.storage.getUserData();
-          console.log('DEBUG: Preserving existing attribution (not storing):', {
+          this.log('DEBUG: Preserving existing attribution (not storing):', {
             isNewSession: isNewSession,
             currentAttribution: attribution,
             shouldStore: shouldStore,
@@ -2450,13 +2450,11 @@
       if (conversionEvents.includes(eventName)) {
         var storedAttribution = this.getStoredAttribution();
         
-        // Debug log stored attribution
-        if (this.config.debugMode) {
-          console.log('DEBUG: Stored attribution for conversion event:', {
+        this.log('DEBUG: Stored attribution for conversion event:', {
             eventName: eventName,
             storedAttribution: storedAttribution
-          });
-        }
+        });
+        
         
         // Force stored attribution for conversion events (overrides current attribution)
         if (storedAttribution.source) {
@@ -2484,7 +2482,7 @@
         
         // Debug log only in debug mode
         if (this.config.debugMode) {
-          console.log('DEBUG: Conversion event enriched with stored attribution:', {
+          this.log('DEBUG: Conversion event enriched with stored attribution:', {
             eventName: eventName,
             source: eventParams.source,
             medium: eventParams.medium,
@@ -2968,13 +2966,13 @@
         
         // Log encryption status for debugging
         if (this.config.encryptionEnabled) {
-          console.log("🔐 [GA4 Encryption] Event will be encrypted before sending", {
+          this.log("🔐 [GA4 Encryption] Event will be encrypted before sending", {
             eventName: payload.name,
             endpoint: sendEventEndpoint,
             timestamp: new Date().toISOString()
           });
         } else {
-          console.log("📤 [GA4 Encryption] Event will be sent unencrypted", {
+          this.log("📤 [GA4 Encryption] Event will be sent unencrypted", {
             eventName: payload.name,
             endpoint: sendEventEndpoint,
             timestamp: new Date().toISOString()

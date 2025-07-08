@@ -775,7 +775,7 @@
               platform: navigator.userAgentData.platform,
             };
           } catch (e) {
-            console.log("Error accessing User Agent Client Hints:", e);
+            GA4Utils.helpers.log("Error accessing User Agent Client Hints:", e);
             return null;
           }
         }
@@ -1174,7 +1174,7 @@
         // Debug logging for bot detection analysis
         const isBot = trueChecks >= 2 || highConfidenceTriggers >= 1;
         if (isBot) {
-          console.log('Bot Detection Debug:', {
+          GA4Utils.helpers.log('Bot Detection Debug:', {
             userAgent: this.checkUserAgent(userAgentInfo.user_agent),
             geoLocation: this.checkSuspiciousGeoLocation(sessionParams),
             behaviorPatterns: this.checkBehaviorPatterns(clientBehavior, sessionParams),
@@ -2335,7 +2335,7 @@
               );
               
               // Additional console logging for encryption visibility
-              console.log("🔐 [GA4 Encryption] Successfully encrypted event payload", {
+              GA4Utils.helpers.log("🔐 [GA4 Encryption] Successfully encrypted event payload", {
                 originalPayloadKeys: Object.keys(payload),
                 encryptedJwtLength: timeBasedJWT.length,
                 endpoint: endpoint,
@@ -2378,14 +2378,14 @@
         // Additional console logging for request status
         if (endpoint.includes('/send-event')) {
           if (headers["X-Encrypted"]) {
-            console.log("🔐 [GA4 Encryption] Sending encrypted request to send-event endpoint", {
+            GA4Utils.helpers.log("🔐 [GA4 Encryption] Sending encrypted request to send-event endpoint", {
               endpoint: endpoint,
               hasEncryptionHeader: true,
               timestamp: new Date().toISOString(),
               status: "SENDING_ENCRYPTED"
             });
           } else {
-            console.log("📤 [GA4 Encryption] Sending unencrypted request to send-event endpoint", {
+            GA4Utils.helpers.log("📤 [GA4 Encryption] Sending unencrypted request to send-event endpoint", {
               endpoint: endpoint,
               encryptionEnabled: config?.encryptionEnabled || false,
               reason: config?.encryptionEnabled ? "encryption_failed" : "encryption_disabled",
@@ -2420,7 +2420,7 @@
           
           // Additional console logging for successful response
           if (endpoint.includes('/send-event')) {
-            console.log("✅ [GA4 Encryption] Event sent successfully", {
+            GA4Utils.helpers.log("✅ [GA4 Encryption] Event sent successfully", {
               endpoint: endpoint,
               wasEncrypted: !!headers["X-Encrypted"],
               responseData: data,
@@ -2557,9 +2557,9 @@
         prefix = prefix || "[GA4 Utils]";
         if (config && config.debugMode && window.console) {
           if (data) {
-            console.log(prefix + " " + message, data);
+            GA4Utils.helpers.log(prefix + " " + message, data);
           } else {
-            console.log(prefix + " " + message);
+            GA4Utils.helpers.log(prefix + " " + message);
           }
         }
       },
@@ -2702,7 +2702,7 @@
         try {
           return Intl.DateTimeFormat().resolvedOptions().timeZone;
         } catch (e) {
-          console.log("Error getting timezone:", e);
+          GA4Utils.helpers.log("Error getting timezone:", e);
           return "";
         }
       },
@@ -2718,7 +2718,7 @@
           var timezoneRegions = timezone.split("/");
           return timezoneRegions.length > 0 ? timezoneRegions[0] : "";
         } catch (e) {
-          console.log("Error extracting continent from timezone:", e);
+          GA4Utils.helpers.log("Error extracting continent from timezone:", e);
           return "";
         }
       },
@@ -2739,7 +2739,7 @@
           }
           return "";
         } catch (e) {
-          console.log("Error extracting city from timezone:", e);
+          GA4Utils.helpers.log("Error extracting city from timezone:", e);
           return "";
         }
       },
@@ -2864,7 +2864,7 @@
           
           return "";
         } catch (e) {
-          console.log("Error extracting country from timezone:", e);
+          GA4Utils.helpers.log("Error extracting country from timezone:", e);
           return "";
         }
       },
@@ -3257,7 +3257,7 @@
           // Check if this is an expiration error and we have a renewal callback
           if ((error.message.includes('expired') || error.message.includes('signature verification failed')) && 
               options.renewTokenCallback && typeof options.renewTokenCallback === 'function') {
-            console.log('JWT token expired, attempting renewal...');
+            GA4Utils.helpers.log('JWT token expired, attempting renewal...');
             
             try {
               // Call the renewal callback to get a new token (and possibly new key)
@@ -3279,7 +3279,7 @@
                   throw new Error('Invalid renewal result format');
                 }
                 
-                console.log('JWT token renewed successfully, retrying decryption...');
+                GA4Utils.helpers.log('JWT token renewed successfully, retrying decryption...');
                 return await this.verifyJWTToken(newToken, newKey);
               }
             } catch (renewError) {
@@ -3373,7 +3373,7 @@
         const clockTolerance = 30; // 30 seconds tolerance
         if (payload.exp && payload.exp < (currentTime - clockTolerance)) {
           const timeLeft = payload.exp - currentTime;
-          console.log(`JWT verification: token exp=${payload.exp}, current=${currentTime}, diff=${timeLeft}s`);
+          GA4Utils.helpers.log(`JWT verification: token exp=${payload.exp}, current=${currentTime}, diff=${timeLeft}s`);
           throw new Error('JWT token has expired');
         }
         

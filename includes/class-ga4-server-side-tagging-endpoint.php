@@ -35,6 +35,25 @@ class GA4_Server_Side_Tagging_Endpoint
      */
     private $logger;
 
+
+    /**
+     * Performance mode enabled - skips heavy validation for faster response
+     *
+     * @since    1.0.0
+     * @access   private
+     * @var      bool    $performance_mode_enabled    Whether performance mode is enabled.
+     */
+    private $performance_mode_enabled = true;
+
+    /**
+     * Session key for storing validation status
+     *
+     * @since    1.0.0
+     * @access   private
+     * @var      string    $validation_session_key    Session key for tracking validation.
+     */
+    private $validation_session_key = 'ga4_session_validated';
+
     /**
      * Initialize the class.
      *
@@ -44,6 +63,11 @@ class GA4_Server_Side_Tagging_Endpoint
     public function __construct(GA4_Server_Side_Tagging_Logger $logger)
     {
         $this->logger = $logger;
+        
+        // Ensure session is started for validation tracking
+        if (!session_id()) {
+            session_start();
+        }
     }
 
     /**
@@ -60,6 +84,7 @@ class GA4_Server_Side_Tagging_Endpoint
         ));
     }
 
+
     /**
      * Strong permission check for secure config endpoint (enhanced security).
      *
@@ -69,27 +94,50 @@ class GA4_Server_Side_Tagging_Endpoint
      */
     public function check_strong_permission($request)
     {
+        $session_id = session_id();
+        $client_ip = $this->get_client_ip($request);
+        
+        // Check if this session has already passed heavy validation
+        $session_validated = isset($_SESSION[$this->validation_session_key]) && $_SESSION[$this->validation_session_key] === true;
 
-        // 1. Enhanced origin validation - STRICT check
-        if (!$this->validate_request_origin($request)) {
-            $this->log_security_failure($request, 'ORIGIN_VALIDATION_FAILED', 'Request origin validation failed');
-            return false;
+        if ($session_validated && $this->performance_mode_enabled) {
+            // Session already validated - perform only basic origin check            
+            if (!$this->validate_request_origin($request)) {
+                $this->log_security_failure($request, 'ORIGIN_VALIDATION_FAILED', 'Request origin validation failed (basic check)');
+                return false;
+            }
+            
+            return true; // Fast path for validated sessions
         }
 
-        // 2. Bot detection - Block automated requests to secure config
+        
+        // 1. Enhanced origin validation - STRICT check
+        if (!$this->validate_request_origin($request)) {
+            $this->log_security_failure($request, 'ORIGIN_VALIDATION_FAILED', 'Request origin validation failed (heavy check)');
+            return false;
+        }
+        $this->logger->info("Origin validation passed for session: {$session_id}");
+
+        // 2. Bot detection - Block automated requests
         if ($this->is_bot_request($request)) {
             $this->log_security_failure($request, 'BOT_DETECTED', 'Bot or automated request detected');
             return false;
         }
+        $this->logger->info("Bot detection passed for session: {$session_id}");
 
         // 3. Enhanced security checks with stricter validation
         if (!$this->validate_enhanced_security($request)) {
             $this->log_security_failure($request, 'ENHANCED_SECURITY_CHECK_FAILED', 'Enhanced security validation failed');
             return false;
         }
+        $this->logger->info("Enhanced security validation passed for session: {$session_id}");
+
+        // All heavy validation passed - mark session as validated
+        $_SESSION[$this->validation_session_key] = true;
 
         return true;
     }
+
 
     /**
      * Comprehensive bot detection for secure config endpoint.
@@ -518,10 +566,16 @@ class GA4_Server_Side_Tagging_Endpoint
      */
     public function send_event($request)
     {
+        $start_time = microtime(true);
+        $session_id = session_id();
+        $client_ip = $this->get_client_ip($request);
+        
+        
         try {
             // Rate limiting check - 100 requests per minute per IP
             $rate_limit_check = $this->check_rate_limit($request);
             if (!$rate_limit_check['allowed']) {
+                $this->logger->warning("Rate limit exceeded for IP: {$client_ip} - rejected request");
                 return new \WP_REST_Response(
                     array(
                         'error' => 'Rate limit exceeded',
@@ -555,44 +609,14 @@ class GA4_Server_Side_Tagging_Endpoint
                 return new \WP_REST_Response(array('error' => 'Missing required field: session_id'), 400);
             }
 
-            // Get configuration
+            // Get configuration from database (secure - no caching)
+            $this->logger->info("Loading configuration from database for session: {$session_id}");
             $cloudflare_url = get_option('ga4_cloudflare_worker_url', '');
             $worker_api_key = \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::retrieve_encrypted_key('ga4_worker_api_key') ?: get_option('ga4_worker_api_key', '');
             $encryption_enabled = (bool) get_option('ga4_jwt_encryption_enabled', false);
             $encryption_key = \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::retrieve_encrypted_key('ga4_jwt_encryption_key') ?: '';
             
-            // Debug logging: Check if keys from get_option are in encrypted format
-            $raw_encryption_key_from_option = get_option('ga4_jwt_encryption_key', '');
-            if (!empty($raw_encryption_key_from_option)) {
-                // Check if the raw value looks like encrypted data (base64 encoded JSON)
-                $is_encrypted_format = $this->is_key_in_encrypted_format($raw_encryption_key_from_option);
-                if (!$is_encrypted_format) {
-                    // Check if it's a valid hex key (plain text)
-                    if (strlen($raw_encryption_key_from_option) === 64 && ctype_xdigit($raw_encryption_key_from_option)) {
-                        $this->logger->warning('Encryption key from get_option is in plain text format (should be encrypted)');
-                    } else {
-                        $this->logger->error('Encryption key from get_option has invalid format: length=' . strlen($raw_encryption_key_from_option));
-                    }
-                }
-            } else {
-                $this->logger->info('No encryption key found in get_option (ga4_jwt_encryption_key is empty)');
-            }
-            
-            // Debug logging: Check API key format too
-            $raw_api_key_from_option = get_option('ga4_worker_api_key', '');
-            if (!empty($raw_api_key_from_option)) {
-                $is_api_key_encrypted = $this->is_key_in_encrypted_format($raw_api_key_from_option);
-                if (!$is_api_key_encrypted)  {
-                    // Check if it looks like a valid API key (32+ chars, alphanumeric/dashes)
-                    if (strlen($raw_api_key_from_option) >= 32 && preg_match('/^[a-zA-Z0-9\-_]+$/', $raw_api_key_from_option)) {
-                        $this->logger->warning('Worker API key from get_option is in plain text format (should be encrypted)');
-                    } else {
-                        $this->logger->error('Worker API key from get_option has invalid format: length=' . strlen($raw_api_key_from_option));
-                    }
-                }
-            } else {
-                $this->logger->info('No worker API key found in get_option (ga4_worker_api_key is empty)');
-            }
+            // Removed excessive debug logging for performance optimization
 
             if (empty($cloudflare_url) || empty($worker_api_key)) {
                 return new \WP_REST_Response(array('error' => 'Configuration incomplete'), 500);
@@ -602,22 +626,37 @@ class GA4_Server_Side_Tagging_Endpoint
             $event_payload = $request_data;
 
             // Send to Cloudflare Worker
-            $result = $this->forward_to_cloudflare($event_payload, $cloudflare_url, $worker_api_key, $encryption_enabled, $encryption_key, $request);
+            $this->logger->info("Forwarding event to Cloudflare Worker for session: {$session_id}");
+            
+            // Check if debug mode is enabled to determine if we should wait for response
+            $debug_mode = get_option('ga4_server_side_tagging_debug_mode', false);
+            
+            if ($debug_mode) {
+                // Debug mode: Wait for response from Cloudflare for debugging
+                $result = $this->forward_to_cloudflare($event_payload, $cloudflare_url, $worker_api_key, $encryption_enabled, $encryption_key, $request);
+                $processing_time = round((microtime(true) - $start_time) * 1000, 2);
 
-            if ($result['success']) {
-                // Include worker response in the response back to client
-                $response_data = array('success' => true);
-                if (isset($result['worker_response'])) {
-                    $response_data['worker_response'] = $result['worker_response'];
+                if ($result['success']) {
+                    $response_data = array('success' => true);
+                    if (isset($result['worker_response'])) {
+                        $response_data['worker_response'] = $result['worker_response'];
+                    }
+                    return new \WP_REST_Response($response_data, 200);
+                } else {
+                    $this->logger->error("Failed to send event to Cloudflare for session: {$session_id} after {$processing_time}ms: " . $result['error']);
+                    return new \WP_REST_Response(array('error' => 'Event sending failed', 'details' => $result['error']), 500);
                 }
-                return new \WP_REST_Response($response_data, 200);
             } else {
-                $this->logger->error('Failed to send event to Cloudflare: ' . $result['error']);
-                return new \WP_REST_Response(array('error' => 'Event sending failed', 'details' => $result['error']), 500);
+                // Production mode: Fire and forget for maximum performance
+                $this->forward_to_cloudflare_async($event_payload, $cloudflare_url, $worker_api_key, $encryption_enabled, $encryption_key, $request);
+                $processing_time = round((microtime(true) - $start_time) * 1000, 2);
+                
+                return new \WP_REST_Response(array('success' => true), 200);
             }
 
         } catch (\Exception $e) {
-            $this->logger->error('Failed to process send-event request: ' . $e->getMessage());
+            $processing_time = round((microtime(true) - $start_time) * 1000, 2);
+            $this->logger->error("Failed to process send-event request for session: {$session_id} after {$processing_time}ms: " . $e->getMessage());
             return new \WP_REST_Response(array('error' => 'Processing error'), 500);
         }
     }
@@ -912,6 +951,78 @@ class GA4_Server_Side_Tagging_Endpoint
 
 
     /**
+     * Forward the event to Cloudflare Worker asynchronously (fire and forget).
+     *
+     * @since    1.0.0
+     * @param    array                  $event_payload      The event payload.
+     * @param    string                 $cloudflare_url     The Cloudflare Worker URL.
+     * @param    string                 $worker_api_key     The API key.
+     * @param    bool                   $encryption_enabled Whether encryption is enabled.
+     * @param    string                 $encryption_key     The encryption key.
+     * @param    \WP_REST_Request|null  $original_request   The original request object for header forwarding.
+     * @return   void
+     */
+    private function forward_to_cloudflare_async($event_payload, $cloudflare_url, $worker_api_key, $encryption_enabled, $encryption_key, $original_request = null)
+    {
+        try {
+            // Ensure Cloudflare Worker URL uses HTTPS
+            if (!empty($cloudflare_url) && strpos($cloudflare_url, 'https://') !== 0) {
+                $this->logger->error('Cloudflare Worker URL must use HTTPS protocol for security');
+                return;
+            }
+
+            $auth_header_value = $worker_api_key;
+
+            $headers = array(
+                'Content-Type' => 'application/json',
+                'Authorization' => 'Bearer ' . $auth_header_value
+            );
+
+            // Forward Origin, Referer, and User-Agent headers from the original request
+            if ($original_request) {
+                $origin = $original_request->get_header('origin');
+                $referer = $original_request->get_header('referer');
+                $user_agent = $original_request->get_header('user-agent');
+
+                if ($origin) {
+                    $headers['Origin'] = $origin;
+                }
+                if ($referer) {
+                    $headers['Referer'] = $referer;
+                }
+                if ($user_agent) {
+                    $headers['User-Agent'] = $user_agent;
+                }
+            }
+
+            $body = $event_payload;
+
+            // Encrypt payload if encryption is enabled
+            if ($encryption_enabled && !empty($encryption_key)) {
+                try {
+                    $encrypted_payload = GA4_Encryption_Util::create_encrypted_response($body, $encryption_key);
+                    $body = $encrypted_payload;
+                    $headers['X-Encrypted'] = 'true';
+                } catch (\Exception $e) {
+                    $this->logger->error('Event encryption failed: ' . $e->getMessage());
+                    // Continue with unencrypted payload as fallback
+                }
+            }
+
+            // Fire and forget - no blocking, no response waiting
+            wp_remote_post($cloudflare_url, array(
+                'timeout' => 10, // 10 second timeout for async
+                'blocking' => false, // Non-blocking request
+                'headers' => $headers,
+                'body' => wp_json_encode($body)
+            ));
+
+        } catch (\Exception $e) {
+            $this->logger->error('Async event forwarding failed: ' . $e->getMessage());
+        }
+    }
+
+    /**
      * Forward event to Cloudflare Worker.
      *
      * @since    1.0.0
@@ -934,14 +1045,7 @@ class GA4_Server_Side_Tagging_Endpoint
             $auth_header_value = $worker_api_key;
             
             
-            // Check if the API key looks like it might still be encrypted (base64 JSON format)
-            if (strlen($auth_header_value) > 100 || strpos($auth_header_value, 'eyJ') === 0) {
-                $this->logger->warning('API key appears to still be in encrypted/JWT format when sending to Cloudflare');
-                $this->logger->warning('This suggests the key was not properly decrypted from database storage');
-            }
-            
-            // Also log what we got from the database before decryption
-            $raw_api_key_from_db = get_option('ga4_worker_api_key', '');
+            // Performance: Removed debug logging for faster processing
 
             $headers = array(
                 'Content-Type' => 'application/json',
@@ -984,9 +1088,9 @@ class GA4_Server_Side_Tagging_Endpoint
                 }
             }
 
-            // Send to Cloudflare Worker
+            // Send to Cloudflare Worker - 10 second timeout for debug mode
             $response = wp_remote_post($cloudflare_url, array(
-                'timeout' => 30,
+                'timeout' => 10, // 10 second timeout for debug mode
                 'headers' => $headers,
                 'body' => wp_json_encode($body)
             ));
