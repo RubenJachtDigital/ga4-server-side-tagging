@@ -610,7 +610,6 @@ class GA4_Server_Side_Tagging_Endpoint
             }
 
             // Get configuration from database (secure - no caching)
-            $this->logger->info("Loading configuration from database for session: {$session_id}");
             $cloudflare_url = get_option('ga4_cloudflare_worker_url', '');
             $worker_api_key = \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::retrieve_encrypted_key('ga4_worker_api_key') ?: get_option('ga4_worker_api_key', '');
             $encryption_enabled = (bool) get_option('ga4_jwt_encryption_enabled', false);
@@ -624,9 +623,6 @@ class GA4_Server_Side_Tagging_Endpoint
 
             // Forward the complete original payload to Cloudflare (no modifications)
             $event_payload = $request_data;
-
-            // Send to Cloudflare Worker
-            $this->logger->info("Forwarding event to Cloudflare Worker for session: {$session_id}");
             
             // Check if debug mode is enabled to determine if we should wait for response
             $debug_mode = get_option('ga4_server_side_tagging_debug_mode', false);
