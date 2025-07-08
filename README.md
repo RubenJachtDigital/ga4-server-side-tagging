@@ -24,7 +24,9 @@ A comprehensive WordPress plugin that provides advanced server-side tagging for 
 - **Multi-layered bot detection** with behavioral analysis and scoring
 - **Complete A/B testing framework** with click tracking and GA4 integration
 - **Custom click tracking** with configurable CSS selectors and event naming
-- **Duplicate purchase prevention** for accurate e-commerce reporting
+- **🔒 PHP Session-based Duplicate Prevention** - Server-side order tracking with session management
+- **🔐 Secure Configuration Delivery** - JWT-encrypted API keys and settings with rotating keys
+- **📊 Complete Payload Logging** - Debug mode logs complete GA4 payloads for troubleshooting
 - **Automatic data migration** from legacy storage systems
 - **Comprehensive debugging** and logging system
 
@@ -118,22 +120,30 @@ Payload → Format Detection → Behavior Scoring → Attribution → GA4 API
 ### 📊 What Gets Encrypted
 
 **🔐 Always Encrypted:**
-- API keys (WordPress → Cloudflare)
-- Sensitive configuration data
-- Event payloads (when encryption enabled)
-- Database-stored encryption keys
+- **API Keys**: Cloudflare Worker authentication (WordPress → Cloudflare)
+- **Configuration Data**: Secure config endpoint responses with JWT encryption
+- **Database Storage**: Encryption keys stored with WordPress salts
+- **Temporary Keys**: 5-minute rotating JWT keys for config delivery
 
-**📋 Optionally Encrypted:**
-- Event data (Client → WordPress)
-- Response data (Cloudflare → WordPress)
-- Attribution parameters
-- User identification data
+**📋 Optionally Encrypted (When JWT Encryption Enabled):**
+- **Event Payloads**: Complete event data (Client → WordPress → Cloudflare)
+- **Response Data**: Worker responses back to WordPress
+- **Attribution Parameters**: Traffic source and campaign data
+- **User Identification Data**: Client IDs and session information
+- **E-commerce Data**: Order details and product information
 
 **🔓 Never Encrypted:**
-- HTTP headers (for routing)
-- Rate limiting data
-- Basic validation responses
-- CORS preflight responses
+- **HTTP Headers**: Required for routing and CORS handling
+- **Rate Limiting Data**: IP-based request counting
+- **Basic Validation Responses**: Simple success/error messages
+- **CORS Preflight Responses**: Browser security validations
+- **Debug Logs**: Console output and logging data
+
+**🔒 Encryption Methods Used:**
+- **JWT with HS256**: Event payload encryption (shared secret)
+- **Time-based JWT**: Configuration delivery (rotating 5-min keys)
+- **WordPress Salts**: Database encryption key derivation
+- **Bearer Token**: API key authentication in HTTP headers
 
 ### ⚡ Rate Limiting Implementation
 
@@ -148,6 +158,81 @@ Payload → Format Detection → Behavior Scoring → Attribution → GA4 API
 - **Method**: Cloudflare KV storage
 - **Integration**: Built-in DDoS protection
 - **Escalation**: Automatic IP blocking
+
+### 🔒 PHP Session-Based Duplicate Prevention
+
+**Enhanced Purchase Tracking Security:**
+```php
+// First visit to thank you page
+Order ID: 12345 → Session tracking: [] → Send order data → Session: [12345]
+
+// Page refresh/revisit same session
+Order ID: 12345 → Session tracking: [12345] → Send orderSent: true → Skip tracking
+```
+
+**Implementation Details:**
+- **Session Storage**: Server-side PHP sessions (secure, non-manipulable)
+- **Duplicate Detection**: Checks `$_SESSION['ga4_tracked_orders']` array
+- **Logging**: Warning-level logs when duplicates are prevented
+- **Cleanup**: Automatic session maintenance (keeps last 10 orders)
+- **Security**: Session-based (more secure than client-side localStorage)
+
+**Benefits:**
+- **Prevents revenue inflation** from page refreshes
+- **Server-side security** - cannot be bypassed by client manipulation
+- **Automatic cleanup** - maintains session efficiency
+- **Comprehensive logging** - tracks both successful and prevented duplicates
+
+### 🔐 Secure Configuration System
+
+**JWT-Encrypted Configuration Delivery:**
+```javascript
+// Configuration request flow
+GET /wp-json/ga4-server-side-tagging/v1/secure-config
+→ Multi-layered bot detection (6 security checks)
+→ Rate limiting (100 requests/hour per IP)
+→ JWT encryption with rotating 5-minute keys
+→ Encrypted response with API keys and settings
+```
+
+**Security Layers:**
+1. **Rate Limiting**: 100 requests/hour per IP for config endpoint
+2. **Bot Detection**: 6 comprehensive security validation checks
+3. **Origin Validation**: Same-domain referrer and origin verification
+4. **Browser Fingerprinting**: Validates authentic browser headers
+5. **JWT Encryption**: Rotating encryption keys (5-minute rotation)
+6. **Request Authentication**: Enhanced security validation
+
+**What Gets Encrypted in Configuration:**
+- **API Keys**: Cloudflare Worker authentication tokens
+- **Worker URLs**: Secure endpoint locations
+- **Encryption Keys**: Event payload encryption secrets
+- **Configuration Data**: Sensitive plugin settings
+
+### 📊 Complete Payload Logging
+
+**Cloudflare Worker Debug Logging:**
+```javascript
+// Debug mode logs complete GA4 payloads
+if (DEBUG_MODE) {
+  console.log("📤 Complete GA4 Payload being sent to Google Analytics:");
+  console.log(JSON.stringify(ga4Payload, null, 2));
+}
+```
+
+**Logged Data Includes:**
+- **Event Names**: page_view, purchase, add_to_cart, etc.
+- **Event Parameters**: All processed event data
+- **Consent Settings**: GDPR compliance status
+- **Attribution Data**: Source, medium, campaign information
+- **E-commerce Data**: Transaction details and product information
+- **User Identification**: Client ID, session ID, user ID (if present)
+
+**Benefits:**
+- **Debug Troubleshooting**: Complete visibility into GA4 data transmission
+- **Compliance Verification**: Confirms proper consent handling
+- **Data Quality Assurance**: Validates event parameters and formatting
+- **Performance Monitoring**: Tracks payload size and structure
 
 ## 📋 Requirements
 
