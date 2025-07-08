@@ -59,7 +59,7 @@
 
       // Log initialization
       this.log(
-        "%c GA4 Server-Side Tagging initialized v2 (Single Endpoint) ",
+        "%c GA4 Server-Side Tagging initialized v3 (Single Endpoint) ",
         "background: #4CAF50; color: white; font-size: 16px; font-weight: bold; padding: 8px 12px; border-radius: 4px;"
       );
     },
@@ -1923,6 +1923,12 @@
      */
     setupPurchaseTracking: function () {
       var self = this;
+
+      // Check if order was already sent (PHP session-based duplicate prevention)
+      if (this.config.orderSent === true) {
+        self.log("Order already tracked in PHP session - skipping duplicate tracking");
+        return;
+      }
 
       // Track purchase event on order received page using safe tracking
       if (

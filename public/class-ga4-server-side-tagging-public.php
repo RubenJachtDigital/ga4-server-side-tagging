@@ -44,6 +44,57 @@ class GA4_Server_Side_Tagging_Public
     public function __construct(GA4_Server_Side_Tagging_Logger $logger)
     {
         $this->logger = $logger;
+        
+        // Start session if not already started
+        if (!session_id()) {
+            session_start();
+        }
+    }
+
+    /**
+     * Check if an order has already been tracked in this session
+     *
+     * @since    1.0.0
+     * @param    int    $order_id    The order ID to check
+     * @return   bool   True if order was already tracked, false otherwise
+     */
+    private function is_order_already_tracked($order_id)
+    {
+        if (!isset($_SESSION['ga4_tracked_orders'])) {
+            $_SESSION['ga4_tracked_orders'] = array();
+        }
+        
+        return in_array($order_id, $_SESSION['ga4_tracked_orders']);
+    }
+
+    /**
+     * Mark an order as tracked in this session
+     *
+     * @since    1.0.0
+     * @param    int    $order_id    The order ID to mark as tracked
+     */
+    private function mark_order_as_tracked($order_id)
+    {
+        if (!isset($_SESSION['ga4_tracked_orders'])) {
+            $_SESSION['ga4_tracked_orders'] = array();
+        }
+        
+        if (!in_array($order_id, $_SESSION['ga4_tracked_orders'])) {
+            $_SESSION['ga4_tracked_orders'][] = $order_id;
+            $this->logger->info('Order marked as tracked in session: ' . $order_id);
+        }
+    }
+
+    /**
+     * Clean up old tracked orders from session (keep only last 10 orders)
+     *
+     * @since    1.0.0
+     */
+    private function cleanup_tracked_orders()
+    {
+        if (isset($_SESSION['ga4_tracked_orders']) && count($_SESSION['ga4_tracked_orders']) > 10) {
+            $_SESSION['ga4_tracked_orders'] = array_slice($_SESSION['ga4_tracked_orders'], -10);
+        }
     }
 
     /**
@@ -170,8 +221,18 @@ class GA4_Server_Side_Tagging_Public
                 if ($order_id) {
                     $order = wc_get_order($order_id);
                     if ($order) {
-                        $script_data['orderData'] = $this->get_order_data_for_tracking($order);
-                        $this->logger->info('Added order data for purchase event tracking. Order ID: ' . $order_id);
+                        // Check if this order was already tracked in this session
+                        if ($this->is_order_already_tracked($order_id)) {
+                            // Order already tracked - send orderSent flag instead
+                            $script_data['orderSent'] = true;
+                            $this->logger->warning('Duplicate order tracking prevented - Order ID: ' . $order_id . ' already tracked in this session');
+                        } else {
+                            // First time tracking this order - send order data and mark as tracked
+                            $script_data['orderData'] = $this->get_order_data_for_tracking($order);
+                            $this->mark_order_as_tracked($order_id);
+                            $this->cleanup_tracked_orders();
+                            $this->logger->info('Added order data for purchase event tracking. Order ID: ' . $order_id);
+                        }
                     }
                 }
             }
