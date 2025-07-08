@@ -413,6 +413,23 @@ if (!defined('WPINC')) {
                                 </p>
                             </td>
                         </tr>
+                        <tr id="simple_requests_bot_detection_row" style="<?php echo ($simple_requests_enabled ?? false) ? '' : 'display: none;'; ?>">
+                            <th scope="row">
+                                <label for="ga4_simple_requests_bot_detection">Simple Requests Bot Detection</label>
+                            </th>
+                            <td>
+                                <label for="ga4_simple_requests_bot_detection">
+                                    <input type="checkbox" id="ga4_simple_requests_bot_detection" name="ga4_simple_requests_bot_detection" <?php checked($simple_requests_bot_detection ?? false); ?> />
+                                    Enable WordPress bot detection for Simple requests
+                                </label>
+                                <p class="description">
+                                    <strong>🤖 Bot Detection:</strong> Validates requests via WordPress REST endpoint before sending to Cloudflare Worker.<br>
+                                    <strong>Benefits:</strong> Filters bot traffic at WordPress level, uses same bot detection as regular requests, session caching for performance.<br>
+                                    <strong>Trade-offs:</strong> Adds WordPress server response time (~200-300ms), but ensures higher data quality.<br>
+                                    <strong>Recommended for:</strong> Sites that need maximum bot filtering accuracy and can accept slight performance reduction.
+                                </p>
+                            </td>
+                        </tr>
                     </table>
                 </div>
 
@@ -651,6 +668,15 @@ jQuery(document).ready(function($) {
             $('#encryption_key_row').show();
         } else {
             $('#encryption_key_row').hide();
+        }
+    });
+    
+    // Toggle Simple requests bot detection visibility based on Simple requests checkbox
+    $('#ga4_simple_requests_enabled').on('change', function() {
+        if ($(this).is(':checked')) {
+            $('#simple_requests_bot_detection_row').show();
+        } else {
+            $('#simple_requests_bot_detection_row').hide();
         }
     });
     

@@ -238,6 +238,18 @@ class GA4_Server_Side_Tagging_Admin
 
         register_setting(
             'ga4_server_side_tagging_settings',
+            'ga4_simple_requests_bot_detection',
+            array(
+                'type' => 'boolean',
+                'description' => 'Enable bot detection for Simple requests via WordPress endpoint',
+                'sanitize_callback' => array($this, 'sanitize_checkbox'),
+                'show_in_rest' => false,
+                'default' => false,
+            )
+        );
+
+        register_setting(
+            'ga4_server_side_tagging_settings',
             'ga4_jwt_encryption_key',
             array(
                 'type' => 'string',
@@ -592,6 +604,7 @@ class GA4_Server_Side_Tagging_Admin
         
         // Simple requests settings
         $simple_requests_enabled = get_option('ga4_simple_requests_enabled', false);
+        $simple_requests_bot_detection = get_option('ga4_simple_requests_bot_detection', false);
         
         $yith_raq_form_id = get_option('ga4_yith_raq_form_id', '');
         $conversion_form_ids = get_option('ga4_conversion_form_ids', '');
@@ -736,6 +749,7 @@ class GA4_Server_Side_Tagging_Admin
         update_option('ga4_track_logged_in_users', isset($_POST['ga4_track_logged_in_users']));
         update_option('ga4_ecommerce_tracking', isset($_POST['ga4_ecommerce_tracking']));
         update_option('ga4_simple_requests_enabled', isset($_POST['ga4_simple_requests_enabled']));
+        update_option('ga4_simple_requests_bot_detection', isset($_POST['ga4_simple_requests_bot_detection']));
 
         // GDPR Consent settings
         update_option('ga4_use_iubenda', isset($_POST['ga4_use_iubenda']));

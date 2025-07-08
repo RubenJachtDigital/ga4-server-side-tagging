@@ -2557,9 +2557,9 @@
         prefix = prefix || "[GA4 Utils]";
         if (config && config.debugMode && window.console) {
           if (data) {
-            GA4Utils.helpers.log(prefix + " " + message, data);
+            console.log(prefix + " " + message, data);
           } else {
-            GA4Utils.helpers.log(prefix + " " + message);
+            console.log(prefix + " " + message);
           }
         }
       },

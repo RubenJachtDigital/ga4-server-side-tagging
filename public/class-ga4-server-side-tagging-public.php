@@ -163,38 +163,39 @@ class GA4_Server_Side_Tagging_Public
         // Prepare data for the script (enhanced with GDPR consent settings)
         $script_data = array(
             'measurementId' => $measurement_id,
-            'debugMode' => get_option('ga4_server_side_tagging_debug_mode', false),
-            'anonymizeIp' => get_option('ga4_anonymize_ip', true),
-            'ga4TrackLoggedInUsers' => get_option('ga4_track_logged_in_users', true),
+            'debugMode' => (bool) get_option('ga4_server_side_tagging_debug_mode', false),
+            'anonymizeIp' => (bool) get_option('ga4_anonymize_ip', true),
+            'ga4TrackLoggedInUsers' => (bool) get_option('ga4_track_logged_in_users', true),
             'apiEndpoint' => rest_url('ga4-server-side-tagging/v1'),
             'nonce' => wp_create_nonce('wp_rest'),
-            'isEcommerceEnabled' => get_option('ga4_ecommerce_tracking', true),
+            'isEcommerceEnabled' => (bool) get_option('ga4_ecommerce_tracking', true),
             'yithRaqFormId' => get_option('ga4_yith_raq_form_id', ''),
             'conversionFormIds' => get_option('ga4_conversion_form_ids', ''),
             'currency' => function_exists('get_woocommerce_currency') ? get_woocommerce_currency() : 'EUR',
             'siteName' => get_bloginfo('name'),
-            'encryptionEnabled' => get_option('ga4_jwt_encryption_enabled', false),
-            'simpleRequestsEnabled' => get_option('ga4_simple_requests_enabled', false),
+            'encryptionEnabled' => (bool) get_option('ga4_jwt_encryption_enabled', false),
+            'simpleRequestsEnabled' => (bool) get_option('ga4_simple_requests_enabled', false),
+            'simpleRequestsBotDetection' => (bool) get_option('ga4_simple_requests_bot_detection', false),
             
 
             // GDPR Consent settings (enhanced)
             'consentSettings' => array(
-                'useIubenda' => get_option('ga4_use_iubenda', false),
+                'useIubenda' => (bool) get_option('ga4_use_iubenda', false),
                 'acceptSelector' => get_option('ga4_consent_accept_selector', '.accept-all'),
                 'denySelector' => get_option('ga4_consent_deny_selector', '.deny-all'),
-                'defaultTimeout' => get_option('ga4_consent_default_timeout', 0),
+                'defaultTimeout' => (int) get_option('ga4_consent_default_timeout', 0),
                 'timeoutAction' => get_option('ga4_consent_timeout_action', 'deny'),
-                'consentModeEnabled' => get_option('ga4_consent_mode_enabled', true),
-                'disableAllIP' => get_option('ga4_disable_all_ip', false),
-                'storageExpirationHours' => get_option('ga4_storage_expiration_hours', 24)
+                'consentModeEnabled' => (bool) get_option('ga4_consent_mode_enabled', true),
+                'disableAllIP' => (bool) get_option('ga4_disable_all_ip', false),
+                'storageExpirationHours' => (int) get_option('ga4_storage_expiration_hours', 24)
             ),
 
             // A/B Testing settings
-            'abTestsEnabled' => get_option('ga4_ab_tests_enabled', false),
+            'abTestsEnabled' => (bool) get_option('ga4_ab_tests_enabled', false),
             'abTestsConfig' => get_option('ga4_ab_tests_config', '[]'),
 
             // Click Tracking settings
-            'clickTracksEnabled' => get_option('ga4_click_tracks_enabled', false),
+            'clickTracksEnabled' => (bool) get_option('ga4_click_tracks_enabled', false),
             'clickTracksConfig' => get_option('ga4_click_tracks_config', '[]')
         );
 
