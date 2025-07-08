@@ -2958,7 +2958,9 @@
           workerUrl: this.config.cloudflareWorkerUrl,
           eventName: payload.name,
           bypassWordPress: true,
-          encryptionDisabled: true
+          encryptionDisabled: true,
+          apiKeyValidationDisabled: true,
+          botDetectionEnabled: true
         });
 
         const response = await fetch(this.config.cloudflareWorkerUrl, {

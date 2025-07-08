@@ -408,8 +408,8 @@ if (!defined('WPINC')) {
                                 <p class="description">
                                     <strong>⚡ Performance Mode:</strong> Bypasses WordPress REST API and sends events directly from JavaScript to Cloudflare Worker.<br>
                                     <strong>Benefits:</strong> Dramatically reduces server response time (~80% faster), reduces server load, eliminates encryption overhead.<br>
-                                    <strong>Trade-offs:</strong> Disables encryption, API key validation, and server-side security checks. Events are sent directly to Cloudflare.<br>
-                                    <strong>Recommended for:</strong> High-traffic sites prioritizing performance over advanced security features.
+                                    <strong>Trade-offs:</strong> Disables encryption, API key validation, and origin validation. Bot detection and basic rate limiting remain active.<br>
+                                    <strong>Recommended for:</strong> High-traffic sites prioritizing performance while maintaining data quality through bot filtering.
                                 </p>
                             </td>
                         </tr>

@@ -1324,8 +1324,9 @@ async function handleRequest(request, env) {
     console.log(`🔍 Processing ${isSimpleRequest ? 'Simple' : 'Regular'} request`);
   }
 
-  // SECURITY CHECKS - Run comprehensive security validation (skip for Simple requests)
+  // SECURITY CHECKS - Run validation based on request type
   if (!isSimpleRequest) {
+    // Regular requests: Full security validation (payload, API key, origin, rate limiting)
     const securityCheck = await runSecurityChecks(request);
     if (!securityCheck.passed) {
       if (DEBUG_MODE) {
@@ -1357,8 +1358,48 @@ async function handleRequest(request, env) {
       }));
     }
   } else {
+    // Simple requests: Only essential checks (payload size, basic rate limiting)
+    // Skip API key validation and origin validation for performance
+    
     if (DEBUG_MODE) {
-      console.log("⚡ Simple request - bypassing security checks for performance");
+      console.log("⚡ Simple request - bypassing API key and origin validation");
+    }
+    
+    // Still validate payload size for Simple requests
+    if (!validatePayloadSize(request)) {
+      return new Response(
+        JSON.stringify({
+          success: false,
+          error: "Payload too large",
+          details: `Payload exceeds ${MAX_PAYLOAD_SIZE} bytes`
+        }),
+        {
+          status: 413,
+          headers: {
+            "Content-Type": "application/json",
+            ...getCORSHeaders(request),
+          },
+        }
+      );
+    }
+    
+    // Basic rate limiting for Simple requests (more lenient than regular requests)
+    const rateLimitCheck = await checkRateLimit(request);
+    if (!rateLimitCheck.allowed) {
+      return new Response(
+        JSON.stringify({
+          success: false,
+          error: "Rate limit exceeded",
+          details: `${rateLimitCheck.count}/${rateLimitCheck.limit} requests in window`
+        }),
+        {
+          status: 429,
+          headers: {
+            "Content-Type": "application/json",
+            ...getCORSHeaders(request),
+          },
+        }
+      );
     }
   }
 
