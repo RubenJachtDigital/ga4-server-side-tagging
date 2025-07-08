@@ -930,16 +930,6 @@ function checkEventData(payload) {
   // Check for suspicious event patterns
   const suspiciousPatterns = [];
 
-  // Extremely short engagement time
-  if (params.engagement_time_msec && params.engagement_time_msec < 200) {
-    suspiciousPatterns.push('very_short_engagement');
-  }
-
-  // Suspicious screen resolutions common to headless browsers
-  const botResolutions = ['1024x768', '1366x768', '1920x1080', '800x600', '1280x720'];
-  if (params.screen_resolution && botResolutions.includes(params.screen_resolution)) {
-    suspiciousPatterns.push('bot_resolution');
-  }
 
   // Missing JavaScript indicators
   if (params.has_javascript === false) {

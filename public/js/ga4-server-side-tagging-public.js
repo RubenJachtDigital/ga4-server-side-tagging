@@ -59,7 +59,7 @@
 
       // Log initialization
       this.log(
-        "%c GA4 Server-Side Tagging initialized v1 (Single Endpoint) ",
+        "%c GA4 Server-Side Tagging initialized v2 (Single Endpoint) ",
         "background: #4CAF50; color: white; font-size: 16px; font-weight: bold; padding: 8px 12px; border-radius: 4px;"
       );
     },
@@ -2956,8 +2956,24 @@
         this.log("📤 Sending event via send-event endpoint", {
           endpoint: sendEventEndpoint,
           eventName: payload.name,
-          consentReady: this.consentReady
+          consentReady: this.consentReady,
+          encryptionEnabled: this.config.encryptionEnabled
         });
+        
+        // Log encryption status for debugging
+        if (this.config.encryptionEnabled) {
+          console.log("🔐 [GA4 Encryption] Event will be encrypted before sending", {
+            eventName: payload.name,
+            endpoint: sendEventEndpoint,
+            timestamp: new Date().toISOString()
+          });
+        } else {
+          console.log("📤 [GA4 Encryption] Event will be sent unencrypted", {
+            eventName: payload.name,
+            endpoint: sendEventEndpoint,
+            timestamp: new Date().toISOString()
+          });
+        }
         
         return await GA4Utils.ajax.sendPayloadFetch(
           sendEventEndpoint,

@@ -471,6 +471,51 @@ class GA4_Encryption_Util
     }
 
     /**
+     * Decrypt general key from database storage using WordPress salts
+     * This method works with any key format, unlike decrypt_key_from_storage which only works with 64-char hex
+     * 
+     * @param string $encrypted_key Encrypted key from database
+     * @return string|false Decrypted key (any format) or false on failure
+     */
+    public static function decrypt_general_key_from_storage($encrypted_key)
+    {
+        try {
+            // Use WordPress option values as additional entropy
+            $salt = get_option('ga4_time_based_salt', '');
+            $auth_key = get_option('ga4_time_based_auth_key', '');
+            
+            if (empty($salt) || empty($auth_key)) {
+                throw new \Exception('WordPress time-based encryption options not configured');
+            }
+            
+            // Create derived key from WordPress salts
+            $derived_key = hash_pbkdf2('sha256', $auth_key, $salt, 10000, 32, true);
+            
+            // Decode the encrypted data
+            $encrypted_data = json_decode(base64_decode($encrypted_key), true);
+            
+            if (!$encrypted_data || !isset($encrypted_data['data'], $encrypted_data['iv'], $encrypted_data['tag'])) {
+                throw new \Exception('Invalid encrypted key format');
+            }
+            
+            // Decrypt the key using AES-256-GCM
+            $decrypted_key = self::decrypt_aes_gcm(
+                base64_decode($encrypted_data['data']),
+                base64_decode($encrypted_data['iv']),
+                base64_decode($encrypted_data['tag']),
+                $derived_key
+            );
+            
+            // No format validation for general keys - return as-is
+            return $decrypted_key;
+            
+        } catch (\Exception $e) {
+            error_log('GA4 General Key Decryption Error: ' . $e->getMessage());
+            return false;
+        }
+    }
+
+    /**
      * Encrypt general key (like API key) for database storage using WordPress salts
      * This method works with any string format, unlike encrypt_key_for_storage which only works with 64-char hex
      * 
@@ -548,8 +593,16 @@ class GA4_Encryption_Util
         $is_encrypted_format = self::is_encrypted_format($encrypted_key);
         
         if ($is_encrypted_format) {
-            // This is encrypted data, decrypt it
-            return self::decrypt_key_from_storage($encrypted_key);
+            // This is encrypted data, try to decrypt it
+            // First try as a JWT encryption key (strict 64-char hex validation)
+            $decrypted_key = self::decrypt_key_from_storage($encrypted_key);
+            
+            if ($decrypted_key !== false) {
+                return $decrypted_key;
+            }
+            
+            // If strict validation failed, try as a general key (no format validation)
+            return self::decrypt_general_key_from_storage($encrypted_key);
         } else {
             // This appears to be plaintext (legacy format), return as-is
             return $encrypted_key;

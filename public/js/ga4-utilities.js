@@ -2372,7 +2372,9 @@
         var headers = {
           "Content-Type": "application/json",
           "Origin": window.location.origin,
-          "Referer": window.location.href
+          "Referer": window.location.href,
+          "Accept": "application/json, text/plain, */*",
+          "Accept-Language": navigator.language || "en-US"
         };
 
         var requestBody = JSON.stringify(payload);
@@ -2401,6 +2403,15 @@
                 logPrefix
               );
               
+              // Additional console logging for encryption visibility
+              console.log("🔐 [GA4 Encryption] Successfully encrypted event payload", {
+                originalPayloadKeys: Object.keys(payload),
+                encryptedJwtLength: timeBasedJWT.length,
+                endpoint: endpoint,
+                timestamp: new Date().toISOString(),
+                status: "ENCRYPTED"
+              });
+              
             } catch (encryptError) {
               GA4Utils.helpers.log(
                 "⚠️ Time-based JWT encryption failed, sending unencrypted",
@@ -2408,6 +2419,15 @@
                 config,
                 logPrefix
               );
+              
+              // Additional console logging for encryption failure
+              console.warn("⚠️ [GA4 Encryption] Encryption failed, sending unencrypted", {
+                error: encryptError.message,
+                endpoint: endpoint,
+                timestamp: new Date().toISOString(),
+                status: "ENCRYPTION_FAILED"
+              });
+              
               // Continue with unencrypted payload if encryption fails
             }
           }
@@ -2423,6 +2443,26 @@
           config,
           logPrefix
         );
+        
+        // Additional console logging for request status
+        if (endpoint.includes('/send-event')) {
+          if (headers["X-Encrypted"]) {
+            console.log("🔐 [GA4 Encryption] Sending encrypted request to send-event endpoint", {
+              endpoint: endpoint,
+              hasEncryptionHeader: true,
+              timestamp: new Date().toISOString(),
+              status: "SENDING_ENCRYPTED"
+            });
+          } else {
+            console.log("📤 [GA4 Encryption] Sending unencrypted request to send-event endpoint", {
+              endpoint: endpoint,
+              encryptionEnabled: config?.encryptionEnabled || false,
+              reason: config?.encryptionEnabled ? "encryption_failed" : "encryption_disabled",
+              timestamp: new Date().toISOString(),
+              status: "SENDING_UNENCRYPTED"
+            });
+          }
+        }
 
         try {
           const response = await fetch(endpoint, {
@@ -2446,6 +2486,17 @@
             config,
             logPrefix
           );
+          
+          // Additional console logging for successful response
+          if (endpoint.includes('/send-event')) {
+            console.log("✅ [GA4 Encryption] Event sent successfully", {
+              endpoint: endpoint,
+              wasEncrypted: !!headers["X-Encrypted"],
+              responseData: data,
+              timestamp: new Date().toISOString(),
+              status: "SUCCESS"
+            });
+          }
           return data;
         } catch (error) {
           GA4Utils.helpers.log(

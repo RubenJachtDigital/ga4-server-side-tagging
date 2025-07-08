@@ -364,9 +364,10 @@ if (!defined('WPINC')) {
                             </th>
                             <td>
                                 <input type="text" id="ga4_worker_api_key" name="ga4_worker_api_key"
-                                    value="<?php echo esc_attr($worker_api_key); ?>" class="regular-text" />
+                                    value="<?php echo esc_attr($worker_api_key); ?>" class="regular-text" 
+                                    placeholder="Enter your API key or generate a new one" />
                                 <button type="button" id="generate_api_key" class="button button-secondary" style="margin-left: 10px;">Generate New Key</button>
-                                <p class="description">API key for secure communication with your Cloudflare Worker. Click "Generate New Key" to create a random secure key.</p>
+                                <p class="description">API key for secure communication with your Cloudflare Worker. You can manually enter your own key or click "Generate New Key" to create a random secure key.</p>
                                 <p class="description"><strong>Important:</strong> Copy this API key and paste it into your Cloudflare Worker configuration.</p>
                             </td>
                         </tr>
@@ -388,9 +389,10 @@ if (!defined('WPINC')) {
                             </th>
                             <td>
                                 <input type="text" id="ga4_jwt_encryption_key" name="ga4_jwt_encryption_key"
-                                    value="<?php echo esc_attr($jwt_encryption_key ?? ''); ?>" class="regular-text" />
+                                    value="<?php echo esc_attr($jwt_encryption_key ?? ''); ?>" class="regular-text" 
+                                    placeholder="Enter your encryption key or generate a new one" />
                                 <button type="button" id="generate_encryption_key" class="button button-secondary" style="margin-left: 10px;">Generate New Encryption Key</button>
-                                <p class="description">256-bit encryption key for JWT token encryption. Click "Generate New Encryption Key" to create a secure key.</p>
+                                <p class="description">256-bit encryption key for JWT token encryption. You can manually enter your own key or click "Generate New Encryption Key" to create a secure key.</p>
                                 <p class="description"><strong>Important:</strong> Copy this encryption key and paste it into your Cloudflare Worker configuration as the ENCRYPTION_KEY constant.</p>
                             </td>
                         </tr>

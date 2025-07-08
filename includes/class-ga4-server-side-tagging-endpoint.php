@@ -117,20 +117,25 @@ class GA4_Server_Side_Tagging_Endpoint
             $this->check_user_agent_patterns($user_agent),
             $this->check_known_bot_ips($client_ip),
             $this->check_suspicious_referrers($referer),
+            $this->check_missing_headers($request),
+            $this->check_suspicious_asn($client_ip),
+            $this->check_behavioral_patterns($request)
         );
 
-        // If any check returns true, it's a bot
-        $is_bot = in_array(true, $bot_checks, true);
+        // Require at least 2 positive checks to classify as bot (same as Cloudflare worker)
+        $positive_checks = array_filter($bot_checks, function($check) { return $check === true; });
+        $is_bot = count($positive_checks) >= 2;
 
         if ($is_bot) {
             // Log detailed bot detection information
             $detection_details = array(
                 'user_agent_check' => $bot_checks[0],
-                'headers_check' => $bot_checks[1],
-                'ip_check' => $bot_checks[2],
-                'referer_check' => $bot_checks[3],
-                'behavior_check' => $bot_checks[4],
-                'fingerprint_check' => $bot_checks[5]
+                'ip_check' => $bot_checks[1],
+                'referer_check' => $bot_checks[2],
+                'headers_check' => $bot_checks[3],
+                'asn_check' => $bot_checks[4],
+                'behavior_check' => $bot_checks[5],
+                'positive_checks_count' => count($positive_checks)
             );
 
             $this->logger->log_data(array(
@@ -300,6 +305,157 @@ class GA4_Server_Side_Tagging_Endpoint
     }
 
     /**
+     * Check for missing essential headers (similar to Cloudflare worker).
+     *
+     * @since    1.0.0
+     * @param    \WP_REST_Request    $request    The request object.
+     * @return   bool                          True if suspicious headers detected.
+     */
+    private function check_missing_headers($request)
+    {
+        $essential_headers = array(
+            'accept',
+            'accept-language',
+            'accept-encoding'
+        );
+
+        $missing_count = 0;
+        foreach ($essential_headers as $header) {
+            if (empty($request->get_header($header))) {
+                $missing_count++;
+            }
+        }
+
+        // Missing 2 or more essential headers is suspicious
+        if ($missing_count >= 2) {
+            return true;
+        }
+
+        // Check for suspicious header values
+        $accept = $request->get_header('accept');
+        if ($accept === '*/*') {
+            return true; // Too generic
+        }
+
+        $connection = $request->get_header('connection');
+        if ($connection === 'close') {
+            return true; // Suspicious connection type
+        }
+
+        // Check for automation indicators in headers
+        $x_forwarded_for = $request->get_header('x-forwarded-for');
+        if ($x_forwarded_for && stripos($x_forwarded_for, 'crawler') !== false) {
+            return true;
+        }
+
+        // Check for "from" header (bot indicator)
+        if (!empty($request->get_header('from'))) {
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * Check for suspicious ASN/hosting providers (similar to Cloudflare worker).
+     *
+     * @since    1.0.0
+     * @param    string    $ip    The client IP address.
+     * @return   bool            True if suspicious ASN detected.
+     */
+    private function check_suspicious_asn($ip)
+    {
+        if (empty($ip)) {
+            return false;
+        }
+
+        // Known bot/hosting provider IP ranges (expanded from Cloudflare worker)
+        $suspicious_ip_ranges = array(
+            // Cloud providers commonly used by bots
+            '13.107.42.0/24',     // Microsoft Azure
+            '20.36.0.0/14',       // Microsoft Azure
+            '40.74.0.0/15',       // Microsoft Azure
+            '52.0.0.0/11',        // Amazon AWS
+            '54.0.0.0/15',        // Amazon AWS
+            '35.0.0.0/8',         // Google Cloud
+            '34.0.0.0/9',         // Google Cloud
+            '104.16.0.0/12',      // Cloudflare
+            '172.64.0.0/13',      // Cloudflare
+            '173.245.48.0/20',    // Cloudflare
+            '103.21.244.0/22',    // Cloudflare
+            '103.22.200.0/22',    // Cloudflare
+            '103.31.4.0/22',      // Cloudflare
+            '141.101.64.0/18',    // Cloudflare
+            '108.162.192.0/18',   // Cloudflare
+            '190.93.240.0/20',    // Cloudflare
+            '188.114.96.0/20',    // Cloudflare
+            '197.234.240.0/22',   // Cloudflare
+            '198.41.128.0/17',    // Cloudflare
+            '162.158.0.0/15',     // Cloudflare
+            '104.24.0.0/14',      // Cloudflare
+            '172.67.0.0/16',      // Cloudflare
+            '131.0.72.0/22'       // Cloudflare
+        );
+
+        foreach ($suspicious_ip_ranges as $range) {
+            if ($this->ip_in_range($ip, $range)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Check for suspicious behavioral patterns (similar to Cloudflare worker).
+     *
+     * @since    1.0.0
+     * @param    \WP_REST_Request    $request    The request object.
+     * @return   bool                          True if suspicious behavior detected.
+     */
+    private function check_behavioral_patterns($request)
+    {
+        $user_agent = $request->get_header('user-agent');
+        
+        // Check for automation tools in user agent
+        $automation_patterns = array(
+            '/curl/i',
+            '/wget/i',
+            '/python/i',
+            '/node/i',
+            '/automation/i',
+            '/postman/i',
+            '/insomnia/i',
+            '/selenium/i',
+            '/webdriver/i',
+            '/puppeteer/i',
+            '/playwright/i',
+            '/phantom/i'
+        );
+
+        foreach ($automation_patterns as $pattern) {
+            if (preg_match($pattern, $user_agent)) {
+                return true;
+            }
+        }
+
+        // Check content type
+        $content_type = $request->get_header('content-type');
+        if ($content_type && $content_type !== 'application/json') {
+            return true; // Expecting JSON for this endpoint
+        }
+
+        // Check for missing origin and referer (both missing is suspicious)
+        $origin = $request->get_header('origin');
+        $referer = $request->get_header('referer');
+        if (empty($origin) && empty($referer)) {
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
      * Check if IP is within a CIDR range.
      *
      * @since    1.0.0
@@ -385,7 +541,7 @@ class GA4_Server_Side_Tagging_Endpoint
             }
 
             // Check for event name (accept both 'name' and 'event_name' fields)
-            if (empty($request_data['name']) || empty($request_data['event_name'])) {
+            if (empty($request_data['event_name'])) {
                 return new \WP_REST_Response(array('error' => 'Missing required field: event name'), 400);
             }
 
@@ -781,8 +937,6 @@ class GA4_Server_Side_Tagging_Endpoint
             // Use the API key as-is for Authorization header (already decrypted from database)
             $auth_header_value = $worker_api_key;
             
-            // Debug logging: Log the exact API key being sent to Cloudflare (first 20 characters for security)
-            $this->logger->info('Sending API key to Cloudflare - Full length: ' . strlen($auth_header_value) . ', Preview: ' . substr($auth_header_value, 0, 20) . '...');
             
             // Check if the API key looks like it might still be encrypted (base64 JSON format)
             if (strlen($auth_header_value) > 100 || strpos($auth_header_value, 'eyJ') === 0) {
@@ -792,7 +946,6 @@ class GA4_Server_Side_Tagging_Endpoint
             
             // Also log what we got from the database before decryption
             $raw_api_key_from_db = get_option('ga4_worker_api_key', '');
-            $this->logger->info('Raw API key from database - Length: ' . strlen($raw_api_key_from_db) . ', Preview: ' . substr($raw_api_key_from_db, 0, 20) . '...');
 
             $headers = array(
                 'Content-Type' => 'application/json',
