@@ -174,6 +174,7 @@ class GA4_Server_Side_Tagging_Public
             'currency' => function_exists('get_woocommerce_currency') ? get_woocommerce_currency() : 'EUR',
             'siteName' => get_bloginfo('name'),
             'encryptionEnabled' => get_option('ga4_jwt_encryption_enabled', false),
+            'simpleRequestsEnabled' => get_option('ga4_simple_requests_enabled', false),
             
 
             // GDPR Consent settings (enhanced)
@@ -247,6 +248,11 @@ class GA4_Server_Side_Tagging_Public
                 $script_data['quoteData'] = $quote_data;
                 $this->logger->info('Added quote data for request a quote event tracking. Order ID: ' . $quote_data['transaction_id']);
             }
+        }
+
+        // Add Cloudflare Worker URL for Simple requests (direct JS to Cloudflare)
+        if (get_option('ga4_simple_requests_enabled', false)) {
+            $script_data['cloudflareWorkerUrl'] = get_option('ga4_cloudflare_worker_url', '');
         }
 
         // Pass data to the script

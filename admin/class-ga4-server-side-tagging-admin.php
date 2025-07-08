@@ -226,6 +226,18 @@ class GA4_Server_Side_Tagging_Admin
 
         register_setting(
             'ga4_server_side_tagging_settings',
+            'ga4_simple_requests_enabled',
+            array(
+                'type' => 'boolean',
+                'description' => 'Enable Simple requests for maximum performance',
+                'sanitize_callback' => array($this, 'sanitize_checkbox'),
+                'show_in_rest' => false,
+                'default' => false,
+            )
+        );
+
+        register_setting(
+            'ga4_server_side_tagging_settings',
             'ga4_jwt_encryption_key',
             array(
                 'type' => 'string',
@@ -578,6 +590,9 @@ class GA4_Server_Side_Tagging_Admin
         $jwt_encryption_enabled = get_option('ga4_jwt_encryption_enabled', false);
         $jwt_encryption_key = \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::retrieve_encrypted_key('ga4_jwt_encryption_key');
         
+        // Simple requests settings
+        $simple_requests_enabled = get_option('ga4_simple_requests_enabled', false);
+        
         $yith_raq_form_id = get_option('ga4_yith_raq_form_id', '');
         $conversion_form_ids = get_option('ga4_conversion_form_ids', '');
         
@@ -720,6 +735,7 @@ class GA4_Server_Side_Tagging_Admin
         update_option('ga4_server_side_tagging_debug_mode', isset($_POST['ga4_server_side_tagging_debug_mode']));
         update_option('ga4_track_logged_in_users', isset($_POST['ga4_track_logged_in_users']));
         update_option('ga4_ecommerce_tracking', isset($_POST['ga4_ecommerce_tracking']));
+        update_option('ga4_simple_requests_enabled', isset($_POST['ga4_simple_requests_enabled']));
 
         // GDPR Consent settings
         update_option('ga4_use_iubenda', isset($_POST['ga4_use_iubenda']));

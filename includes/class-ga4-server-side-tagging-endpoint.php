@@ -116,21 +116,18 @@ class GA4_Server_Side_Tagging_Endpoint
             $this->log_security_failure($request, 'ORIGIN_VALIDATION_FAILED', 'Request origin validation failed (heavy check)');
             return false;
         }
-        $this->logger->info("Origin validation passed for session: {$session_id}");
 
         // 2. Bot detection - Block automated requests
         if ($this->is_bot_request($request)) {
             $this->log_security_failure($request, 'BOT_DETECTED', 'Bot or automated request detected');
             return false;
         }
-        $this->logger->info("Bot detection passed for session: {$session_id}");
 
         // 3. Enhanced security checks with stricter validation
         if (!$this->validate_enhanced_security($request)) {
             $this->log_security_failure($request, 'ENHANCED_SECURITY_CHECK_FAILED', 'Enhanced security validation failed');
             return false;
         }
-        $this->logger->info("Enhanced security validation passed for session: {$session_id}");
 
         // All heavy validation passed - mark session as validated
         $_SESSION[$this->validation_session_key] = true;

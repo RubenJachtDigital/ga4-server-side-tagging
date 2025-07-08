@@ -1317,43 +1317,57 @@ async function handleRequest(request, env) {
     });
   }
 
-  // SECURITY CHECKS - Run comprehensive security validation
-  const securityCheck = await runSecurityChecks(request);
-  if (!securityCheck.passed) {
-    if (DEBUG_MODE) {
-      console.log("Security check failed:", JSON.stringify(securityCheck));
-    }
-    
-    return new Response(
-      JSON.stringify({
-        success: false,
-        error: "Security validation failed",
-        reason: securityCheck.reason,
-        details: securityCheck.details
-      }),
-      {
-        status: securityCheck.reason === "rate_limited" ? 429 : 403,
-        headers: {
-          "Content-Type": "application/json",
-          ...getCORSHeaders(request),
-        },
-      }
-    );
+  // Check if this is a Simple request (bypasses most security checks)
+  const isSimpleRequest = request.headers.get("X-Simple-request") === "true";
+  
+  if (DEBUG_MODE) {
+    console.log(`🔍 Processing ${isSimpleRequest ? 'Simple' : 'Regular'} request`);
   }
 
-  if (DEBUG_MODE) {
-    console.log("Security checks passed:", JSON.stringify({
-      origin: securityCheck.origin?.domain,
-      rateLimit: `${securityCheck.rateLimit?.count}/${securityCheck.rateLimit?.limit}`
-    }));
+  // SECURITY CHECKS - Run comprehensive security validation (skip for Simple requests)
+  if (!isSimpleRequest) {
+    const securityCheck = await runSecurityChecks(request);
+    if (!securityCheck.passed) {
+      if (DEBUG_MODE) {
+        console.log("Security check failed:", JSON.stringify(securityCheck));
+      }
+      
+      return new Response(
+        JSON.stringify({
+          success: false,
+          error: "Security validation failed",
+          reason: securityCheck.reason,
+          details: securityCheck.details
+        }),
+        {
+          status: securityCheck.reason === "rate_limited" ? 429 : 403,
+          headers: {
+            "Content-Type": "application/json",
+            ...getCORSHeaders(request),
+          },
+        }
+      );
+    }
+    
+    // Log security check success for regular requests
+    if (DEBUG_MODE) {
+      console.log("Security checks passed:", JSON.stringify({
+        origin: securityCheck.origin?.domain,
+        rateLimit: `${securityCheck.rateLimit?.count}/${securityCheck.rateLimit?.limit}`
+      }));
+    }
+  } else {
+    if (DEBUG_MODE) {
+      console.log("⚡ Simple request - bypassing security checks for performance");
+    }
   }
 
   try {
     // Parse the request body
     let payload = await request.json();
 
-    // Check if the request uses JWT encryption
-    const isJWTEncrypted = request.headers.get('X-Encrypted') === 'true';
+    // Check if the request uses JWT encryption (skip for Simple requests)
+    const isJWTEncrypted = !isSimpleRequest && request.headers.get('X-Encrypted') === 'true';
     if (isJWTEncrypted) {
       if (!JWT_ENCRYPTION_ENABLED) {
         console.warn("❌ X-Encrypted header present but JWT_ENCRYPTION_ENABLED is false");
@@ -1715,7 +1729,8 @@ async function handleGA4Event(payload, request) {
     "ga4_response": DEBUG_MODE ? ga4ResponseBody : undefined,
     "debug": payloadDebug ? ga4Payload : undefined,
     "consent_applied": ga4Payload.consent ? true : false,
-    "consent_mode": ga4Payload.consent?.ad_user_data || 'unknown'
+    "consent_mode": ga4Payload.consent?.ad_user_data || 'unknown',
+    "request_type": request.headers.get("X-Simple-request") === "true" ? "simple" : "regular"
   };
 
   // Return encrypted response if requested
@@ -1735,8 +1750,9 @@ async function createResponse(responseData, request) {
     ...getCORSHeaders(request),
   };
 
-  // Always encrypt responses when encryption is enabled (regardless of request encryption status)
-  if (JWT_ENCRYPTION_ENABLED && ENCRYPTION_KEY) {
+  // Always encrypt responses when encryption is enabled (skip for Simple requests)
+  const isSimpleRequest = request.headers.get("X-Simple-request") === "true";
+  if (JWT_ENCRYPTION_ENABLED && ENCRYPTION_KEY && !isSimpleRequest) {
     try {
       const jwtToken = await encrypt(responseBody, ENCRYPTION_KEY);
       responseBody = JSON.stringify({ jwt: jwtToken });
@@ -2470,7 +2486,7 @@ function getCORSHeaders(request) {
   return {
     "Access-Control-Allow-Origin": origin,
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization, X-API-Key, X-Encrypted",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization, X-API-Key, X-Encrypted, X-Simple-request",
     "Access-Control-Max-Age": "86400",
   };
 }

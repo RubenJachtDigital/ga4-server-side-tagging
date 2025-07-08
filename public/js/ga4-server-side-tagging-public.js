@@ -59,7 +59,7 @@
 
       // Log initialization
       this.log(
-        "%c GA4 Server-Side Tagging initialized v3 (Single Endpoint) ",
+        "%c GA4 Server-Side Tagging initialized v1 (Single Endpoint) ",
         "background: #4CAF50; color: white; font-size: 16px; font-weight: bold; padding: 8px 12px; border-radius: 4px;"
       );
     },
@@ -2742,7 +2742,18 @@
         eventName: eventName
       });
       
-      this.sendAjaxPayload(null, data);
+      // Check if Simple requests are enabled for direct Cloudflare communication
+      if (this.config.simpleRequestsEnabled && this.config.cloudflareWorkerUrl) {
+        this.log("📡 Simple requests enabled - sending directly to Cloudflare Worker", {
+          eventName: eventName,
+          workerUrl: this.config.cloudflareWorkerUrl,
+          bypassWordPress: true
+        });
+        
+        this.sendSimpleRequest(data);
+      } else {
+        this.sendAjaxPayload(null, data);
+      }
     },
 
 
@@ -2937,6 +2948,54 @@
         }
     },
 
+
+    /**
+     * Send Simple request directly to Cloudflare Worker (bypasses WordPress)
+     */
+    sendSimpleRequest: async function (payload) {
+      try {
+        this.log("🚀 Sending Simple request directly to Cloudflare Worker", {
+          workerUrl: this.config.cloudflareWorkerUrl,
+          eventName: payload.name,
+          bypassWordPress: true,
+          encryptionDisabled: true
+        });
+
+        const response = await fetch(this.config.cloudflareWorkerUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Simple-request': 'true'
+          },
+          body: JSON.stringify({
+            event_name: payload.name,
+            params: payload.params || {}
+          })
+        });
+
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        const result = await response.json();
+        
+        this.log("✅ Simple request sent successfully", {
+          eventName: payload.name,
+          status: response.status,
+          response: result
+        });
+
+        return result;
+
+      } catch (error) {
+        this.log("❌ Simple request failed", {
+          eventName: payload.name,
+          error: error.message,
+          workerUrl: this.config.cloudflareWorkerUrl
+        });
+        return Promise.resolve({ error: error.message });
+      }
+    },
 
     /**
      * Send AJAX payload to endpoint
