@@ -552,6 +552,10 @@ class GA4_Server_Side_Tagging_Admin
             $test_result = $this->test_ga4_connection();
         }
 
+        // Ensure existing plain text keys are encrypted when loading admin page
+        $this->ensure_api_key_is_encrypted();
+        $this->ensure_encryption_key_is_encrypted();
+
         // Get current settings
         $measurement_id = get_option('ga4_measurement_id', '');
         $api_secret = get_option('ga4_api_secret', '');
@@ -663,9 +667,16 @@ class GA4_Server_Side_Tagging_Admin
             update_option('ga4_cloudflare_worker_url', esc_url_raw(wp_unslash($_POST['ga4_cloudflare_worker_url'])));
         }
 
-        // Handle API key and JWT encryption key manually
+        // Handle API key with encryption
         if (isset($_POST['ga4_worker_api_key'])) {
-            update_option('ga4_worker_api_key', sanitize_text_field(wp_unslash($_POST['ga4_worker_api_key'])));
+            $api_key = sanitize_text_field(wp_unslash($_POST['ga4_worker_api_key']));
+            if (!empty($api_key)) {
+                // Store API key using encryption utility
+                \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::store_encrypted_key('ga4_worker_api_key', $api_key);
+            } else {
+                // Clear the key if empty
+                update_option('ga4_worker_api_key', '');
+            }
         }
 
         if (isset($_POST['ga4_jwt_encryption_enabled'])) {
@@ -678,7 +689,13 @@ class GA4_Server_Side_Tagging_Admin
             $encryption_key = sanitize_text_field(wp_unslash($_POST['ga4_jwt_encryption_key']));
             // Basic validation for encryption key format
             if (empty($encryption_key) || (strlen($encryption_key) === 64 && ctype_xdigit($encryption_key))) {
-                update_option('ga4_jwt_encryption_key', $encryption_key);
+                if (!empty($encryption_key)) {
+                    // Store encryption key using encryption utility
+                    \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::store_encrypted_key('ga4_jwt_encryption_key', $encryption_key);
+                } else {
+                    // Clear the key if empty
+                    update_option('ga4_jwt_encryption_key', '');
+                }
             } else {
                 add_settings_error(
                     'ga4_server_side_tagging_settings',
@@ -765,6 +782,10 @@ class GA4_Server_Side_Tagging_Admin
 
         // Update logger debug mode
         $this->logger->set_debug_mode(isset($_POST['ga4_server_side_tagging_debug_mode']));
+
+        // Ensure existing plain text keys are encrypted after settings save
+        $this->ensure_api_key_is_encrypted();
+        $this->ensure_encryption_key_is_encrypted();
 
         // Log settings update
         $this->logger->info('Plugin settings updated');
@@ -1244,8 +1265,8 @@ class GA4_Server_Side_Tagging_Admin
             // Generate new encryption key (256-bit = 64 hex characters)
             $new_encryption_key = $this->generate_encryption_key();
             
-            // Save it to options (simplified - no encryption)
-            update_option('ga4_jwt_encryption_key', $new_encryption_key);
+            // Save it to options with encryption
+            \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::store_encrypted_key($new_encryption_key, 'ga4_jwt_encryption_key');
             
             // Return success response
             wp_send_json_success(array(
@@ -1331,9 +1352,6 @@ class GA4_Server_Side_Tagging_Admin
                     } else {
                         $this->logger->warning('Failed to automatically encrypt existing plain text worker API key');
                     }
-                } else {
-                    // Key is already encrypted (decrypted_test is different from raw_key)
-                    $this->logger->info('Worker API key is already encrypted, no upgrade needed');
                 }
             }
         } catch (\Exception $e) {

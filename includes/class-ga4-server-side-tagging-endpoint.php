@@ -566,9 +566,7 @@ class GA4_Server_Side_Tagging_Endpoint
             if (!empty($raw_encryption_key_from_option)) {
                 // Check if the raw value looks like encrypted data (base64 encoded JSON)
                 $is_encrypted_format = $this->is_key_in_encrypted_format($raw_encryption_key_from_option);
-                if ($is_encrypted_format) {
-                    $this->logger->info('Encryption key from get_option is in encrypted format (good - using retrieve_encrypted_key)');
-                } else {
+                if (!$is_encrypted_format) {
                     // Check if it's a valid hex key (plain text)
                     if (strlen($raw_encryption_key_from_option) === 64 && ctype_xdigit($raw_encryption_key_from_option)) {
                         $this->logger->warning('Encryption key from get_option is in plain text format (should be encrypted)');
@@ -584,9 +582,7 @@ class GA4_Server_Side_Tagging_Endpoint
             $raw_api_key_from_option = get_option('ga4_worker_api_key', '');
             if (!empty($raw_api_key_from_option)) {
                 $is_api_key_encrypted = $this->is_key_in_encrypted_format($raw_api_key_from_option);
-                if ($is_api_key_encrypted) {
-                    $this->logger->info('Worker API key from get_option is in encrypted format (good - using retrieve_encrypted_key)');
-                } else {
+                if (!$is_api_key_encrypted)  {
                     // Check if it looks like a valid API key (32+ chars, alphanumeric/dashes)
                     if (strlen($raw_api_key_from_option) >= 32 && preg_match('/^[a-zA-Z0-9\-_]+$/', $raw_api_key_from_option)) {
                         $this->logger->warning('Worker API key from get_option is in plain text format (should be encrypted)');
