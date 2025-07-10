@@ -95,17 +95,34 @@ class GA4_Server_Side_Tagging_Logger {
     }
 
     /**
-     * Log an info message.
+     * Log an info message (only in debug mode).
      *
      * @since    1.0.0
      * @param    string    $message    The message to log.
      */
     public function info( $message ) {
-        $this->log( $message, 'info' );
+        if ( $this->debug_mode ) {
+            $this->log( $message, 'info' );
+        }
     }
 
     /**
-     * Log a warning message.
+     * Log a bot detection message (always logged).
+     *
+     * @since    1.0.0
+     * @param    string    $message    The message to log.
+     * @param    array     $data       Optional data to include.
+     */
+    public function bot_detected( $message, $data = null ) {
+        $full_message = 'BOT DETECTED: ' . $message;
+        if ( $data ) {
+            $full_message .= ' - Data: ' . wp_json_encode( $data );
+        }
+        $this->log( $full_message, 'warning' );
+    }
+
+    /**
+     * Log a warning message (always logged).
      *
      * @since    1.0.0
      * @param    string    $message    The message to log.
@@ -115,7 +132,7 @@ class GA4_Server_Side_Tagging_Logger {
     }
 
     /**
-     * Log an error message.
+     * Log an error message (always logged).
      *
      * @since    1.0.0
      * @param    string    $message    The message to log.

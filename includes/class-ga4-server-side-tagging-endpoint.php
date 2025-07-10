@@ -190,12 +190,12 @@ class GA4_Server_Side_Tagging_Endpoint
                 'positive_checks_count' => count($positive_checks)
             );
 
-            $this->logger->log_data(array(
+            $this->logger->bot_detected('Bot detected attempting to access secure config', array(
                 'ip' => $client_ip,
                 'user_agent' => $user_agent,
                 'referer' => $referer,
                 'detection_details' => $detection_details
-            ), 'Bot detected attempting to access secure config', );
+            ));
         }
 
         return $is_bot;
@@ -840,9 +840,7 @@ class GA4_Server_Side_Tagging_Endpoint
 
                 return $decrypted_data;
             } catch (\Exception $e) {
-                $this->logger->error('Failed to verify time-based JWT request: ' . $e->getMessage(), array(
-                    'ip' => $this->get_client_ip($request)
-                ));
+                $this->logger->error('Failed to verify time-based JWT request from IP ' . $this->get_client_ip($request) . ': ' . $e->getMessage());
                 throw new \Exception('Failed to verify time-based JWT request: ' . $e->getMessage());
             }
         }
@@ -866,16 +864,12 @@ class GA4_Server_Side_Tagging_Endpoint
         try {
             $decrypted_data = GA4_Encryption_Util::parse_encrypted_request($request_body, $encryption_key);
 
-            $this->logger->info('JWT request verified successfully', array(
-                'ip' => $this->get_client_ip($request)
-            ));
+            // JWT verification successful - no logging needed for normal operation
 
             return $decrypted_data;
 
         } catch (\Exception $e) {
-            $this->logger->error('Failed to verify JWT request: ' . $e->getMessage(), array(
-                'ip' => $this->get_client_ip($request)
-            ));
+            $this->logger->error('Failed to verify JWT request from IP ' . $this->get_client_ip($request) . ': ' . $e->getMessage());
 
             throw new \Exception('JWT request verification failed: ' . $e->getMessage());
         }
@@ -921,7 +915,7 @@ class GA4_Server_Side_Tagging_Endpoint
         if (wp_get_environment_type() === 'development') {
             $accept_language = $request->get_header('accept-language');
             $accept_encoding = $request->get_header('accept-encoding');
-            $this->logger->error("Debug headers - Accept-Language: '{$accept_language}', Accept-Encoding: '{$accept_encoding}'");
+            $this->logger->info("Debug headers - Accept-Language: '{$accept_language}', Accept-Encoding: '{$accept_encoding}'");
         }
 
         // 4. Check request method is POST only
@@ -1296,19 +1290,13 @@ class GA4_Server_Side_Tagging_Endpoint
             $accept = $request->get_header('accept');
             $referer = $request->get_header('referer');
             
-            $this->logger->info('Bot validation request received from IP: ' . $client_ip . ' with headers: ' . json_encode([
-                'user_agent' => $user_agent,
-                'accept_language' => $accept_language,
-                'accept_encoding' => $accept_encoding,
-                'accept' => $accept,
-                'referer' => $referer
-            ]));
+            // Removed unnecessary info log - only log when bot is detected
             
             // Perform comprehensive bot detection (same as send-event)
             $is_bot = $this->is_bot_request($request);
             
             if ($is_bot) {
-                $this->logger->warning('Bot detected during validation', [
+                $this->logger->bot_detected('Bot detected during validation', [
                     'ip' => $client_ip,
                     'user_agent' => $user_agent,
                     'accept_language' => $accept_language,
