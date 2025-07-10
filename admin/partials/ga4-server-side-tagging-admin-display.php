@@ -657,13 +657,13 @@ if (!defined('WPINC')) {
                                 <strong>Value:</strong> <input type="text" readonly value="<?php echo esc_attr($api_secret ?: 'Configure GA4 API Secret first'); ?>" style="width: 100%; padding: 5px; margin-top: 5px; font-family: monospace;" onclick="this.select();">
                             </div>
                             
-                            <div style="margin-bottom: 15px; background: #f8f8f8; padding: 10px; border-radius: 4px; border-left: 4px solid #dc3545;">
+                            <div id="secure-method-api-key" style="margin-bottom: 15px; background: #f8f8f8; padding: 10px; border-radius: 4px; border-left: 4px solid #dc3545;">
                                 <strong>🔒 Secure Method Only:</strong> <code>API_KEY</code><br>
                                 <strong>Value:</strong> <input type="text" readonly value="<?php echo esc_attr($worker_api_key ?: 'Generate API key first'); ?>" style="width: 100%; padding: 5px; margin-top: 5px; font-family: monospace;" onclick="this.select();">
                                 <small style="color: #666;">Only required for "Secure WordPress to Cloudflare" transmission</small>
                             </div>
                             
-                            <div style="margin-bottom: 15px; background: #f8f8f8; padding: 10px; border-radius: 4px; border-left: 4px solid #dc3545;">
+                            <div id="secure-method-encryption-key" style="margin-bottom: 15px; background: #f8f8f8; padding: 10px; border-radius: 4px; border-left: 4px solid #dc3545;">
                                 <strong>🔒 Secure Method Only:</strong> <code>ENCRYPTION_KEY</code><br>
                                 <strong>Value:</strong> <input type="text" readonly value="<?php echo esc_attr($jwt_encryption_key ?: 'Generate encryption key if using JWT encryption'); ?>" style="width: 100%; padding: 5px; margin-top: 5px; font-family: monospace;" onclick="this.select();">
                                 <small style="color: #666;">Only required for "Secure WordPress to Cloudflare" transmission</small>
@@ -765,8 +765,23 @@ jQuery(document).ready(function($) {
     
     // Cloudflare Variables Modal functionality
     $('#show-cloudflare-vars').on('click', function() {
+        // Show/hide secure method fields based on current transmission method
+        updateModalFieldsVisibility();
         $('#cloudflare-vars-modal').show();
     });
+    
+    // Function to update modal fields visibility based on transmission method
+    function updateModalFieldsVisibility() {
+        const selectedMethod = $('#ga4_transmission_method').val();
+        
+        if (selectedMethod === 'secure_wp_to_cf') {
+            $('#secure-method-api-key').show();
+            $('#secure-method-encryption-key').show();
+        } else {
+            $('#secure-method-api-key').hide();
+            $('#secure-method-encryption-key').hide();
+        }
+    }
     
     $('#close-cloudflare-modal, #close-cloudflare-modal-btn').on('click', function() {
         $('#cloudflare-vars-modal').hide();
@@ -798,7 +813,7 @@ jQuery(document).ready(function($) {
                 '✅ <strong>Audit Trail:</strong> Complete logging of all security validations'
             ],
             cons: [
-                '❌ <strong>Performance Impact:</strong> Additional encryption/decryption adds ~100-200ms',
+                '❌ <strong>Performance Impact:</strong> Additional encryption/decryption impacts performance',
                 '❌ <strong>Complex Setup:</strong> Requires encryption key configuration in Cloudflare Worker',
                 '❌ <strong>Resource Usage:</strong> Higher CPU usage for encryption operations'
             ],
