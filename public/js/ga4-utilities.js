@@ -2315,7 +2315,7 @@
           headers["X-WP-Nonce"] = config.nonce || "";
           
           // Check if this is the send-event endpoint and encryption is enabled
-          if (endpoint.includes('/send-event') && config.encryptionEnabled) {
+          if (endpoint.includes('/send-events') && config.encryptionEnabled) {
             try {
               // Generate time-based JWT token using site URL and current time
               const timeBasedJWT = await GA4Utils.encryption.createSelfGeneratedTimeBasedJWT(payload);
@@ -2376,16 +2376,16 @@
         );
         
         // Additional console logging for request status
-        if (endpoint.includes('/send-event')) {
+        if (endpoint.includes('/send-events')) {
           if (headers["X-Encrypted"]) {
-            GA4Utils.helpers.log("🔐 [GA4 Encryption] Sending encrypted request to send-event endpoint", {
+            GA4Utils.helpers.log("🔐 [GA4 Encryption] Sending encrypted request to send-events endpoint", {
               endpoint: endpoint,
               hasEncryptionHeader: true,
               timestamp: new Date().toISOString(),
               status: "SENDING_ENCRYPTED"
             });
           } else {
-            GA4Utils.helpers.log("📤 [GA4 Encryption] Sending unencrypted request to send-event endpoint", {
+            GA4Utils.helpers.log("📤 [GA4 Encryption] Sending unencrypted request to send-events endpoint", {
               endpoint: endpoint,
               encryptionEnabled: config?.encryptionEnabled || false,
               reason: config?.encryptionEnabled ? "encryption_failed" : "encryption_disabled",
@@ -2419,7 +2419,7 @@
           );
           
           // Additional console logging for successful response
-          if (endpoint.includes('/send-event')) {
+          if (endpoint.includes('/send-events')) {
             GA4Utils.helpers.log("✅ [GA4 Encryption] Event sent successfully", {
               endpoint: endpoint,
               wasEncrypted: !!headers["X-Encrypted"],

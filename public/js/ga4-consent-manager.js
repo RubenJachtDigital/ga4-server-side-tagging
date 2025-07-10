@@ -64,7 +64,50 @@
         this.setupDefaultConsentTimeout();
       }
 
+      // Set up page unload listener to send batch events
+      this.setupPageUnloadListener();
+
     },
+
+    /**
+     * Setup page unload listener to send batch events when user leaves
+     */
+    setupPageUnloadListener: function() {
+      var self = this;
+      
+      // Use both beforeunload and visibilitychange for maximum coverage
+      window.addEventListener('beforeunload', function() {
+        self.log("📤 BEFOREUNLOAD triggered - sending batch events", {
+          eventQueueLength: self.eventQueue?.length || 0,
+          consentGiven: self.consentGiven
+        });
+        self.sendBatchEvents();
+      });
+      
+      // Handle page visibility changes (mobile browsers, tab switching)
+      document.addEventListener('visibilitychange', function() {
+        if (document.visibilityState === 'hidden') {
+          self.log("📤 VISIBILITYCHANGE hidden - sending batch events", {
+            eventQueueLength: self.eventQueue?.length || 0,
+            consentGiven: self.consentGiven,
+            visibilityState: document.visibilityState
+          });
+          self.sendBatchEvents();
+        }
+      });
+      
+      // Handle page freeze/resume (modern browsers)
+      window.addEventListener('pagehide', function() {
+        self.log("📤 PAGEHIDE triggered - sending batch events", {
+          eventQueueLength: self.eventQueue?.length || 0,
+          consentGiven: self.consentGiven
+        });
+        self.sendBatchEvents();
+      });
+
+      this.log("👂 Page unload listeners configured for batch event sending");
+    },
+    
 
     /**
      * Check if consent has been given
@@ -82,24 +125,22 @@
 
     /**
      * Check if an event should be sent or queued
+     * NEW BEHAVIOR: Always queue events - never send immediately
      * @param {string} eventName - The event name
      * @param {Object} eventParams - The basic event parameters
      * @param {Object} completeEventData - The complete event data with all context (optional)
-     * @returns {boolean} - true if event should be sent now, false if queued
+     * @returns {boolean} - Always false to queue events
      */
     shouldSendEvent: function(eventName, eventParams, completeEventData) {
       
-      if (this.consentGiven) {
-        return true; // Send immediately
-      }
-
+      // NEW: Always queue events regardless of consent status
       // Queue the event with complete data if available
       if (completeEventData) {
         this.queueEvent(eventName, completeEventData, true); // true = isCompleteData
       } else {
         this.queueEvent(eventName, eventParams, false); // false = basicParams only
       }
-      return false; // Don't send now
+      return false; // Always queue, never send immediately
     },
 
     /**
@@ -130,44 +171,90 @@
     },
 
     /**
-     * Process all queued events
+     * Process all queued events (NEW: no longer sends events, just marks consent as ready)
      */
     processQueuedEvents: function() {
-      // Call the main GA4ServerSideTagging processQueuedEvents function
-      if (typeof GA4ServerSideTagging !== 'undefined' && GA4ServerSideTagging.processQueuedEvents) {
-        GA4ServerSideTagging.processQueuedEvents();
+      // NEW BEHAVIOR: Don't send events immediately
+      // Just ensure that consent tracking instances are notified
+      if (typeof GA4ServerSideTagging !== 'undefined' && GA4ServerSideTagging.onConsentReady) {
+        GA4ServerSideTagging.onConsentReady();
+      }
+      
+      this.log("📋 Events remain queued for batch sending on page unload", {
+        queuedEvents: this.eventQueue.length
+      });
+    },
+
+    /**
+     * Send all queued events as a single batch payload
+     * Only sends events if consent has been determined (granted or denied)
+     */
+    sendBatchEvents: function() {
+      if (!this.eventQueue || this.eventQueue.length === 0) {
+        this.log("📤 No events to send in batch");
+        return;
       }
 
-      // Also process consent manager's own queue if it exists
-      if (this.eventQueue && this.eventQueue.length > 0) {
-        // Prevent duplicate processing if events were already processed
-        if (this.eventsProcessed) {
-          this.eventQueue = []; // Clear queue
-          return;
-        }
+      // Check if consent has been processed - only send if consent has been determined
+      if (!this.consentProcessed) {
+        this.log("❌ Consent not yet processed - not sending batch events", {
+          queuedEvents: this.eventQueue.length,
+          consentGiven: this.consentGiven,
+          consentProcessed: this.consentProcessed,
+          consentStatus: this.consentStatus
+        });
+        return;
+      }
 
-        // Mark events as being processed
-        this.eventsProcessed = true;
+      this.log("✅ Consent confirmed - proceeding with batch send", {
+        queuedEvents: this.eventQueue.length,
+        consentGiven: this.consentGiven,
+        consentStatus: this.consentStatus
+      });
 
-        // Process events in order
-        var eventsToProcess = this.eventQueue.slice(); // Copy array
-        this.eventQueue = []; // Clear queue immediately to prevent reprocessing
+      // Get current consent data
+      var consentData = this.getConsentForServerSide();
+      
+      // Prepare batch payload
+      var batchPayload = {
+        batch: true,
+        events: [],
+        consent: consentData,
+        timestamp: Date.now()
+      };
+
+      // Process each event in the queue
+      this.eventQueue.forEach(function(queuedEvent) {
+        var eventData = {
+          name: queuedEvent.eventName,
+          params: queuedEvent.eventParams,
+          isCompleteData: queuedEvent.isCompleteData,
+          timestamp: queuedEvent.timestamp
+        };
         
-        // Clear session storage since events are being processed
-        this.clearQueuedEventsFromSession();
+        // Add page context if event doesn't have complete data
+        if (!queuedEvent.isCompleteData && queuedEvent.pageUrl) {
+          eventData.pageUrl = queuedEvent.pageUrl;
+          eventData.pageTitle = queuedEvent.pageTitle;
+        }
+        
+        batchPayload.events.push(eventData);
+      });
 
-        // Use setTimeout to ensure events are processed after consent is fully applied
-        setTimeout(function() {
-          eventsToProcess.forEach(function(queuedEvent, index) {
+      this.log("📤 Sending batch payload with " + batchPayload.events.length + " events", batchPayload);
 
-            // Add small delay between events to prevent overwhelming the server
-            setTimeout(async function() {
-              await this.sendEventWithBypass(queuedEvent.eventName, queuedEvent.eventParams, queuedEvent.isCompleteData);
-            }.bind(this), index * 100); // 100ms delay between events
-            
-          }.bind(this));
-        }.bind(this), 200); // 200ms delay before starting to process
+      // Send batch to the tracking instance
+      if (this.trackingInstance && typeof this.trackingInstance.sendBatchEvents === 'function') {
+        this.trackingInstance.sendBatchEvents(batchPayload);
+      } else if (typeof GA4ServerSideTagging !== 'undefined' && typeof GA4ServerSideTagging.sendBatchEvents === 'function') {
+        GA4ServerSideTagging.sendBatchEvents(batchPayload);
+      } else {
+        this.log("❌ No batch sending method available");
       }
+
+      // Clear the queue after sending
+      this.eventQueue = [];
+      this.clearQueuedEventsFromSession();
     },
 
     /**
@@ -855,7 +942,6 @@
           }
           self.applyConsent(storedConsent);
           self.enableTracking();
-          self.processQueuedEvents();
           clearInterval(pollInterval);
         }
 
@@ -1034,9 +1120,8 @@
         consentProcessed: this.consentProcessed
       });
 
-      // Enable tracking and process queued events
+      // Enable tracking (events remain queued for batch sending)
       this.enableTracking();
-      this.processQueuedEvents();
     },
 
     /**
@@ -1087,9 +1172,8 @@
         consentProcessed: this.consentProcessed
       });
 
-      // Enable tracking and process queued events (they will be anonymized)
+      // Enable tracking (events remain queued for batch sending with anonymization)
       this.enableTracking();
-      this.processQueuedEvents();
     },
 
     /**
@@ -1331,6 +1415,39 @@
 
     denyConsent: function () {
       this.handleConsentDenied('button_click');
+    },
+
+    /**
+     * TESTING METHODS - Force consent and batch sending for debugging
+     */
+    testGrantConsent: function() {
+      this.log("🧪 TEST: Manually granting consent for testing");
+      this.handleConsentGiven('test_manual');
+    },
+
+    testSendBatch: function() {
+      this.log("🧪 TEST: Manually triggering batch send", {
+        queueLength: this.eventQueue?.length || 0,
+        consentGiven: this.consentGiven
+      });
+      this.sendBatchEvents();
+    },
+
+    testForceConsent: function() {
+      this.log("🧪 TEST: Force enabling consent for testing (bypass normal flow)");
+      this.consentGiven = true;
+      this.consentStatus = {
+        analytics_storage: 'GRANTED',
+        ad_storage: 'GRANTED',
+        ad_user_data: 'GRANTED',
+        ad_personalization: 'GRANTED',
+        functionality_storage: 'GRANTED',
+        personalization_storage: 'GRANTED',
+        security_storage: 'GRANTED',
+        consent_reason: 'test_manual',
+        timestamp: Date.now()
+      };
+      this.log("🧪 TEST: Consent forced for testing - you can now test batch sending");
     },
 
     resetConsent: function () {

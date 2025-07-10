@@ -1435,7 +1435,12 @@ async function handleRequest(request, env) {
       }
     }
 
-    // GDPR CONSENT PROCESSING - Apply before bot detection
+    // Check if this is a batch request
+    if (payload.events && Array.isArray(payload.events) && payload.events.length > 0) {
+      return await handleBatchEvents(payload, request);
+    }
+
+    // GDPR CONSENT PROCESSING - Apply before bot detection (single event)
     const consentProcessedPayload = processGDPRConsent(payload);
 
     // BOT DETECTION CHECK
@@ -1489,6 +1494,128 @@ async function handleRequest(request, env) {
         }
       );
     }
+  }
+}
+
+/**
+ * Handle batch events by processing each event individually using existing functions
+ * @param {Object} batchPayload
+ * @param {Request} request
+ */
+async function handleBatchEvents(batchPayload, request) {
+  try {
+    if (DEBUG_MODE) {
+      console.log("📦 Processing batch of events:", {
+        eventCount: batchPayload.events.length,
+        hasConsent: !!batchPayload.consent,
+        timestamp: batchPayload.timestamp
+      });
+    }
+
+    // Process each event in the batch using existing functions
+    const results = [];
+    const errors = [];
+    
+    for (let i = 0; i < batchPayload.events.length; i++) {
+      const event = batchPayload.events[i];
+      
+      try {
+        // Convert batch event back to single event format for existing functions
+        const singleEventPayload = {
+          event_name: event.name,
+          name: event.name,
+          params: event.params || {},
+          consent: batchPayload.consent,
+          timestamp: event.timestamp || batchPayload.timestamp
+        };
+
+        // Add page context for events without complete data
+        if (!event.isCompleteData && event.pageUrl) {
+          singleEventPayload.params.page_location = event.pageUrl;
+          singleEventPayload.params.page_title = event.pageTitle;
+        }
+
+        // Use existing GDPR processing
+        const consentProcessedPayload = processGDPRConsent(singleEventPayload);
+
+        // Bot detection for batch (use first event's data as representative)
+        if (i === 0) {
+          const botDetection = detectBot(request, consentProcessedPayload);
+          
+          if (botDetection.isBot) {
+            logBotDetection(botDetection, request, consentProcessedPayload);
+            
+            // Return early if bot detected - don't process any events in batch
+            const botResponseData = {
+              success: true,
+              filtered: true,
+              reason: "bot_detected",
+              bot_score: botDetection.score,
+              events_filtered: batchPayload.events.length,
+              gdpr_processed: true
+            };
+            
+            return await createResponse(botResponseData, request);
+          }
+        }
+
+        // Use existing handleGA4Event function to maintain payload structure
+        const ga4Response = await handleGA4Event(consentProcessedPayload, request);
+        
+        // Parse the response to get success status
+        const responseData = await ga4Response.json().catch(() => ({}));
+        
+        results.push({
+          event: event.name,
+          success: ga4Response.ok,
+          status: ga4Response.status,
+          response: DEBUG_MODE ? responseData : undefined
+        });
+
+        if (DEBUG_MODE) {
+          console.log(`✅ Processed event ${i + 1}/${batchPayload.events.length}: ${event.name}`);
+        }
+
+      } catch (eventError) {
+        console.error(`❌ Error processing event ${i + 1}:`, eventError);
+        errors.push({
+          event: event.name || 'unknown',
+          error: eventError.message
+        });
+      }
+    }
+
+    // Prepare batch response
+    const responseData = {
+      success: true,
+      events_processed: results.length,
+      events_failed: errors.length,
+      total_events: batchPayload.events.length,
+      results: DEBUG_MODE ? results : undefined,
+      errors: errors.length > 0 ? errors : undefined,
+      consent_applied: !!batchPayload.consent,
+      consent_mode: batchPayload.consent?.analytics_storage || 'unknown',
+      request_type: request.headers.get("X-Simple-request") === "true" ? "simple" : "regular"
+    };
+
+    if (DEBUG_MODE) {
+      console.log("📦 Batch processing complete:", responseData);
+    }
+
+    return await createResponse(responseData, request);
+
+  } catch (error) {
+    console.error("❌ Error processing batch events:", error);
+    
+    const errorResponseData = {
+      success: false,
+      error: "Batch processing failed",
+      details: error.message,
+      events_processed: 0,
+      events_failed: batchPayload.events?.length || 0
+    };
+    
+    return await createResponse(errorResponseData, request);
   }
 }
 

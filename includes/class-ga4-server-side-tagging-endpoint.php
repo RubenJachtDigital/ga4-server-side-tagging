@@ -77,9 +77,10 @@ class GA4_Server_Side_Tagging_Endpoint
      */
     public function register_routes()
     {
-        register_rest_route('ga4-server-side-tagging/v1', '/send-event', array(
+        // Events endpoint (supports both single events and batches)
+        register_rest_route('ga4-server-side-tagging/v1', '/send-events', array(
             'methods' => 'POST',
-            'callback' => array($this, 'send_event'),
+            'callback' => array($this, 'send_events'),
             'permission_callback' => array($this, 'check_strong_permission'),
         ));
 
@@ -562,24 +563,23 @@ class GA4_Server_Side_Tagging_Endpoint
     }
 
     /**
-     * Send event to Cloudflare Worker with embedded config.
+     * Send events to Cloudflare Worker (batch processing only).
      *
      * @since    1.0.0
      * @param    \WP_REST_Request    $request    The request object.
      * @return   \WP_REST_Response               The response object.
      */
-    public function send_event($request)
+    public function send_events($request)
     {
         $start_time = microtime(true);
         $session_id = session_id();
         $client_ip = $this->get_client_ip($request);
         
-        
         try {
             // Rate limiting check - 100 requests per minute per IP
             $rate_limit_check = $this->check_rate_limit($request);
             if (!$rate_limit_check['allowed']) {
-                $this->logger->warning("Rate limit exceeded for IP: {$client_ip} - rejected request");
+                $this->logger->warning("Rate limit exceeded for IP: {$client_ip} - rejected batch request");
                 return new \WP_REST_Response(
                     array(
                         'error' => 'Rate limit exceeded',
@@ -590,77 +590,144 @@ class GA4_Server_Side_Tagging_Endpoint
                 );
             }
 
-            // Handle encrypted request if present (now supports temporary key encryption)
+            // Handle encrypted request if present
             $request_data = $this->handle_encrypted_request($request);
 
-            // Validate required fields without modifying the payload
+            // Debug logging for the request data structure
+            $this->logger->info("Received request data structure", [
+                'has_events' => isset($request_data['events']),
+                'events_count' => isset($request_data['events']) ? count($request_data['events']) : 0,
+                'has_consent' => isset($request_data['consent']),
+                'has_batch' => isset($request_data['batch']),
+                'has_event_name' => isset($request_data['event_name']),
+                'has_name' => isset($request_data['name']),
+                'request_keys' => array_keys($request_data ?: [])
+            ]);
+
+            // Validate batch request structure
             if (empty($request_data)) {
+                $this->logger->error("Empty request data received");
                 return new \WP_REST_Response(array('error' => 'Invalid request data'), 400);
             }
 
-            // Check for event name (accept both 'name' and 'event_name' fields)
-            if (empty($request_data['event_name'])) {
-                return new \WP_REST_Response(array('error' => 'Missing required field: event name'), 400);
+            // Support both single events and batch events
+            if (isset($request_data['events']) && is_array($request_data['events'])) {
+                // Already a batch request - validate it
+                if (empty($request_data['events'])) {
+                    return new \WP_REST_Response(array('error' => 'Empty events array'), 400);
+                }
+                
+                // Validate each event in the batch
+                foreach ($request_data['events'] as $index => $event) {
+                    if (!is_array($event)) {
+                        return new \WP_REST_Response(array('error' => "Event at index {$index} is not an array"), 400);
+                    }
+                    
+                    if (!isset($event['name']) || empty($event['name'])) {
+                        return new \WP_REST_Response(array('error' => "Missing event name at index {$index}"), 400);
+                    }
+                    
+                    if (!isset($event['params']) || !is_array($event['params'])) {
+                        // If no params, create empty array
+                        $request_data['events'][$index]['params'] = array();
+                    }
+                }
+                
+                $this->logger->info("Validated batch with " . count($request_data['events']) . " events");
+            } elseif (isset($request_data['event_name']) || isset($request_data['name'])) {
+                // Single event request - convert to batch format
+                $event_name = $request_data['event_name'] ?? $request_data['name'];
+                $event_params = $request_data['params'] ?? $request_data;
+                
+                // Remove event-level fields from params
+                unset($event_params['event_name'], $event_params['name'], $event_params['consent']);
+                
+                $request_data['events'] = array(
+                    array(
+                        'name' => $event_name,
+                        'params' => $event_params,
+                        'isCompleteData' => true,
+                        'timestamp' => $request_data['timestamp'] ?? time() * 1000
+                    )
+                );
+                
+                $this->logger->info("Converted single event to batch format: {$event_name}");
+            } else {
+                return new \WP_REST_Response(array('error' => 'Missing events array or single event data'), 400);
             }
 
-            // Check for required client_id and session_id in params
-            $params = $request_data['params'] ?? array();
-            if (empty($params['client_id'])) {
-                return new \WP_REST_Response(array('error' => 'Missing required field: client_id'), 400);
+            // Validate consent data (optional for debugging)
+            if (!isset($request_data['consent'])) {
+                $this->logger->warning("Missing consent data - using default DENIED consent");
+                $request_data['consent'] = array(
+                    'analytics_storage' => 'DENIED',
+                    'ad_storage' => 'DENIED',
+                    'consent_mode' => 'DENIED',
+                    'consent_reason' => 'missing_data'
+                );
             }
 
-            if (empty($params['session_id'])) {
-                return new \WP_REST_Response(array('error' => 'Missing required field: session_id'), 400);
-            }
+            // Log batch info
+            $event_count = count($request_data['events']);
+            $this->logger->info("Processing batch of {$event_count} events for session: {$session_id}");
 
-            // Get configuration from database (secure - no caching)
+            // Get configuration from database
             $cloudflare_url = get_option('ga4_cloudflare_worker_url', '');
             $worker_api_key = \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::retrieve_encrypted_key('ga4_worker_api_key') ?: get_option('ga4_worker_api_key', '');
             $encryption_enabled = (bool) get_option('ga4_jwt_encryption_enabled', false);
             $encryption_key = \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::retrieve_encrypted_key('ga4_jwt_encryption_key') ?: '';
             
-            // Removed excessive error logging for performance optimization
-
             if (empty($cloudflare_url) || empty($worker_api_key)) {
                 return new \WP_REST_Response(array('error' => 'Configuration incomplete'), 500);
             }
 
-            // Forward the complete original payload to Cloudflare (no modifications)
-            $event_payload = $request_data;
+            // Forward the complete batch payload to Cloudflare
+            $batch_payload = $request_data;
             
-            // Check if debug mode is enabled to determine if we should wait for response
+            // Check if debug mode is enabled
             $debug_mode = get_option('ga4_server_side_tagging_debug_mode', false);
             
             if ($debug_mode) {
                 // Debug mode: Wait for response from Cloudflare for debugging
-                $result = $this->forward_to_cloudflare($event_payload, $cloudflare_url, $worker_api_key, $encryption_enabled, $encryption_key, $request);
+                $result = $this->forward_to_cloudflare($batch_payload, $cloudflare_url, $worker_api_key, $encryption_enabled, $encryption_key, $request);
                 $processing_time = round((microtime(true) - $start_time) * 1000, 2);
 
                 if ($result['success']) {
-                    $response_data = array('success' => true);
+                    $response_data = array(
+                        'success' => true, 
+                        'events_processed' => $event_count,
+                        'processing_time_ms' => $processing_time
+                    );
                     if (isset($result['worker_response'])) {
                         $response_data['worker_response'] = $result['worker_response'];
                     }
                     return new \WP_REST_Response($response_data, 200);
                 } else {
-                    $this->logger->error("Failed to send event to Cloudflare for session: {$session_id} after {$processing_time}ms: " . $result['error']);
-                    return new \WP_REST_Response(array('error' => 'Event sending failed', 'details' => $result['error']), 500);
+                    $this->logger->error("Failed to send batch events to Cloudflare for session: {$session_id} after {$processing_time}ms: " . $result['error']);
+                    return new \WP_REST_Response(array(
+                        'error' => 'Batch event sending failed', 
+                        'details' => $result['error'],
+                        'events_failed' => $event_count
+                    ), 500);
                 }
             } else {
                 // Production mode: Fire and forget for maximum performance
-                $this->forward_to_cloudflare_async($event_payload, $cloudflare_url, $worker_api_key, $encryption_enabled, $encryption_key, $request);
+                $this->forward_to_cloudflare_async($batch_payload, $cloudflare_url, $worker_api_key, $encryption_enabled, $encryption_key, $request);
                 $processing_time = round((microtime(true) - $start_time) * 1000, 2);
                 
-                return new \WP_REST_Response(array('success' => true), 200);
+                return new \WP_REST_Response(array(
+                    'success' => true, 
+                    'events_processed' => $event_count,
+                    'processing_time_ms' => $processing_time
+                ), 200);
             }
 
         } catch (\Exception $e) {
             $processing_time = round((microtime(true) - $start_time) * 1000, 2);
-            $this->logger->error("Failed to process send-event request for session: {$session_id} after {$processing_time}ms: " . $e->getMessage());
+            $this->logger->error("Failed to process batch events request for session: {$session_id} after {$processing_time}ms: " . $e->getMessage());
             return new \WP_REST_Response(array('error' => 'Processing error'), 500);
         }
     }
-
 
     /**
      * Log security failures to the main log file.
@@ -1292,7 +1359,7 @@ class GA4_Server_Side_Tagging_Endpoint
             
             // Removed unnecessary info log - only log when bot is detected
             
-            // Perform comprehensive bot detection (same as send-event)
+            // Perform comprehensive bot detection (same as send-events)
             $is_bot = $this->is_bot_request($request);
             
             if ($is_bot) {

@@ -59,7 +59,7 @@
 
       // Log initialization
       this.log(
-        "%c GA4 Server-Side Tagging initialized v2",
+        "%c GA4 Server-Side Tagging initialized v3",
         "background: #4CAF50; color: white; font-size: 16px; font-weight: bold; padding: 8px 12px; border-radius: 4px;"
       );
     },
@@ -2779,6 +2779,151 @@
       }
     },
 
+    /**
+     * Send multiple events as a batch payload
+     * @param {Object} batchPayload - Batch payload with events array
+     */
+    sendBatchEvents: function(batchPayload) {
+      if (!batchPayload || !batchPayload.events || batchPayload.events.length === 0) {
+        this.log("No events in batch payload");
+        return;
+      }
+
+      this.log("📦 Processing batch payload with " + batchPayload.events.length + " events", batchPayload);
+
+      // Determine transmission method based on configuration
+      const transmissionMethod = this.config.transmissionMethod || 'secure_wp_to_cf';
+      
+      // Format batch data for transmission
+      var data = {
+        batch: true,
+        events: batchPayload.events,
+        consent: batchPayload.consent,
+        timestamp: batchPayload.timestamp || Date.now()
+      };
+
+      this.log("🚀 Sending batch via " + transmissionMethod, {
+        eventCount: data.events.length,
+        transmissionMethod: transmissionMethod,
+        consent: data.consent
+      });
+
+      if (transmissionMethod === 'direct_to_cf' && this.config.cloudflareWorkerUrl) {
+        this.log("⚡ Direct to Cloudflare batch transmission");
+        this.sendBatchToCloudflare(data);
+      } else if (transmissionMethod === 'wp_endpoint_to_cf' && this.config.cloudflareWorkerUrl) {
+        this.log("🛡️ WordPress Endpoint to Cloudflare batch transmission");
+        this.sendBatchViaWordPress(data, false); // false = no encryption
+      } else {
+        this.log("🔒 Secure WordPress to Cloudflare batch transmission");
+        this.sendBatchViaWordPress(data, true); // true = with encryption
+      }
+    },
+
+    /**
+     * Send batch directly to Cloudflare Worker (direct transmission)
+     */
+    sendBatchToCloudflare: function(batchData) {
+      if (!this.config.cloudflareWorkerUrl) {
+        this.log("❌ Cloudflare Worker URL not configured for direct transmission");
+        return;
+      }
+
+      // Use sendBeacon for page unload reliability, fallback to fetch
+      try {
+        var payload = JSON.stringify(batchData);
+        
+        if (navigator.sendBeacon) {
+          var success = navigator.sendBeacon(this.config.cloudflareWorkerUrl, payload);
+          if (success) {
+            this.log("✅ Batch sent via sendBeacon to Cloudflare Worker");
+            return;
+          } else {
+            this.log("⚠️ sendBeacon failed, falling back to fetch");
+          }
+        }
+
+        // Fallback to fetch for browsers without sendBeacon support
+        fetch(this.config.cloudflareWorkerUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: payload,
+          keepalive: true // Important for page unload
+        }).then(function(response) {
+          this.log("✅ Batch sent via fetch to Cloudflare Worker", {
+            status: response.status,
+            ok: response.ok
+          });
+        }.bind(this)).catch(function(error) {
+          this.log("❌ Error sending batch to Cloudflare Worker", error);
+        }.bind(this));
+
+      } catch (error) {
+        this.log("❌ Error preparing batch for Cloudflare Worker", error);
+      }
+    },
+
+    /**
+     * Send batch via WordPress endpoint (balanced or secure transmission)
+     */
+    sendBatchViaWordPress: function(batchData, useEncryption) {
+      var endpoint = this.config.apiEndpoint + '/send-events';
+      
+      try {
+        var payload = JSON.stringify(batchData);
+        
+        // For batch requests, prefer fetch over sendBeacon to ensure proper headers
+        // sendBeacon doesn't allow setting Content-Type header properly
+        if (navigator.sendBeacon && false) { // Disabled for batch requests
+          var success = navigator.sendBeacon(endpoint, payload);
+          if (success) {
+            this.log("✅ Batch sent via sendBeacon to WordPress endpoint");
+            return;
+          } else {
+            this.log("⚠️ sendBeacon failed, falling back to fetch");
+          }
+        }
+
+        // Use fetch for batch requests
+        fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-WP-Nonce': this.config.nonce || ''
+          },
+          body: payload,
+          keepalive: true // Important for page unload
+        }).then(function(response) {
+          if (response.ok) {
+            this.log("✅ Batch sent via fetch to WordPress endpoint", {
+              status: response.status,
+              ok: response.ok,
+              encrypted: useEncryption
+            });
+          } else {
+            this.log("❌ WordPress endpoint returned error", {
+              status: response.status,
+              statusText: response.statusText,
+              ok: response.ok
+            });
+            
+            // Try to parse error response
+            response.text().then(function(text) {
+              this.log("Error response body:", text);
+            }.bind(this)).catch(function() {
+              this.log("Could not parse error response");
+            }.bind(this));
+          }
+        }.bind(this)).catch(function(error) {
+          this.log("❌ Network error sending batch to WordPress endpoint", error);
+        }.bind(this));
+
+      } catch (error) {
+        this.log("❌ Error preparing batch for WordPress endpoint", error);
+      }
+    },
 
   /**
    * Get consent-aware client ID
@@ -3136,7 +3281,7 @@
         }
         
         // Use the single send-event endpoint
-        const sendEventEndpoint = this.config.apiEndpoint + '/send-event';
+        const sendEventEndpoint = this.config.apiEndpoint + '/send-events';
         
         this.log("📤 Sending event via send-event endpoint", {
           endpoint: sendEventEndpoint,
