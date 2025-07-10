@@ -111,8 +111,8 @@ class GA4_Server_Side_Tagging_Admin
         // Add submenu for logs
         add_submenu_page(
             'ga4-server-side-tagging',
-            'Debug Logs',
-            'Debug Logs',
+            'Error Logs',
+            'Error Logs',
             'manage_options',
             'ga4-server-side-tagging-logs',
             array($this, 'display_logs_page')
@@ -431,6 +431,18 @@ class GA4_Server_Side_Tagging_Admin
             )
         );
 
+        register_setting(
+            'ga4_server_side_tagging_settings',
+            'ga4_transmission_method',
+            array(
+                'type' => 'string',
+                'description' => 'Event transmission method',
+                'sanitize_callback' => array($this, 'sanitize_transmission_method'),
+                'show_in_rest' => false,
+                'default' => 'secure_wp_to_cf',
+            )
+        );
+
     }
 
     /**
@@ -551,7 +563,24 @@ class GA4_Server_Side_Tagging_Admin
         return json_encode($sanitized_tests);
     }
 
-
+    /**
+     * Sanitize transmission method value.
+     *
+     * @since    1.0.0
+     * @param    mixed    $input    The input value.
+     * @return   string              The sanitized value.
+     */
+    public function sanitize_transmission_method($input)
+    {
+        $valid_methods = array('secure_wp_to_cf', 'wp_endpoint_to_cf', 'direct_to_cf');
+        $input = sanitize_text_field($input);
+        
+        if (in_array($input, $valid_methods)) {
+            return $input;
+        }
+        
+        return 'secure_wp_to_cf'; // Default fallback
+    }
 
     /**
      * Display the plugin admin page.
@@ -605,6 +634,9 @@ class GA4_Server_Side_Tagging_Admin
         // Simple requests settings
         $simple_requests_enabled = get_option('ga4_simple_requests_enabled', false);
         $simple_requests_bot_detection = get_option('ga4_simple_requests_bot_detection', false);
+        
+        // Transmission method setting
+        $transmission_method = get_option('ga4_transmission_method', 'secure_wp_to_cf');
         
         $yith_raq_form_id = get_option('ga4_yith_raq_form_id', '');
         $conversion_form_ids = get_option('ga4_conversion_form_ids', '');
@@ -751,6 +783,30 @@ class GA4_Server_Side_Tagging_Admin
         update_option('ga4_simple_requests_enabled', isset($_POST['ga4_simple_requests_enabled']));
         update_option('ga4_simple_requests_bot_detection', isset($_POST['ga4_simple_requests_bot_detection']));
 
+        // Transmission method setting
+        if (isset($_POST['ga4_transmission_method'])) {
+            $transmission_method = $this->sanitize_transmission_method($_POST['ga4_transmission_method']);
+            update_option('ga4_transmission_method', $transmission_method);
+            
+            // Configure settings based on transmission method
+            if ($transmission_method === 'secure_wp_to_cf') {
+                // Most secure: Enable encryption, disable simple requests
+                update_option('ga4_jwt_encryption_enabled', true);
+                update_option('ga4_simple_requests_enabled', false);
+                update_option('ga4_simple_requests_bot_detection', false);
+            } elseif ($transmission_method === 'wp_endpoint_to_cf') {
+                // Balanced: Enable simple requests with bot detection, no API key or encryption
+                update_option('ga4_simple_requests_enabled', true);
+                update_option('ga4_simple_requests_bot_detection', true);
+                // No API key validation or encryption for balanced method
+            } elseif ($transmission_method === 'direct_to_cf') {
+                // Fastest: Enable simple requests without bot detection, disable encryption
+                update_option('ga4_simple_requests_enabled', true);
+                update_option('ga4_simple_requests_bot_detection', false);
+                update_option('ga4_jwt_encryption_enabled', false);
+            }
+        }
+
         // GDPR Consent settings
         update_option('ga4_use_iubenda', isset($_POST['ga4_use_iubenda']));
         update_option('ga4_consent_mode_enabled', isset($_POST['ga4_consent_mode_enabled']));
@@ -822,11 +878,11 @@ class GA4_Server_Side_Tagging_Admin
         // Log settings update
         $this->logger->info('Plugin settings updated');
 
-        // Add admin notice
+        // Add admin notice with cache clearing reminder
         add_settings_error(
             'ga4_server_side_tagging_settings',
             'settings_updated',
-            'Settings saved successfully.',
+            '✅ Settings saved successfully! <strong>Important:</strong> Please clear your website cache and any CDN/server cache for changes to take effect immediately.',
             'updated'
         );
     }
@@ -1064,7 +1120,7 @@ class GA4_Server_Side_Tagging_Admin
     }
 
     /**
-     * Display the debug logs page.
+     * Display the error logs page.
      *
      * @since    1.0.0
      */
@@ -1074,7 +1130,7 @@ class GA4_Server_Side_Tagging_Admin
         if (isset($_POST['action']) && isset($_POST['_wpnonce']) && wp_verify_nonce($_POST['_wpnonce'], 'ga4_logs_action')) {
             if ($_POST['action'] === 'clear_logs') {
                 $this->logger->clear_log();
-                add_settings_error('ga4_logs', 'logs_cleared', 'Debug logs have been cleared.', 'success');
+                add_settings_error('ga4_logs', 'logs_cleared', 'Error logs have been cleared.', 'success');
             } elseif ($_POST['action'] === 'toggle_debug_mode') {
                 $debug_mode = get_option('ga4_server_side_tagging_debug_mode', false);
                 update_option('ga4_server_side_tagging_debug_mode', !$debug_mode);
@@ -1105,7 +1161,7 @@ class GA4_Server_Side_Tagging_Admin
 
         ?>
         <div class="wrap">
-            <h1>GA4 Server-Side Tagging - Debug Logs</h1>
+            <h1>GA4 Server-Side Tagging - Error Logs</h1>
 
             <?php settings_errors('ga4_logs'); ?>
 
@@ -1138,7 +1194,7 @@ class GA4_Server_Side_Tagging_Admin
             </div>
 
             <div class="card">
-                <h2>Debug Log</h2>
+                <h2>Error Log</h2>
                 <?php if (empty($log_content)): ?>
                     <p>No log entries found. <?php echo !$debug_mode ? 'Enable debug mode to start logging.' : ''; ?></p>
                 <?php else: ?>

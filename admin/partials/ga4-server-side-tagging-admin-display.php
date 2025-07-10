@@ -345,7 +345,38 @@ if (!defined('WPINC')) {
                 <!-- Cloudflare Integration -->
                 <div class="ga4-server-side-tagging-admin-section">
                     <h3>Cloudflare Integration</h3>
+                    
+                    <!-- Transmission Method Cache Warning -->
+                    <div class="notice notice-warning inline" style="margin-bottom: 20px;">
+                        <p><strong>⚠️ Cache Clear Required:</strong> Changing the transmission method requires clearing all website and server caches. See the detailed instructions below the Save button.</p>
+                    </div>
 
+                    <table class="form-table">
+                        <tr>
+                            <th scope="row">
+                                <label for="ga4_transmission_method">Event Transmission Method</label>
+                            </th>
+                            <td>
+                                <select id="ga4_transmission_method" name="ga4_transmission_method" class="regular-text">
+                                    <option value="secure_wp_to_cf" <?php selected($transmission_method, 'secure_wp_to_cf'); ?>>
+                                        🔒 Secure WordPress to Cloudflare (Most Secure)
+                                    </option>
+                                    <option value="wp_endpoint_to_cf" <?php selected($transmission_method, 'wp_endpoint_to_cf'); ?>>
+                                        🛡️ WordPress Endpoint to Cloudflare (Balanced)
+                                    </option>
+                                    <option value="direct_to_cf" <?php selected($transmission_method, 'direct_to_cf'); ?>>
+                                        ⚡ Direct to Cloudflare (Fastest)
+                                    </option>
+                                </select>
+                                
+                                <div id="transmission_method_explanation" style="margin-top: 15px; padding: 15px; border: 1px solid #ddd; border-radius: 5px; background-color: #f9f9f9;">
+                                    <!-- Content will be populated by JavaScript -->
+                                </div>
+                            </td>
+                        </tr>
+                    </table>
+                    
+                    <!-- Always show Worker URL field -->
                     <table class="form-table">
                         <tr>
                             <th scope="row">
@@ -354,48 +385,60 @@ if (!defined('WPINC')) {
                             <td>
                                 <input type="url" id="ga4_cloudflare_worker_url" name="ga4_cloudflare_worker_url"
                                     value="<?php echo esc_url($cloudflare_worker_url); ?>" class="regular-text" />
-                                <p class="description">URL to your Cloudflare Worker for GA4 server-side tagging
-                                    (optional)</p>
+                                <p class="description">URL to your Cloudflare Worker for GA4 server-side tagging (required for all methods)</p>
                             </td>
                         </tr>
-                        <tr>
-                            <th scope="row">
-                                <label for="ga4_worker_api_key">Worker API Key</label>
-                            </th>
-                            <td>
-                                <input type="text" id="ga4_worker_api_key" name="ga4_worker_api_key"
-                                    value="<?php echo esc_attr($worker_api_key); ?>" class="regular-text" 
-                                    placeholder="Enter your API key or generate a new one" />
-                                <button type="button" id="generate_api_key" class="button button-secondary" style="margin-left: 10px;">Generate New Key</button>
-                                <p class="description">API key for secure communication with your Cloudflare Worker. You can manually enter your own key or click "Generate New Key" to create a random secure key.</p>
-                                <p class="description"><strong>Important:</strong> Copy this API key and paste it into your Cloudflare Worker configuration.</p>
-                            </td>
-                        </tr>
-                        <tr>
-                            <th scope="row">
-                                <label for="ga4_jwt_encryption_enabled">JWT Encryption</label>
-                            </th>
-                            <td>
-                                <label for="ga4_jwt_encryption_enabled">
-                                    <input type="checkbox" id="ga4_jwt_encryption_enabled" name="ga4_jwt_encryption_enabled" <?php checked($jwt_encryption_enabled ?? false); ?> />
-                                    Enable JWT encryption for secure requests
-                                </label>
-                                <p class="description">Encrypt JWT tokens and API calls for enhanced security</p>
-                            </td>
-                        </tr>
-                        <tr id="encryption_key_row" style="<?php echo ($jwt_encryption_enabled ?? false) ? '' : 'display: none;'; ?>">
-                            <th scope="row">
-                                <label for="ga4_jwt_encryption_key">JWT Encryption Key</label>
-                            </th>
-                            <td>
-                                <input type="text" id="ga4_jwt_encryption_key" name="ga4_jwt_encryption_key"
-                                    value="<?php echo esc_attr($jwt_encryption_key ?? ''); ?>" class="regular-text" 
-                                    placeholder="Enter your encryption key or generate a new one" />
-                                <button type="button" id="generate_encryption_key" class="button button-secondary" style="margin-left: 10px;">Generate New Encryption Key</button>
-                                <p class="description">256-bit encryption key for JWT token encryption. You can manually enter your own key or click "Generate New Encryption Key" to create a secure key.</p>
-                                <p class="description"><strong>Important:</strong> Copy this encryption key and paste it into your Cloudflare Worker configuration as the ENCRYPTION_KEY constant.</p>
-                            </td>
-                        </tr>
+                    </table>
+                    
+                    <!-- API Key and Encryption fields - shown only for secure method -->
+                    <div id="secure_config_fields" style="<?php echo ($transmission_method === 'secure_wp_to_cf') ? '' : 'display: none;'; ?>">
+                        <table class="form-table">
+                            <tr>
+                                <th scope="row">
+                                    <label for="ga4_worker_api_key">Worker API Key</label>
+                                </th>
+                                <td>
+                                    <input type="text" id="ga4_worker_api_key" name="ga4_worker_api_key"
+                                        value="<?php echo esc_attr($worker_api_key); ?>" class="regular-text" 
+                                        placeholder="Enter your API key or generate a new one" />
+                                    <button type="button" id="generate_api_key" class="button button-secondary" style="margin-left: 10px;">Generate New Key</button>
+                                    <p class="description">API key for secure communication with your Cloudflare Worker. You can manually enter your own key or click "Generate New Key" to create a random secure key.</p>
+                                    <p class="description"><strong>Important:</strong> Copy this API key and paste it into your Cloudflare Worker configuration.</p>
+                                </td>
+                            </tr>
+                            <tr>
+                                <th scope="row">
+                                    <label for="ga4_jwt_encryption_enabled">JWT Encryption</label>
+                                </th>
+                                <td>
+                                    <label for="ga4_jwt_encryption_enabled">
+                                        <input type="checkbox" id="ga4_jwt_encryption_enabled" name="ga4_jwt_encryption_enabled" <?php checked($jwt_encryption_enabled ?? false); ?> />
+                                        Enable JWT encryption for secure requests
+                                    </label>
+                                    <p class="description">Encrypt JWT tokens and API calls for enhanced security</p>
+                                    <!-- Hidden input for secure transmission method -->
+                                    <input type="hidden" id="ga4_jwt_encryption_forced" name="ga4_jwt_encryption_enabled" value="1" style="display: none;" />
+                                </td>
+                            </tr>
+                            <tr id="encryption_key_row" style="<?php echo ($jwt_encryption_enabled ?? false) ? '' : 'display: none;'; ?>">
+                                <th scope="row">
+                                    <label for="ga4_jwt_encryption_key">JWT Encryption Key</label>
+                                </th>
+                                <td>
+                                    <input type="text" id="ga4_jwt_encryption_key" name="ga4_jwt_encryption_key"
+                                        value="<?php echo esc_attr($jwt_encryption_key ?? ''); ?>" class="regular-text" 
+                                        placeholder="Enter your encryption key or generate a new one" />
+                                    <button type="button" id="generate_encryption_key" class="button button-secondary" style="margin-left: 10px;">Generate New Encryption Key</button>
+                                    <p class="description">256-bit encryption key for JWT token encryption. You can manually enter your own key or click "Generate New Encryption Key" to create a secure key.</p>
+                                    <p class="description"><strong>Important:</strong> Copy this encryption key and paste it into your Cloudflare Worker configuration as the ENCRYPTION_KEY constant.</p>
+                                </td>
+                            </tr>
+                        </table>
+                    </div>
+                    
+                    <!-- Legacy Simple Requests fields - hidden when using new transmission method selector -->
+                    <div id="legacy_simple_requests_fields" style="display: none;">
+                        <table class="form-table">
                         <tr>
                             <th scope="row">
                                 <label for="ga4_simple_requests_enabled">Simple Requests</label>
@@ -413,24 +456,25 @@ if (!defined('WPINC')) {
                                 </p>
                             </td>
                         </tr>
-                        <tr id="simple_requests_bot_detection_row" style="<?php echo ($simple_requests_enabled ?? false) ? '' : 'display: none;'; ?>">
-                            <th scope="row">
-                                <label for="ga4_simple_requests_bot_detection">Simple Requests Bot Detection</label>
-                            </th>
-                            <td>
-                                <label for="ga4_simple_requests_bot_detection">
-                                    <input type="checkbox" id="ga4_simple_requests_bot_detection" name="ga4_simple_requests_bot_detection" <?php checked($simple_requests_bot_detection ?? false); ?> />
-                                    Enable WordPress bot detection for Simple requests
-                                </label>
-                                <p class="description">
-                                    <strong>🤖 Bot Detection:</strong> Validates requests via WordPress REST endpoint before sending to Cloudflare Worker.<br>
-                                    <strong>Benefits:</strong> Filters bot traffic at WordPress level, uses same bot detection as regular requests, session caching for performance.<br>
-                                    <strong>Trade-offs:</strong> Adds WordPress server response time (~200-300ms), but ensures higher data quality.<br>
-                                    <strong>Recommended for:</strong> Sites that need maximum bot filtering accuracy and can accept slight performance reduction.
-                                </p>
-                            </td>
-                        </tr>
-                    </table>
+                            <tr id="simple_requests_bot_detection_row" style="<?php echo ($simple_requests_enabled ?? false) ? '' : 'display: none;'; ?>">
+                                <th scope="row">
+                                    <label for="ga4_simple_requests_bot_detection">Simple Requests Bot Detection</label>
+                                </th>
+                                <td>
+                                    <label for="ga4_simple_requests_bot_detection">
+                                        <input type="checkbox" id="ga4_simple_requests_bot_detection" name="ga4_simple_requests_bot_detection" <?php checked($simple_requests_bot_detection ?? false); ?> />
+                                        Enable WordPress bot detection for Simple requests
+                                    </label>
+                                    <p class="description">
+                                        <strong>🤖 Bot Detection:</strong> Validates requests via WordPress REST endpoint before sending to Cloudflare Worker.<br>
+                                        <strong>Benefits:</strong> Filters bot traffic at WordPress level, uses same bot detection as regular requests, session caching for performance.<br>
+                                        <strong>Trade-offs:</strong> Adds WordPress server response time (~200-300ms), but ensures higher data quality.<br>
+                                        <strong>Recommended for:</strong> Sites that need maximum bot filtering accuracy and can accept slight performance reduction.
+                                    </p>
+                                </td>
+                            </tr>
+                        </table>
+                    </div>
                 </div>
 
                 <!-- GA4 Analytics Settings -->
@@ -482,6 +526,37 @@ if (!defined('WPINC')) {
                 </div>
 
           
+
+                <!-- Cache Clear Notice -->
+                <div class="notice notice-info inline" style="margin: 20px 0;">
+                    <h3 style="margin-top: 10px;">🔄 Important: Clear Cache After Settings Changes</h3>
+                    <p><strong>After saving any changes to these settings, you must clear all caches:</strong></p>
+                    <div style="display: flex; gap: 30px; margin: 15px 0;">
+                        <div style="flex: 1;">
+                            <h4 style="margin: 0 0 8px 0; color: #2271b1;">🌐 Website Cache</h4>
+                            <ul style="margin: 0; padding-left: 20px; line-height: 1.6;">
+                                <li>Clear WordPress caching plugins (WP Rocket, W3 Total Cache, etc.)</li>
+                                <li>Clear browser cache (Ctrl+F5 or Cmd+Shift+R)</li>
+                                <li>Clear any object cache (Redis, Memcached)</li>
+                                <li>Purge CDN cache if using one</li>
+                            </ul>
+                        </div>
+                        <div style="flex: 1;">
+                            <h4 style="margin: 0 0 8px 0; color: #dc3545;">☁️ Server Cache</h4>
+                            <ul style="margin: 0; padding-left: 20px; line-height: 1.6;">
+                                <li>Clear Cloudflare cache (if using Cloudflare)</li>
+                                <li>Restart Cloudflare Worker (redeploy)</li>
+                                <li>Clear server-side PHP opcache</li>
+                                <li>Clear any reverse proxy cache (Nginx, Varnish)</li>
+                            </ul>
+                        </div>
+                    </div>
+                    <p style="background: #fff3cd; padding: 10px; border-left: 4px solid #856404; margin-top: 15px;">
+                        <strong>⚠️ Why This Matters:</strong> Changes to transmission methods, encryption settings, and API configurations 
+                        are cached in multiple layers. Without clearing cache, your changes may not take effect immediately, 
+                        leading to tracking failures or mixed behavior between old and new settings.
+                    </p>
+                </div>
 
                 <p class="submit">
                     <input type="submit" name="ga4_server_side_tagging_settings_submit" class="button-primary"
@@ -543,11 +618,12 @@ if (!defined('WPINC')) {
                     <li>Deploy the provided <code>cloudflare-worker-example.js</code> script</li>
                 </ol>
                 
-                <h4>Step 2: Configure Variables and Secrets (Recommended)</h4>
-                <p><strong>🔒 Secure Method:</strong> Use Cloudflare's Variables and Secrets feature instead of hardcoding values:</p>
+                <h4>Step 2: Configure Variables and Secrets</h4>
+                <p><strong>📋 Required for All Methods:</strong> GA4 credentials are always needed.</p>
+                <p><strong>🔒 Additional for Secure Method:</strong> API key and encryption key only needed for "Secure WordPress to Cloudflare" transmission.</p>
                 <ol>
                     <li>Go to your Worker → <strong>Settings → Variables and Secrets</strong></li>
-                    <li>Add the following variables with type <strong>"secret"</strong></li>
+                    <li>Add the required variables with type <strong>"secret"</strong></li>
                     <li><button type="button" id="show-cloudflare-vars" class="button button-secondary">📋 Show Variables to Copy</button></li>
                 </ol>
                 
@@ -565,6 +641,11 @@ if (!defined('WPINC')) {
                         <h3 style="margin-top: 0;">🔧 Cloudflare Worker Variables and Secrets</h3>
                         <p>Copy and paste these exact values into your Cloudflare Worker Variables and Secrets:</p>
                         
+                        <div style="background: #e7f3ff; padding: 10px; border-left: 4px solid #0073aa; margin-bottom: 15px; font-size: 12px;">
+                            <p style="margin: 0;"><strong>📋 Required for All Methods:</strong> GA4_MEASUREMENT_ID, GA4_API_SECRET, ALLOWED_DOMAINS</p>
+                            <p style="margin: 5px 0 0 0;"><strong>🔒 Secure Method Only:</strong> API_KEY, ENCRYPTION_KEY</p>
+                        </div>
+                        
                         <div style="background: #f9f9f9; padding: 15px; border-left: 4px solid #0073aa; font-family: monospace; font-size: 13px; margin: 15px 0;">
                             <div style="margin-bottom: 15px;">
                                 <strong>Variable Name:</strong> <code>GA4_MEASUREMENT_ID</code><br>
@@ -576,14 +657,16 @@ if (!defined('WPINC')) {
                                 <strong>Value:</strong> <input type="text" readonly value="<?php echo esc_attr($api_secret ?: 'Configure GA4 API Secret first'); ?>" style="width: 100%; padding: 5px; margin-top: 5px; font-family: monospace;" onclick="this.select();">
                             </div>
                             
-                            <div style="margin-bottom: 15px;">
-                                <strong>Variable Name:</strong> <code>API_KEY</code><br>
+                            <div style="margin-bottom: 15px; background: #f8f8f8; padding: 10px; border-radius: 4px; border-left: 4px solid #dc3545;">
+                                <strong>🔒 Secure Method Only:</strong> <code>API_KEY</code><br>
                                 <strong>Value:</strong> <input type="text" readonly value="<?php echo esc_attr($worker_api_key ?: 'Generate API key first'); ?>" style="width: 100%; padding: 5px; margin-top: 5px; font-family: monospace;" onclick="this.select();">
+                                <small style="color: #666;">Only required for "Secure WordPress to Cloudflare" transmission</small>
                             </div>
                             
-                            <div style="margin-bottom: 15px;">
-                                <strong>Variable Name:</strong> <code>ENCRYPTION_KEY</code><br>
+                            <div style="margin-bottom: 15px; background: #f8f8f8; padding: 10px; border-radius: 4px; border-left: 4px solid #dc3545;">
+                                <strong>🔒 Secure Method Only:</strong> <code>ENCRYPTION_KEY</code><br>
                                 <strong>Value:</strong> <input type="text" readonly value="<?php echo esc_attr($jwt_encryption_key ?: 'Generate encryption key if using JWT encryption'); ?>" style="width: 100%; padding: 5px; margin-top: 5px; font-family: monospace;" onclick="this.select();">
+                                <small style="color: #666;">Only required for "Secure WordPress to Cloudflare" transmission</small>
                             </div>
                             
                             <div style="margin-bottom: 15px;">
@@ -699,6 +782,142 @@ jQuery(document).ready(function($) {
     // Prevent modal from closing when clicking inside the modal content
     $('#cloudflare-vars-modal > div').on('click', function(e) {
         e.stopPropagation();
+    });
+    
+    // Transmission method explanations
+    const transmissionExplanations = {
+        'secure_wp_to_cf': {
+            title: '🔒 Secure WordPress to Cloudflare (Most Secure)',
+            description: 'Maximum security with JWT encryption and WordPress endpoint validation.',
+            pros: [
+                '✅ <strong>Maximum Security:</strong> JWT token encryption for all data transmission',
+                '✅ <strong>API Key Protection:</strong> Secure API key validation at WordPress level',
+                '✅ <strong>Bot Detection:</strong> Multi-layered bot detection with WordPress security checks',
+                '✅ <strong>Origin Validation:</strong> Strict same-domain validation for all requests',
+                '✅ <strong>Data Integrity:</strong> Encrypted payloads prevent tampering',
+                '✅ <strong>Audit Trail:</strong> Complete logging of all security validations'
+            ],
+            cons: [
+                '❌ <strong>Performance Impact:</strong> Additional encryption/decryption adds ~100-200ms',
+                '❌ <strong>Complex Setup:</strong> Requires encryption key configuration in Cloudflare Worker',
+                '❌ <strong>Resource Usage:</strong> Higher CPU usage for encryption operations'
+            ],
+            when: 'Use for high-security environments, financial sites, or when handling sensitive data. Best for sites prioritizing security over performance.',
+            fields: ['worker_api_key', 'jwt_encryption']
+        },
+        'wp_endpoint_to_cf': {
+            title: '🛡️ WordPress Endpoint to Cloudflare (Balanced)',
+            description: 'Balanced approach with WordPress security validation but no encryption or API key overhead.',
+            pros: [
+                '✅ <strong>Good Security:</strong> WordPress bot detection and origin validation',
+                '✅ <strong>Better Performance:</strong> No encryption or API key validation overhead',
+                '✅ <strong>Bot Filtering:</strong> WordPress-level bot detection with session caching',
+                '✅ <strong>Origin Validation:</strong> Validates requests come from legitimate sources',
+                '✅ <strong>Simple Setup:</strong> No API keys or encryption to manage',
+                '✅ <strong>Debug Friendly:</strong> Plain JSON makes troubleshooting easier'
+            ],
+            cons: [
+                '❌ <strong>No API Key Protection:</strong> No server-side API key validation',
+                '❌ <strong>No Encryption:</strong> Data sent as plain JSON (but still over HTTPS)',
+                '❌ <strong>WordPress Dependency:</strong> Still requires WordPress processing for each event',
+                '❌ <strong>Moderate Performance:</strong> Slower than direct method due to WordPress processing'
+            ],
+            when: 'Use for most websites that need good security with better performance. Ideal for e-commerce sites and business websites that want bot filtering without API key complexity.',
+            fields: []
+        },
+        'direct_to_cf': {
+            title: '⚡ Direct to Cloudflare (Fastest)',
+            description: 'Maximum performance with direct JavaScript to Cloudflare Worker transmission.',
+            pros: [
+                '✅ <strong>Maximum Performance:</strong> Direct transmission, ~80% faster than other methods',
+                '✅ <strong>Reduced Server Load:</strong> No WordPress processing required',
+                '✅ <strong>Minimal Latency:</strong> Bypasses WordPress entirely for event transmission',
+                '✅ <strong>Simple Setup:</strong> No API keys or encryption to configure',
+                '✅ <strong>CDN Benefits:</strong> Leverages Cloudflare\'s global network optimally',
+                '✅ <strong>Scalability:</strong> Handles high traffic without WordPress bottlenecks'
+            ],
+            cons: [
+                '❌ <strong>Basic Security:</strong> No WordPress-level API key validation',
+                '❌ <strong>Limited Bot Detection:</strong> Relies only on Cloudflare Worker bot detection',
+                '❌ <strong>No Origin Validation:</strong> Cannot verify requests come from your WordPress site',
+                '❌ <strong>Exposed Worker URL:</strong> Worker URL is visible in browser network requests'
+            ],
+            when: 'Use for high-traffic sites prioritizing performance over security. Perfect for content sites, blogs, and when WordPress server load is a concern.',
+            fields: []
+        }
+    };
+    
+    // Function to update transmission method explanation
+    function updateTransmissionExplanation() {
+        const selectedMethod = $('#ga4_transmission_method').val();
+        const explanation = transmissionExplanations[selectedMethod];
+        
+        if (explanation) {
+            let html = '<div style="margin-bottom: 15px;">';
+            html += '<h4 style="margin: 0 0 10px 0; color: #2271b1;">' + explanation.title + '</h4>';
+            html += '<p style="margin: 0 0 15px 0; font-style: italic;">' + explanation.description + '</p>';
+            html += '</div>';
+            
+            // Pros section
+            html += '<div style="margin-bottom: 15px;">';
+            html += '<h5 style="margin: 0 0 8px 0; color: #198754;">✅ Advantages:</h5>';
+            html += '<ul style="margin: 0; padding-left: 20px; line-height: 1.6;">';
+            explanation.pros.forEach(pro => {
+                html += '<li style="margin-bottom: 5px;">' + pro + '</li>';
+            });
+            html += '</ul>';
+            html += '</div>';
+            
+            // Cons section
+            html += '<div style="margin-bottom: 15px;">';
+            html += '<h5 style="margin: 0 0 8px 0; color: #dc3545;">❌ Trade-offs:</h5>';
+            html += '<ul style="margin: 0; padding-left: 20px; line-height: 1.6;">';
+            explanation.cons.forEach(con => {
+                html += '<li style="margin-bottom: 5px;">' + con + '</li>';
+            });
+            html += '</ul>';
+            html += '</div>';
+            
+            // When to use section
+            html += '<div style="padding: 12px; background-color: #e7f3ff; border-left: 4px solid #2271b1; border-radius: 4px;">';
+            html += '<h5 style="margin: 0 0 8px 0; color: #2271b1;">🎯 When to Use:</h5>';
+            html += '<p style="margin: 0; line-height: 1.6;">' + explanation.when + '</p>';
+            html += '</div>';
+            
+            $('#transmission_method_explanation').html(html);
+        }
+    }
+    
+    // Function to toggle field visibility based on transmission method
+    function toggleTransmissionFields() {
+        const selectedMethod = $('#ga4_transmission_method').val();
+        
+        // Show/hide secure config fields
+        if (selectedMethod === 'secure_wp_to_cf') {
+            $('#secure_config_fields').show();
+            // For most secure method, enable encryption by default and hide the checkbox
+            $('#ga4_jwt_encryption_enabled').prop('checked', true).closest('tr').hide();
+            $('#ga4_jwt_encryption_forced').show();
+            $('#encryption_key_row').show();
+        } else {
+            $('#secure_config_fields').hide();
+            // For other methods (balanced and direct), show encryption checkbox and let user choose
+            $('#ga4_jwt_encryption_enabled').closest('tr').show();
+            $('#ga4_jwt_encryption_forced').hide();
+        }
+        
+        // Hide legacy simple requests fields since we're using the new method selector
+        $('#legacy_simple_requests_fields').hide();
+    }
+    
+    // Initialize on page load
+    updateTransmissionExplanation();
+    toggleTransmissionFields();
+    
+    // Handle transmission method changes
+    $('#ga4_transmission_method').on('change', function() {
+        updateTransmissionExplanation();
+        toggleTransmissionFields();
     });
 });
 </script>

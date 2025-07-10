@@ -619,7 +619,7 @@ class GA4_Server_Side_Tagging_Endpoint
             $encryption_enabled = (bool) get_option('ga4_jwt_encryption_enabled', false);
             $encryption_key = \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::retrieve_encrypted_key('ga4_jwt_encryption_key') ?: '';
             
-            // Removed excessive debug logging for performance optimization
+            // Removed excessive error logging for performance optimization
 
             if (empty($cloudflare_url) || empty($worker_api_key)) {
                 return new \WP_REST_Response(array('error' => 'Configuration incomplete'), 500);
@@ -1045,7 +1045,7 @@ class GA4_Server_Side_Tagging_Endpoint
             $auth_header_value = $worker_api_key;
             
             
-            // Performance: Removed debug logging for faster processing
+            // Performance: Removed error logging for faster processing
 
             $headers = array(
                 'Content-Type' => 'application/json',
@@ -1347,9 +1347,7 @@ class GA4_Server_Side_Tagging_Endpoint
                 'accept' => $accept,
                 'referer' => $referer
             ];
-            
-            $this->logger->info('Bot validation passed for IP: ' . $client_ip);
-            
+                        
             return new \WP_REST_Response(array(
                 'success' => true,
                 'is_bot' => false,

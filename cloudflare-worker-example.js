@@ -382,10 +382,6 @@ function processGDPRConsent(payload) {
     ad_user_data: consent.ad_user_data || "DENIED",
     ad_personalization: consent.ad_personalization || "DENIED"
   };
-  
-  if (DEBUG_MODE) {
-    console.log("Processing GDPR consent:", JSON.stringify(processedConsent));
-  }
 
   // Apply consent-based data filtering based on processed consent
   // Use ad_user_data for analytics consent (user data collection)
@@ -410,9 +406,7 @@ function processGDPRConsent(payload) {
  * @returns {Object} Modified payload
  */
 function applyAnalyticsConsentDenied(payload) {
-  if (DEBUG_MODE) {
-    console.log("Applying analytics consent denied rules");
-  }
+
 
   // Remove or anonymize personal identifiers
   if (payload.user_id) {
@@ -1008,10 +1002,7 @@ function logBotDetection(detection, request, payload) {
 function validateOrigin(request) {
   const origin = request.headers.get("Origin");
   const referer = request.headers.get("Referer");
-  if(DEBUG_MODE){
-    console.log(`Send from Origin: ${origin}`);
-    console.log(`Send from Referer: ${referer}`);
-  }
+
   // Check Origin header first
   if (origin) {
     try {
@@ -1174,18 +1165,9 @@ async function validateApiKey(request) {
     return false;
   }
   
-  if (DEBUG_MODE) {
-    console.log("🔍 Received API key format analysis...");
-  }
-  
   try {
     // Detect format and decode the API key
     const { key: decodedKey, format } = await detectAndDecodeApiKey(receivedApiKey);
-    
-    if (DEBUG_MODE) {
-      console.log(`📋 API key format detected: ${format}`);
-      console.log(`🔑 Decoded API key: ${decodedKey.substring(0, 8)}...`);
-    }
     
     // Compare with expected API key
     const isValid = decodedKey === API_KEY;
@@ -1415,9 +1397,7 @@ async function handleRequest(request, env) {
       } else if (!ENCRYPTION_KEY) {
         console.warn("❌ X-Encrypted header present but ENCRYPTION_KEY is not set");
       } else {
-        if (DEBUG_MODE) {
-          console.log("🔒 Processing JWT encrypted request");
-        }
+      
         
         try {
           // Check for legacy JWT format first
@@ -1426,7 +1406,6 @@ async function handleRequest(request, env) {
             payload = JSON.parse(decryptedData);
             
             if (DEBUG_MODE) {
-              console.log("🔓 JWT request successfully verified and decrypted");
               console.log("Decrypted payload:", JSON.stringify(payload));
             }
           } else {
@@ -1456,21 +1435,6 @@ async function handleRequest(request, env) {
       }
     }
 
-    // CONSENT PROCESSING - Process consent data or default to DENIED
-    const consentData = payload.params?.consent;
-    
-    if (!consentData || (!consentData.analytics_storage && !consentData.ad_storage)) {
-      if (DEBUG_MODE) {
-        console.log("No consent data found - processing event with DENIED consent defaults");
-      }
-      // Continue processing with default DENIED consent values
-      // The processGDPRConsent function will handle the defaults
-    } else {
-      if (DEBUG_MODE) {
-        console.log("Consent data found - processing with provided consent values:", JSON.stringify(consentData));
-      }
-    }
-
     // GDPR CONSENT PROCESSING - Apply before bot detection
     const consentProcessedPayload = processGDPRConsent(payload);
 
@@ -1491,20 +1455,6 @@ async function handleRequest(request, env) {
       };
       
       return await createResponse(botResponseData, request);
-    }
-
-    // Log legitimate traffic (optional, for monitoring)
-    if (DEBUG_MODE) {
-      const consentInfo = consentProcessedPayload.params?.consent || {};
-      console.log("Legitimate traffic detected:", JSON.stringify({
-        eventName: consentProcessedPayload.name,
-        country: String(request.cf && request.cf.country || 'unknown'),
-        city: String(request.cf && request.cf.city || 'unknown'),
-        userAgent: (request.headers.get('User-Agent') || ''),
-        bot_score: botDetection.score,
-        consent_mode: consentInfo.analytics_storage || 'unknown',
-        gdpr_processed: true
-      }));
     }
 
     return await handleGA4Event(consentProcessedPayload, request);
@@ -1551,12 +1501,6 @@ async function handleGA4Event(payload, request) {
   // Process the event data
   const processedData = processEventData(payload, request);
   let payloadDebug = false;
-  // Log the incoming event data
-  if (DEBUG_MODE) {    
-    // Log consent status
-    const consentInfo = processedData.params?.consent || {};
-    console.log("Consent status:", JSON.stringify(consentInfo));
-  }
 
   // Validate required parameters - check for both 'name' and 'event_name' fields
   if (!processedData.name && !processedData.event_name) {
@@ -1720,10 +1664,6 @@ async function handleGA4Event(payload, request) {
     if (processedData.name == 'page_view' || processedData.name == 'custom_session_start' || processedData.name == 'custom_first_visit') {
       console.log("Traffic Type:" + processedData.params.traffic_type);
     }
-    
-    // Log consent mode for tracking
-    const consentMode = ga4Payload.consent?.ad_user_data || 'unknown';
-    console.log("Sending event with consent mode:", consentMode);
   }
 
   // Log the complete payload being sent to Google Analytics
@@ -1889,10 +1829,6 @@ function extractDeviceInfo(params) {
     if (browserInfo.brand) {
       device.brand = browserInfo.brand;
     }
-  }
-  
-  if (DEBUG_MODE && Object.keys(device).length > 0) {
-    console.log("Extracted device info:", JSON.stringify(device));
   }
   
   return device;
@@ -2255,9 +2191,6 @@ function extractLocationData(params) {
   // Clean up timezone parameter - remove it from event params
   // (timezone is not a standard GA4 event parameter)
   if (params.timezone) {
-    if (DEBUG_MODE) {
-      console.log("Timezone detected in event:", params.timezone);
-    }
     delete params.timezone;
   }
 

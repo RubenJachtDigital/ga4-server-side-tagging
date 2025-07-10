@@ -137,7 +137,7 @@ Payload → Format Detection → Behavior Scoring → Attribution → GA4 API
 - **Rate Limiting Data**: IP-based request counting
 - **Basic Validation Responses**: Simple success/error messages
 - **CORS Preflight Responses**: Browser security validations
-- **Debug Logs**: Console output and logging data
+- **Error Logs**: Console output and logging data
 
 **🔒 Encryption Methods Used:**
 - **JWT with HS256**: Event payload encryption (shared secret)
@@ -211,7 +211,7 @@ GET /wp-json/ga4-server-side-tagging/v1/secure-config
 
 ### 📊 Complete Payload Logging
 
-**Cloudflare Worker Debug Logging:**
+**Cloudflare Worker Error Logging:**
 ```javascript
 // Debug mode logs complete GA4 payloads
 if (DEBUG_MODE) {

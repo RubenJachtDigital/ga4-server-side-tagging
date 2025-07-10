@@ -59,7 +59,7 @@
 
       // Log initialization
       this.log(
-        "%c GA4 Server-Side Tagging initialized v1 (Single Endpoint) ",
+        "%c GA4 Server-Side Tagging initialized v2",
         "background: #4CAF50; color: white; font-size: 16px; font-weight: bold; padding: 8px 12px; border-radius: 4px;"
       );
     },
@@ -2742,16 +2742,39 @@
         eventName: eventName
       });
       
-      // Check if Simple requests are enabled for direct Cloudflare communication
-      if (this.config.simpleRequestsEnabled && this.config.cloudflareWorkerUrl) {
-        this.log("📡 Simple requests enabled - sending directly to Cloudflare Worker", {
+      // Determine transmission method based on configuration
+      const transmissionMethod = this.config.transmissionMethod || 'secure_wp_to_cf';
+      
+      if (transmissionMethod === 'direct_to_cf' && this.config.cloudflareWorkerUrl) {
+        this.log("⚡ Direct to Cloudflare transmission - sending directly to Worker", {
           eventName: eventName,
           workerUrl: this.config.cloudflareWorkerUrl,
-          bypassWordPress: true
+          method: 'direct_to_cf',
+          bypassWordPress: true,
+          botDetection: false
         });
         
-        this.sendSimpleRequest(data);
+        this.sendSimpleRequest(data, false); // false = no bot detection
+      } else if (transmissionMethod === 'wp_endpoint_to_cf' && this.config.cloudflareWorkerUrl) {
+        this.log("🛡️ WordPress Endpoint to Cloudflare transmission - plain JSON with bot validation", {
+          eventName: eventName,
+          workerUrl: this.config.cloudflareWorkerUrl,
+          method: 'wp_endpoint_to_cf',
+          bypassWordPress: true,
+          botDetection: true,
+          apiKeyValidation: false,
+          encryption: false
+        });
+        
+        this.sendSimpleRequest(data, true); // true = with bot detection
       } else {
+        this.log("🔒 Secure WordPress to Cloudflare transmission - sending via WordPress endpoint", {
+          eventName: eventName,
+          method: 'secure_wp_to_cf',
+          encryption: true,
+          apiKeyValidation: true
+        });
+        
         this.sendAjaxPayload(null, data);
       }
     },
@@ -2952,9 +2975,9 @@
     /**
      * Send Simple request directly to Cloudflare Worker (bypasses WordPress)
      */
-    sendSimpleRequest: async function (payload) {
+    sendSimpleRequest: async function (payload, enableBotDetection = false) {
       try {
-        const botDetectionEnabled = this.config.simpleRequestsBotDetection;
+        const botDetectionEnabled = enableBotDetection;
         
         this.log("🚀 Sending Simple request directly to Cloudflare Worker", {
           workerUrl: this.config.cloudflareWorkerUrl,

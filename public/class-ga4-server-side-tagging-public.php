@@ -174,8 +174,8 @@ class GA4_Server_Side_Tagging_Public
             'currency' => function_exists('get_woocommerce_currency') ? get_woocommerce_currency() : 'EUR',
             'siteName' => get_bloginfo('name'),
             'encryptionEnabled' => (bool) get_option('ga4_jwt_encryption_enabled', false),
-            'simpleRequestsEnabled' => (bool) get_option('ga4_simple_requests_enabled', false),
-            'simpleRequestsBotDetection' => (bool) get_option('ga4_simple_requests_bot_detection', false),
+            'transmissionMethod' => get_option('ga4_transmission_method', 'secure_wp_to_cf'),
+            'cloudflareWorkerUrl' => get_option('ga4_cloudflare_worker_url', ''),
             
 
             // GDPR Consent settings (enhanced)
@@ -251,10 +251,7 @@ class GA4_Server_Side_Tagging_Public
             }
         }
 
-        // Add Cloudflare Worker URL for Simple requests (direct JS to Cloudflare)
-        if (get_option('ga4_simple_requests_enabled', false)) {
-            $script_data['cloudflareWorkerUrl'] = get_option('ga4_cloudflare_worker_url', '');
-        }
+        // Cloudflare Worker URL is now included in the main script_data array based on transmission method
 
         // Pass data to the script
         wp_localize_script(
