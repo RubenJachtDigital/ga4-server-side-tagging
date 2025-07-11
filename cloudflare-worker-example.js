@@ -1174,7 +1174,6 @@ async function validateApiKey(request) {
     
     if (DEBUG_MODE) {
       if (isValid) {
-        console.log(`✅ API key validation successful (${format})`);
       } else {
         console.log(`❌ API key validation failed (${format})`);
         console.log(`Expected: ${API_KEY?.substring(0, 8)}...`);
@@ -1508,8 +1507,18 @@ async function handleBatchEvents(batchPayload, request) {
       console.log("📦 Processing batch of events:", {
         eventCount: batchPayload.events.length,
         hasConsent: !!batchPayload.consent,
+        consentData: batchPayload.consent,
         timestamp: batchPayload.timestamp
       });
+    }
+
+    // Find the first complete event to use as a reference for enriching incomplete events
+    let firstCompleteEvent = null;
+    for (let i = 0; i < batchPayload.events.length; i++) {
+      if (batchPayload.events[i].isCompleteData) {
+        firstCompleteEvent = batchPayload.events[i];
+        break;
+      }
     }
 
     // Process each event in the batch using existing functions
@@ -1529,12 +1538,162 @@ async function handleBatchEvents(batchPayload, request) {
           timestamp: event.timestamp || batchPayload.timestamp
         };
 
-        // Add page context for events without complete data
-        if (!event.isCompleteData && event.pageUrl) {
-          singleEventPayload.params.page_location = event.pageUrl;
-          singleEventPayload.params.page_title = event.pageTitle;
+        // Add page context and enrich incomplete events with session data
+        if (!event.isCompleteData) {
+          // Add page context if available
+          if (event.pageUrl) {
+            singleEventPayload.params.page_location = event.pageUrl;
+            singleEventPayload.params.page_title = event.pageTitle;
+          }
+          
+          // Enrich incomplete events with session data from the first complete event
+          if (firstCompleteEvent) {
+            // Add missing session data
+            if (!singleEventPayload.params.session_id && firstCompleteEvent.params.session_id) {
+              singleEventPayload.params.session_id = firstCompleteEvent.params.session_id;
+            }
+            if (!singleEventPayload.params.client_id && firstCompleteEvent.params.client_id) {
+              singleEventPayload.params.client_id = firstCompleteEvent.params.client_id;
+            }
+            if (!singleEventPayload.params.session_start && firstCompleteEvent.params.session_start) {
+              singleEventPayload.params.session_start = firstCompleteEvent.params.session_start;
+            }
+            if (!singleEventPayload.params.browser_name && firstCompleteEvent.params.browser_name) {
+              singleEventPayload.params.browser_name = firstCompleteEvent.params.browser_name;
+            }
+            if (!singleEventPayload.params.device_type && firstCompleteEvent.params.device_type) {
+              singleEventPayload.params.device_type = firstCompleteEvent.params.device_type;
+            }
+            if (!singleEventPayload.params.screen_resolution && firstCompleteEvent.params.screen_resolution) {
+              singleEventPayload.params.screen_resolution = firstCompleteEvent.params.screen_resolution;
+            }
+            if (!singleEventPayload.params.is_desktop && firstCompleteEvent.params.is_desktop) {
+              singleEventPayload.params.is_desktop = firstCompleteEvent.params.is_desktop;
+            }
+            if (!singleEventPayload.params.language && firstCompleteEvent.params.language) {
+              singleEventPayload.params.language = firstCompleteEvent.params.language;
+            }
+            if (!singleEventPayload.params.user_agent && firstCompleteEvent.params.user_agent) {
+              singleEventPayload.params.user_agent = firstCompleteEvent.params.user_agent;
+            }
+            // Add STORED attribution data for incomplete events (not current page attribution)
+            // For all events, we want to use the original traffic source that brought the user to the site
+            if (!singleEventPayload.params.source) {
+              // Try to get stored attribution first, then fall back to current attribution
+              if (firstCompleteEvent.params.originalSource) {
+                singleEventPayload.params.source = firstCompleteEvent.params.originalSource;
+              } else if (firstCompleteEvent.params.source) {
+                singleEventPayload.params.source = firstCompleteEvent.params.source;
+              }
+            }
+            if (!singleEventPayload.params.medium) {
+              // Try to get stored attribution first, then fall back to current attribution
+              if (firstCompleteEvent.params.originalMedium) {
+                singleEventPayload.params.medium = firstCompleteEvent.params.originalMedium;
+              } else if (firstCompleteEvent.params.medium) {
+                singleEventPayload.params.medium = firstCompleteEvent.params.medium;
+              }
+            }
+            if (!singleEventPayload.params.campaign) {
+              // Try to get stored attribution first, then fall back to current attribution
+              if (firstCompleteEvent.params.originalCampaign) {
+                singleEventPayload.params.campaign = firstCompleteEvent.params.originalCampaign;
+              } else if (firstCompleteEvent.params.campaign) {
+                singleEventPayload.params.campaign = firstCompleteEvent.params.campaign;
+              }
+            }
+            if (!singleEventPayload.params.content) {
+              // Try to get stored attribution first, then fall back to current attribution
+              if (firstCompleteEvent.params.originalContent) {
+                singleEventPayload.params.content = firstCompleteEvent.params.originalContent;
+              } else if (firstCompleteEvent.params.content) {
+                singleEventPayload.params.content = firstCompleteEvent.params.content;
+              }
+            }
+            if (!singleEventPayload.params.term) {
+              // Try to get stored attribution first, then fall back to current attribution
+              if (firstCompleteEvent.params.originalTerm) {
+                singleEventPayload.params.term = firstCompleteEvent.params.originalTerm;
+              } else if (firstCompleteEvent.params.term) {
+                singleEventPayload.params.term = firstCompleteEvent.params.term;
+              }
+            }
+            if (!singleEventPayload.params.gclid) {
+              // Try to get stored attribution first, then fall back to current attribution
+              if (firstCompleteEvent.params.originalGclid) {
+                singleEventPayload.params.gclid = firstCompleteEvent.params.originalGclid;
+              } else if (firstCompleteEvent.params.gclid) {
+                singleEventPayload.params.gclid = firstCompleteEvent.params.gclid;
+              }
+            }
+            
+            // Use stored traffic_type if available, otherwise calculate from the attribution we just set
+            if (!singleEventPayload.params.traffic_type) {
+              // Use stored traffic type first
+              if (firstCompleteEvent.params.originalTrafficType) {
+                singleEventPayload.params.traffic_type = firstCompleteEvent.params.originalTrafficType;
+              } else {
+                // Calculate traffic type based on the attribution we just set
+                const source = singleEventPayload.params.source || '';
+                const medium = singleEventPayload.params.medium || '';
+                
+                if (source === '(direct)' && medium === '(none)') {
+                  singleEventPayload.params.traffic_type = 'direct';
+                } else if (source === '(internal)' && medium === 'internal') {
+                  singleEventPayload.params.traffic_type = 'internal';
+                } else if (medium === 'organic') {
+                  singleEventPayload.params.traffic_type = 'organic';
+                } else if (medium === 'cpc' || medium === 'ppc' || medium === 'paidsearch') {
+                  singleEventPayload.params.traffic_type = 'paid_search';
+                } else if (medium === 'social') {
+                  singleEventPayload.params.traffic_type = 'social';
+                } else if (medium === 'email') {
+                  singleEventPayload.params.traffic_type = 'email';
+                } else if (medium === 'referral') {
+                  singleEventPayload.params.traffic_type = 'referral';
+                } else {
+                  singleEventPayload.params.traffic_type = 'other';
+                }
+              }
+            }
+            
+            if (!singleEventPayload.params.page_referrer && firstCompleteEvent.params.page_referrer) {
+              singleEventPayload.params.page_referrer = firstCompleteEvent.params.page_referrer;
+            }
+            // Add engagement time if missing
+            if (!singleEventPayload.params.engagement_time_msec && firstCompleteEvent.params.engagement_time_msec) {
+              singleEventPayload.params.engagement_time_msec = firstCompleteEvent.params.engagement_time_msec;
+            }
+            
+            if (DEBUG_MODE) {
+              console.log("📝 Enriched incomplete event with session data and original attribution:", {
+                eventName: event.name,
+                addedSessionId: !!firstCompleteEvent.params.session_id,
+                addedClientId: !!firstCompleteEvent.params.client_id,
+                usedOriginalSource: !!firstCompleteEvent.params.originalSource,
+                usedOriginalMedium: !!firstCompleteEvent.params.originalMedium,
+                usedOriginalTrafficType: !!firstCompleteEvent.params.originalTrafficType,
+                finalSource: singleEventPayload.params.source,
+                finalMedium: singleEventPayload.params.medium,
+                finalTrafficType: singleEventPayload.params.traffic_type
+              });
+            }
+          }
         }
 
+        // Add consent data to the individual event params for GDPR processing
+        // In batch events, consent is at the batch level, not individual event level
+        singleEventPayload.params.consent = batchPayload.consent;
+        
+        if (DEBUG_MODE) {
+          console.log("📋 Added batch consent to individual event:", {
+            eventName: event.name,
+            consentApplied: !!batchPayload.consent,
+            analyticsConsent: batchPayload.consent?.analytics_storage || 'unknown',
+            adConsent: batchPayload.consent?.ad_storage || 'unknown'
+          });
+        }
+        
         // Use existing GDPR processing
         const consentProcessedPayload = processGDPRConsent(singleEventPayload);
 
@@ -1858,19 +2017,9 @@ async function createResponse(responseData, request) {
     ...getCORSHeaders(request),
   };
 
-  // Always encrypt responses when encryption is enabled (skip for Simple requests)
-  const isSimpleRequest = request.headers.get("X-Simple-request") === "true";
-  if (JWT_ENCRYPTION_ENABLED && ENCRYPTION_KEY && !isSimpleRequest) {
-    try {
-      const jwtToken = await encrypt(responseBody, ENCRYPTION_KEY);
-      responseBody = JSON.stringify({ jwt: jwtToken });
-      
-      if (DEBUG_MODE) {
-        console.log("🔐 Response encrypted with JWT");
-      }
-    } catch (encryptError) {
-      console.warn("Failed to create JWT response, sending unencrypted:", encryptError);
-    }
+  // Always send responses as plain text (no encryption)
+  if (DEBUG_MODE) {
+    console.log("📤 Response sent as plain text (encryption disabled for responses)");
   }
 
   return new Response(responseBody, { headers });

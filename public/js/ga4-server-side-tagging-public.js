@@ -45,6 +45,8 @@
       // Initialize GDPR Consent System with retry mechanism for slow loads (immediate)
       await this.initializeConsentSystemWithRetry();
 
+      // Note: Event queue restoration is handled by GA4ConsentManager
+
       // Set up event listeners immediately
       this.setupEventListeners();
 
@@ -59,7 +61,7 @@
 
       // Log initialization
       this.log(
-        "%c GA4 Server-Side Tagging initialized v3",
+        "%c GA4 Server-Side Tagging initialized v2",
         "background: #4CAF50; color: white; font-size: 16px; font-weight: bold; padding: 8px 12px; border-radius: 4px;"
       );
     },
@@ -1140,6 +1142,7 @@
       this.setupSocialTracking();
       this.setupButtonTracking();
       this.setupVisibilityTracking();
+      this.setupPageUnloadListener();
     },
 
     /**
@@ -1311,6 +1314,59 @@
           self.trackEvent("page_visible", {});
         }
       });
+    },
+
+    /**
+     * Setup page unload listener to send batch events when user leaves the entire website
+     */
+    setupPageUnloadListener: function() {
+      var self = this;
+      var isLeavingWebsite = false;
+      
+      // Handle beforeunload - only send events if not internal navigation
+      window.addEventListener('beforeunload', function() {
+          isLeavingWebsite = true;
+          self.log("📤 BEFOREUNLOAD triggered - user leaving website, sending batch events");
+          self.sendBatchEventsOnUnload();
+      });
+      
+      // Handle page visibility changes - only for tab switching/closing, not internal navigation
+      document.addEventListener('visibilitychange', function() {
+        if (document.visibilityState === 'hidden') {
+          // Add a small delay to distinguish between tab switching and internal navigation
+          setTimeout(function() {
+            if (document.visibilityState === 'hidden') {
+              isLeavingWebsite = true;
+              self.log("📤 VISIBILITYCHANGE hidden - user likely left website, sending batch events", {
+                visibilityState: document.visibilityState
+              });
+              self.sendBatchEventsOnUnload();
+            }
+          }, 100); // Small delay to let internal navigation complete
+        }
+      });
+      
+      // Handle page freeze/resume - only if not internal navigation
+      window.addEventListener('pagehide', function() {
+          isLeavingWebsite = true;
+          self.log("📤 PAGEHIDE triggered - user leaving website, sending batch events");
+          self.sendBatchEventsOnUnload();
+      });
+
+      this.log("👂 Page unload listeners configured for batch event sending (website exit only)");
+    },
+
+    /**
+     * Send batch events on page unload - uses consent manager if available
+     */
+    sendBatchEventsOnUnload: function() {
+      // If consent manager is available, use its sendBatchEvents method
+      if (window.GA4ConsentManager && typeof window.GA4ConsentManager.sendBatchEvents === 'function') {
+        window.GA4ConsentManager.sendBatchEvents();
+      } else {
+        // Fallback: if no consent manager, we can't send events as they would be queued there
+        this.log("⚠️ No consent manager available for batch event sending");
+      }
     },
 
     // Setup scroll depth tracking
@@ -2503,6 +2559,12 @@
         eventParams.event_timestamp = Math.floor(Date.now() / 1000);
       }
 
+      // ALWAYS ensure basic location data is present for all events
+      this.ensureBasicLocationData(eventParams);
+
+      // Add stored attribution data for non-foundational events only
+      this.addStoredAttributionData(eventParams, eventName);
+
       // Check consent status via consent manager
       if (window.GA4ConsentManager && typeof window.GA4ConsentManager.shouldSendEvent === 'function') {
         // Check if eventParams already contains complete session data
@@ -3323,18 +3385,376 @@
     },
 
     /**
-     * Queue event for consent decision
+     * Queue event for consent decision with persistent storage
      */
     queueEventForConsent: function(payload) {
-      this.eventQueue.push({
-        payload: payload,
-        timestamp: Date.now()
+      this.log("📦 QUEUEING EVENT - Starting persistent queue process", {
+        eventName: payload.name,
+        currentQueueLength: this.eventQueue.length
       });
+      
+      const queuedEvent = {
+        payload: payload,
+        timestamp: Date.now(),
+        id: this.generateEventId()
+      };
+      
+      // Add to in-memory queue
+      this.eventQueue.push(queuedEvent);
+      
+      // Persist to localStorage for cross-page persistence
+      this.log("💾 Persisting event queue to localStorage...");
+      this.persistEventQueue();
       
       this.log("📦 Event queued for consent decision", {
         eventName: payload.name,
-        queueLength: this.eventQueue.length
+        queueLength: this.eventQueue.length,
+        eventId: queuedEvent.id,
+        persistedToStorage: true
       });
+    },
+
+    /**
+     * Generate unique event ID for queue tracking
+     */
+    generateEventId: function() {
+      return 'evt_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+    },
+
+    /**
+     * Persist event queue to localStorage
+     */
+    persistEventQueue: function() {
+      try {
+        this.log("💾 PERSIST QUEUE - Starting persistence process...", {
+          currentQueueLength: this.eventQueue.length,
+          hasLocalStorage: typeof localStorage !== 'undefined'
+        });
+        
+        const queueData = {
+          events: this.eventQueue,
+          timestamp: Date.now(),
+          version: '1.0'
+        };
+        
+        // Clean up expired events before saving
+        const cleanedEvents = this.cleanupExpiredQueuedEvents(queueData.events);
+        queueData.events = cleanedEvents;
+        
+        // Limit queue size to prevent localStorage bloat
+        if (queueData.events.length > this.getMaxQueueSize()) {
+          queueData.events = queueData.events.slice(-this.getMaxQueueSize());
+          this.log("⚠️ Queue size limit reached, keeping most recent events", {
+            maxSize: this.getMaxQueueSize(),
+            keptEvents: queueData.events.length
+          });
+        }
+        
+        const serializedData = JSON.stringify(queueData);
+        localStorage.setItem('ga4_persistent_event_queue', serializedData);
+        
+        this.log("✅ Event queue persisted to localStorage", {
+          eventCount: queueData.events.length,
+          storageSize: serializedData.length + ' bytes',
+          storageKey: 'ga4_persistent_event_queue'
+        });
+        
+        // Verify the data was stored correctly
+        const verification = localStorage.getItem('ga4_persistent_event_queue');
+        this.log("🔍 Storage verification", {
+          stored: !!verification,
+          size: verification ? verification.length : 0
+        });
+        
+      } catch (error) {
+        this.log("❌ Failed to persist event queue", {
+          error: error.message,
+          stack: error.stack
+        });
+      }
+    },
+
+    /**
+     * Restore event queue from localStorage on page load
+     */
+    restoreEventQueue: function() {
+      try {
+        this.log("🔄 RESTORE QUEUE - Starting restoration process...", {
+          hasLocalStorage: typeof localStorage !== 'undefined',
+          currentQueueLength: this.eventQueue.length
+        });
+        
+        const storedData = localStorage.getItem('ga4_persistent_event_queue');
+        if (!storedData) {
+          this.log("📭 No persistent event queue found in localStorage");
+          return;
+        }
+        
+        this.log("📦 Found stored queue data", {
+          dataSize: storedData.length + ' bytes'
+        });
+        
+        const queueData = JSON.parse(storedData);
+        if (!queueData || !queueData.events || !Array.isArray(queueData.events)) {
+          this.log("⚠️ Invalid queue data format, clearing storage", {
+            hasQueueData: !!queueData,
+            hasEvents: !!(queueData && queueData.events),
+            isArray: !!(queueData && queueData.events && Array.isArray(queueData.events))
+          });
+          localStorage.removeItem('ga4_persistent_event_queue');
+          return;
+        }
+        
+        this.log("📊 Queue data analysis", {
+          totalEvents: queueData.events.length,
+          queueTimestamp: queueData.timestamp,
+          queueVersion: queueData.version,
+          queueAge: Date.now() - queueData.timestamp + 'ms'
+        });
+        
+        // Clean up expired events
+        const validEvents = this.cleanupExpiredQueuedEvents(queueData.events);
+        
+        // Restore events to in-memory queue
+        this.eventQueue = validEvents;
+        
+        this.log("✅ Event queue restored from localStorage", {
+          restoredEvents: validEvents.length,
+          totalFound: queueData.events.length,
+          expiredEvents: queueData.events.length - validEvents.length,
+          queueAge: Date.now() - queueData.timestamp + 'ms'
+        });
+        
+        // Update localStorage with cleaned events if any were expired
+        if (validEvents.length !== queueData.events.length) {
+          this.log("🧹 Updating localStorage with cleaned events");
+          this.persistEventQueue();
+        }
+        
+      } catch (error) {
+        this.log("❌ Failed to restore event queue", {
+          error: error.message,
+          stack: error.stack
+        });
+        // Clear corrupted data
+        localStorage.removeItem('ga4_persistent_event_queue');
+      }
+    },
+
+    /**
+     * Clean up expired queued events
+     */
+    cleanupExpiredQueuedEvents: function(events) {
+      const maxAge = this.getQueueExpiration();
+      const now = Date.now();
+      
+      const validEvents = events.filter(event => {
+        const age = now - event.timestamp;
+        return age <= maxAge;
+      });
+      
+      if (validEvents.length !== events.length) {
+        this.log("🧹 Cleaned up expired queued events", {
+          removed: events.length - validEvents.length,
+          remaining: validEvents.length,
+          maxAge: maxAge / 1000 + 's'
+        });
+      }
+      
+      return validEvents;
+    },
+
+    /**
+     * Get maximum queue size (prevent localStorage bloat)
+     */
+    getMaxQueueSize: function() {
+      return 50; // Reasonable limit for queued events
+    },
+
+    /**
+     * Get queue expiration time in milliseconds
+     */
+    getQueueExpiration: function() {
+      return 24 * 60 * 60 * 1000; // 24 hours in milliseconds
+    },
+
+    /**
+     * Clear persistent event queue
+     */
+    clearPersistentEventQueue: function() {
+      try {
+        localStorage.removeItem('ga4_persistent_event_queue');
+        this.log("🗑️ Persistent event queue cleared");
+      } catch (error) {
+        this.log("❌ Failed to clear persistent event queue", {
+          error: error.message
+        });
+      }
+    },
+
+    /**
+     * Set up periodic cleanup of expired events
+     */
+    setupPeriodicCleanup: function() {
+      // Clean up expired events every 5 minutes
+      setInterval(() => {
+        this.periodicCleanup();
+      }, 5 * 60 * 1000); // 5 minutes
+
+      // Initial cleanup on page load
+      this.periodicCleanup();
+    },
+
+    /**
+     * Perform periodic cleanup of expired events and storage optimization
+     */
+    periodicCleanup: function() {
+      try {
+        const storedData = localStorage.getItem('ga4_persistent_event_queue');
+        if (!storedData) return;
+
+        const queueData = JSON.parse(storedData);
+        if (!queueData || !queueData.events || !Array.isArray(queueData.events)) return;
+
+        const initialCount = queueData.events.length;
+        const cleanedEvents = this.cleanupExpiredQueuedEvents(queueData.events);
+
+        // Check storage size and optimize if needed
+        const currentSize = JSON.stringify(queueData).length;
+        const maxSize = this.getMaxStorageSize();
+
+        if (currentSize > maxSize) {
+          // Keep only the most recent events if storage is too large
+          const maxEvents = Math.floor(this.getMaxQueueSize() * 0.7); // 70% of max
+          cleanedEvents.splice(0, cleanedEvents.length - maxEvents);
+          
+          this.log("⚠️ Storage size limit exceeded, reduced queue size", {
+            originalSize: currentSize + ' bytes',
+            maxSize: maxSize + ' bytes',
+            eventsKept: cleanedEvents.length,
+            eventsRemoved: initialCount - cleanedEvents.length
+          });
+        }
+
+        // Update storage if changes were made
+        if (cleanedEvents.length !== initialCount) {
+          if (cleanedEvents.length > 0) {
+            localStorage.setItem('ga4_persistent_event_queue', JSON.stringify({
+              events: cleanedEvents,
+              timestamp: Date.now(),
+              version: '1.0'
+            }));
+          } else {
+            localStorage.removeItem('ga4_persistent_event_queue');
+          }
+
+          this.log("🧹 Periodic cleanup completed", {
+            originalEvents: initialCount,
+            cleanedEvents: cleanedEvents.length,
+            removedEvents: initialCount - cleanedEvents.length
+          });
+        }
+
+      } catch (error) {
+        this.log("❌ Error during periodic cleanup", {
+          error: error.message
+        });
+      }
+    },
+
+    /**
+     * Get maximum storage size for the queue in bytes
+     */
+    getMaxStorageSize: function() {
+      return 50 * 1024; // 50KB - reasonable limit for localStorage
+    },
+
+    /**
+     * Get storage usage statistics
+     */
+    getQueueStorageStats: function() {
+      try {
+        const storedData = localStorage.getItem('ga4_persistent_event_queue');
+        if (!storedData) {
+          return {
+            exists: false,
+            size: 0,
+            eventCount: 0
+          };
+        }
+
+        const queueData = JSON.parse(storedData);
+        return {
+          exists: true,
+          size: storedData.length,
+          eventCount: queueData.events ? queueData.events.length : 0,
+          timestamp: queueData.timestamp,
+          version: queueData.version
+        };
+      } catch (error) {
+        return {
+          exists: false,
+          size: 0,
+          eventCount: 0,
+          error: error.message
+        };
+      }
+    },
+
+    /**
+     * Test function for debugging persistent queue functionality
+     * Use this in browser console: GA4ServerSideTagging.testPersistentQueue()
+     */
+    testPersistentQueue: function() {
+      this.log("🧪 TESTING PERSISTENT QUEUE FUNCTIONALITY");
+      
+      // Test 1: Check current state
+      const stats = this.getQueueStorageStats();
+      this.log("📊 Current Queue Stats", stats);
+      
+      // Test 2: Queue a test event
+      const testPayload = {
+        name: 'test_event',
+        params: {
+          event_category: 'test',
+          event_label: 'persistent_queue_test',
+          test_timestamp: Date.now()
+        }
+      };
+      
+      this.log("📦 Queuing test event...");
+      this.queueEventForConsent(testPayload);
+      
+      // Test 3: Check state after queuing
+      const newStats = this.getQueueStorageStats();
+      this.log("📊 Queue Stats After Adding Event", newStats);
+      
+      // Test 4: Manually check localStorage
+      const rawData = localStorage.getItem('ga4_persistent_event_queue');
+      this.log("🔍 Raw localStorage Data", {
+        exists: !!rawData,
+        size: rawData ? rawData.length : 0,
+        preview: rawData ? rawData.substring(0, 100) + '...' : 'none'
+      });
+      
+      // Test 5: Test restoration
+      this.log("🔄 Testing queue restoration...");
+      const originalQueue = [...this.eventQueue];
+      this.eventQueue = []; // Clear in-memory queue
+      this.restoreEventQueue();
+      
+      this.log("✅ Test completed", {
+        originalQueueLength: originalQueue.length,
+        restoredQueueLength: this.eventQueue.length,
+        testPassed: this.eventQueue.length === originalQueue.length
+      });
+      
+      return {
+        success: this.eventQueue.length === originalQueue.length,
+        originalLength: originalQueue.length,
+        restoredLength: this.eventQueue.length,
+        storageStats: newStats
+      };
     },
 
     /**
@@ -3353,12 +3773,16 @@
 
       // Process all queued events
       const eventsToProcess = [...this.eventQueue];
-      this.eventQueue = []; // Clear the queue
+      this.eventQueue = []; // Clear the in-memory queue
+      
+      // Clear persistent storage since events are being processed
+      this.clearPersistentEventQueue();
 
       eventsToProcess.forEach(async (queuedEvent) => {
         try {
           this.log("📤 Processing queued event", {
             eventName: queuedEvent.payload.name,
+            eventId: queuedEvent.id || 'unknown',
             queueTime: Date.now() - queuedEvent.timestamp + 'ms'
           });
           
@@ -3366,6 +3790,7 @@
         } catch (error) {
           this.log("❌ Failed to process queued event", {
             eventName: queuedEvent.payload.name,
+            eventId: queuedEvent.id || 'unknown',
             error: error.message
           });
         }
@@ -3379,6 +3804,144 @@
       return GA4ConsentManager && GA4ConsentManager.hasConsentDecision && GA4ConsentManager.hasConsentDecision();
     },
 
+
+    /**
+     * Ensure all events have basic location data (timezone-based fallback)
+     */
+    ensureBasicLocationData: function(params) {
+      // If we don't have any location data, add timezone-based fallback
+      if (!params.geo_continent && !params.geo_country_tz && !params.geo_city_tz && 
+          !params.geo_country && !params.geo_city && !params.geo_region) {
+        
+        var timezone = params.timezone || GA4Utils.helpers.getTimezone();
+        if (timezone) {
+          params.timezone = timezone;
+          var timezoneLocation = GA4Utils.helpers.getLocationFromTimezone(timezone);
+          if (timezoneLocation.continent) params.geo_continent = timezoneLocation.continent;
+          if (timezoneLocation.country) params.geo_country_tz = timezoneLocation.country;
+          if (timezoneLocation.city) params.geo_city_tz = timezoneLocation.city;
+          
+          this.log("Added basic location data from timezone", {
+            timezone: timezone,
+            continent: timezoneLocation.continent,
+            country: timezoneLocation.country,
+            city: timezoneLocation.city
+          });
+        }
+      }
+    },
+
+    /**
+     * Add stored attribution data to non-foundational events for proper attribution tracking
+     */
+    addStoredAttributionData: function(params, eventName) {
+      // Foundational events (page_view, session_start, first_visit) should keep their current attribution
+      var foundationalEvents = ['custom_session_start', 'custom_first_visit', 'page_view', 'view_item', 'view_item_list'];
+      
+      if (foundationalEvents.includes(eventName)) {
+        this.log("Foundational event - keeping current attribution", {
+          eventName: eventName,
+          source: params.source,
+          medium: params.medium
+        });
+        return;
+      }
+      
+      // Get stored attribution data (original traffic source)
+      var storedAttribution = this.getStoredAttribution();
+      
+      // Special handling for conversion events - they get both source and originalSource with stored values
+      var conversionEvents = ['purchase', 'quote_request', 'form_conversion'];
+      
+      if (conversionEvents.includes(eventName)) {
+        // For conversion events, set both source and originalSource to stored attribution
+        if (storedAttribution.source) {
+          params.source = storedAttribution.source;
+        }
+        if (storedAttribution.medium) {
+          params.medium = storedAttribution.medium;
+        }
+        if (storedAttribution.campaign) {
+          params.campaign = storedAttribution.campaign;
+        }
+        if (storedAttribution.content) {
+          params.content = storedAttribution.content;
+        }
+        if (storedAttribution.term) {
+          params.term = storedAttribution.term;
+        }
+        if (storedAttribution.gclid) {
+          params.gclid = storedAttribution.gclid;
+        }
+        
+        // Calculate and add traffic type for both current and original
+        if (storedAttribution.source && storedAttribution.medium) {
+          var trafficType = GA4Utils.traffic.getType(
+            storedAttribution.source,
+            storedAttribution.medium,
+            null // No referrer domain for stored attribution
+          );
+          params.traffic_type = trafficType;
+        }
+        
+        this.log("Added stored attribution as both current and original attribution for conversion event", {
+          eventName: eventName,
+          source: params.source,
+          originalSource: params.originalSource,
+          medium: params.medium,
+          originalMedium: params.originalMedium
+        });
+        return;
+      }
+      
+      // For other non-foundational events, add stored attribution as original attribution fields
+      // Remove current attribution fields and only keep original attribution
+      if (storedAttribution.source) {
+        params.originalSource = storedAttribution.source;
+      }
+      if (storedAttribution.medium) {
+        params.originalMedium = storedAttribution.medium;
+      }
+      if (storedAttribution.campaign) {
+        params.originalCampaign = storedAttribution.campaign;
+      }
+      if (storedAttribution.content) {
+        params.originalContent = storedAttribution.content;
+      }
+      if (storedAttribution.term) {
+        params.originalTerm = storedAttribution.term;
+      }
+      if (storedAttribution.gclid) {
+        params.originalGclid = storedAttribution.gclid;
+      }
+      
+      // Calculate and add original traffic type
+      if (storedAttribution.source && storedAttribution.medium) {
+        params.originalTrafficType = GA4Utils.traffic.getType(
+          storedAttribution.source,
+          storedAttribution.medium,
+          null // No referrer domain for stored attribution
+        );
+      }
+      
+      // Remove current attribution fields for non-foundational events
+      // Only keep original attribution fields
+      delete params.source;
+      delete params.medium;
+      delete params.campaign;
+      delete params.content;
+      delete params.term;
+      delete params.gclid;
+      delete params.traffic_type;
+      
+      this.log("Added stored attribution as original attribution for non-foundational event", {
+        eventName: eventName,
+        originalSource: params.originalSource,
+        originalMedium: params.originalMedium,
+        originalCampaign: params.originalCampaign,
+        originalTrafficType: params.originalTrafficType
+      });
+    },
 
     // Log messages if debug mode is enabled
     log: function (message, data) {

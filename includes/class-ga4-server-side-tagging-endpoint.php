@@ -593,16 +593,7 @@ class GA4_Server_Side_Tagging_Endpoint
             // Handle encrypted request if present
             $request_data = $this->handle_encrypted_request($request);
 
-            // Debug logging for the request data structure
-            $this->logger->info("Received request data structure", [
-                'has_events' => isset($request_data['events']),
-                'events_count' => isset($request_data['events']) ? count($request_data['events']) : 0,
-                'has_consent' => isset($request_data['consent']),
-                'has_batch' => isset($request_data['batch']),
-                'has_event_name' => isset($request_data['event_name']),
-                'has_name' => isset($request_data['name']),
-                'request_keys' => array_keys($request_data ?: [])
-            ]);
+        
 
             // Validate batch request structure
             if (empty($request_data)) {
@@ -673,9 +664,9 @@ class GA4_Server_Side_Tagging_Endpoint
 
             // Get configuration from database
             $cloudflare_url = get_option('ga4_cloudflare_worker_url', '');
-            $worker_api_key = \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::retrieve_encrypted_key('ga4_worker_api_key') ?: get_option('ga4_worker_api_key', '');
+            $worker_api_key = GA4_Encryption_Util::retrieve_encrypted_key('ga4_worker_api_key') ?: get_option('ga4_worker_api_key', '');
             $encryption_enabled = (bool) get_option('ga4_jwt_encryption_enabled', false);
-            $encryption_key = \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::retrieve_encrypted_key('ga4_jwt_encryption_key') ?: '';
+            $encryption_key = GA4_Encryption_Util::retrieve_encrypted_key('ga4_jwt_encryption_key') ?: '';
             
             if (empty($cloudflare_url) || empty($worker_api_key)) {
                 return new \WP_REST_Response(array('error' => 'Configuration incomplete'), 500);
@@ -900,7 +891,7 @@ class GA4_Server_Side_Tagging_Endpoint
         if (isset($request_body['time_jwt']) && !empty($request_body['time_jwt'])) {
             // This is a time-based JWT encrypted request
             try {
-                $decrypted_data = \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::verify_time_based_jwt($request_body['time_jwt']);
+                $decrypted_data = GA4_Encryption_Util::verify_time_based_jwt($request_body['time_jwt']);
                 if ($decrypted_data === false) {
                     throw new \Exception('Time-based JWT verification failed');
                 }
@@ -922,7 +913,7 @@ class GA4_Server_Side_Tagging_Endpoint
         }
 
         // Use the configured encryption key from backend settings
-        $encryption_key = \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::retrieve_encrypted_key('ga4_jwt_encryption_key') ?: '';
+        $encryption_key = GA4_Encryption_Util::retrieve_encrypted_key('ga4_jwt_encryption_key') ?: '';
 
         if (empty($encryption_key)) {
             throw new \Exception('Encryption is enabled but no encryption key is configured');
@@ -1164,7 +1155,7 @@ class GA4_Server_Side_Tagging_Endpoint
             $response_body = wp_remote_retrieve_body($response);
 
             if ($response_code >= 200 && $response_code < 300) {
-                // Parse response body if it's JSON
+                // Try to parse response body as JSON first
                 $parsed_response = json_decode($response_body, true);
                 if (json_last_error() === JSON_ERROR_NONE) {
                     // Check if response is encrypted (JWT format)
@@ -1191,11 +1182,28 @@ class GA4_Server_Side_Tagging_Endpoint
                             return array('success' => true, 'worker_response' => $parsed_response);
                         }
                     } else {
-                        // Response is not encrypted or encryption not enabled
+                        // Response is JSON but not encrypted (valid JSON response)
                         return array('success' => true, 'worker_response' => $parsed_response);
                     }
                 } else {
-                    return array('success' => true, 'worker_response' => $response_body);
+                    // Response is not JSON - handle as plain text
+                    // If it's a simple success message, treat it as successful
+                    $response_body_trimmed = trim($response_body);
+                    if (empty($response_body_trimmed) || 
+                        stripos($response_body_trimmed, 'success') !== false ||
+                        stripos($response_body_trimmed, 'ok') !== false ||
+                        stripos($response_body_trimmed, 'processed') !== false ||
+                        strlen($response_body_trimmed) < 100) {
+                        // Treat plain text success responses as successful
+                        return array('success' => true, 'worker_response' => array(
+                            'message' => $response_body_trimmed,
+                            'status' => 'success',
+                            'format' => 'plain_text'
+                        ));
+                    } else {
+                        // Unknown plain text response, return as-is
+                        return array('success' => true, 'worker_response' => $response_body);
+                    }
                 }
             } else {
                 return array('success' => false, 'error' => 'HTTP ' . $response_code . ': ' . $response_body);

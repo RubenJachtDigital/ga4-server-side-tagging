@@ -21,7 +21,7 @@
     trackingInstance: null, // Reference to main tracking instance
     consentProcessed: false, // Flag to prevent duplicate consent processing
     eventsProcessed: false, // Flag to prevent duplicate event processing
-    sessionStorageKey: 'ga4_queued_events', // Key for storing events in sessionStorage
+    storageKey: 'ga4_queued_events', // Key for storing events in localStorage (persistent across page refreshes)
 
     /**
      * Initialize the consent manager
@@ -30,8 +30,13 @@
       this.config = config || {};
       this.trackingInstance = trackingInstance;
       
+      this.log("🚀 GA4ConsentManager initialization started", {
+        timestamp: Date.now(),
+        pageUrl: window.location.href,
+        storageKey: this.storageKey
+      });
       
-      // Load any existing queued events from session storage
+      // Load any existing queued events from localStorage
       this.loadQueuedEventsFromSession();
 
       // Check for existing consent
@@ -64,9 +69,6 @@
         this.setupDefaultConsentTimeout();
       }
 
-      // Set up page unload listener to send batch events
-      this.setupPageUnloadListener();
-
     },
 
     /**
@@ -75,7 +77,7 @@
     setupPageUnloadListener: function() {
       var self = this;
       
-      // Use both beforeunload and visibilitychange for maximum coverage
+      // Send batches when user is leaving the page
       window.addEventListener('beforeunload', function() {
         self.log("📤 BEFOREUNLOAD triggered - sending batch events", {
           eventQueueLength: self.eventQueue?.length || 0,
@@ -132,6 +134,11 @@
      * @returns {boolean} - Always false to queue events
      */
     shouldSendEvent: function(eventName, eventParams, completeEventData) {
+      this.log("🔍 shouldSendEvent called", {
+        eventName: eventName,
+        hasCompleteData: !!completeEventData,
+        currentQueueLength: this.eventQueue.length
+      });
       
       // NEW: Always queue events regardless of consent status
       // Queue the event with complete data if available
@@ -165,9 +172,15 @@
       
       this.eventQueue.push(queuedEvent);
       
-      // Save to session storage to persist across page navigation
+      this.log("📦 Event queued for consent", {
+        eventName: eventName,
+        queueLength: this.eventQueue.length,
+        timestamp: queuedEvent.timestamp,
+        isCompleteData: isCompleteData
+      });
+      
+      // Save to localStorage to persist across page navigation
       this.saveQueuedEventsToSession();
-
     },
 
     /**
@@ -223,9 +236,13 @@
         timestamp: Date.now()
       };
 
-      // Process each event in the queue
-      this.eventQueue.forEach(function(queuedEvent) {
-        var eventData = {
+      // Process each event in the queue with size validation
+      const maxBatchSize = 500 * 1024; // 500KB max batch size
+      let currentBatchSize = JSON.stringify(batchPayload).length;
+      
+      for (let i = 0; i < this.eventQueue.length; i++) {
+        const queuedEvent = this.eventQueue[i];
+        const eventData = {
           name: queuedEvent.eventName,
           params: queuedEvent.eventParams,
           isCompleteData: queuedEvent.isCompleteData,
@@ -238,23 +255,52 @@
           eventData.pageTitle = queuedEvent.pageTitle;
         }
         
+        // Check if adding this event would exceed the batch size limit
+        const eventSize = JSON.stringify(eventData).length;
+        if (currentBatchSize + eventSize > maxBatchSize) {
+          this.log("⚠️ Batch size limit reached, limiting events in batch", {
+            currentSize: currentBatchSize,
+            maxSize: maxBatchSize,
+            eventsIncluded: batchPayload.events.length,
+            eventsSkipped: this.eventQueue.length - batchPayload.events.length,
+            skipReason: "batch_size_limit"
+          });
+          break; // Stop processing more events
+        }
+        
         batchPayload.events.push(eventData);
-      });
+        currentBatchSize += eventSize;
+      }
 
       this.log("📤 Sending batch payload with " + batchPayload.events.length + " events", batchPayload);
 
       // Send batch to the tracking instance
+      let batchSent = false;
       if (this.trackingInstance && typeof this.trackingInstance.sendBatchEvents === 'function') {
         this.trackingInstance.sendBatchEvents(batchPayload);
+        batchSent = true;
       } else if (typeof GA4ServerSideTagging !== 'undefined' && typeof GA4ServerSideTagging.sendBatchEvents === 'function') {
         GA4ServerSideTagging.sendBatchEvents(batchPayload);
+        batchSent = true;
       } else {
         this.log("❌ No batch sending method available");
       }
 
-      // Clear the queue after sending
-      this.eventQueue = [];
-      this.clearQueuedEventsFromSession();
+      // Only clear events if they were actually sent
+      if (batchSent) {
+        // Clear both in-memory queue and localStorage since events are being sent
+        this.eventQueue = [];
+        this.clearQueuedEventsFromSession();
+        
+        this.log("📤 Batch events sent successfully, all queues cleared", {
+          eventsSent: batchPayload.events.length,
+          batchSize: JSON.stringify(batchPayload).length + ' bytes'
+        });
+      } else {
+        this.log("❌ Batch events not sent, queues preserved", {
+          queueLength: this.eventQueue.length
+        });
+      }
     },
 
     /**
@@ -1117,7 +1163,8 @@
       this.log("✅ Consent granted - processing queued events", { 
         consent: consent, 
         queuedEvents: this.eventQueue.length,
-        consentProcessed: this.consentProcessed
+        consentProcessed: this.consentProcessed,
+        note: "Events remain queued for batch sending on page unload"
       });
 
       // Enable tracking (events remain queued for batch sending)
@@ -1169,7 +1216,8 @@
       this.log("❌ Consent denied - processing queued events with anonymization", { 
         consent: consent, 
         queuedEvents: this.eventQueue.length,
-        consentProcessed: this.consentProcessed
+        consentProcessed: this.consentProcessed,
+        note: "Events remain queued for batch sending with anonymization on page unload"
       });
 
       // Enable tracking (events remain queued for batch sending with anonymization)
@@ -1417,21 +1465,6 @@
       this.handleConsentDenied('button_click');
     },
 
-    /**
-     * TESTING METHODS - Force consent and batch sending for debugging
-     */
-    testGrantConsent: function() {
-      this.log("🧪 TEST: Manually granting consent for testing");
-      this.handleConsentGiven('test_manual');
-    },
-
-    testSendBatch: function() {
-      this.log("🧪 TEST: Manually triggering batch send", {
-        queueLength: this.eventQueue?.length || 0,
-        consentGiven: this.consentGiven
-      });
-      this.sendBatchEvents();
-    },
 
     testForceConsent: function() {
       this.log("🧪 TEST: Force enabling consent for testing (bypass normal flow)");
@@ -1471,8 +1504,8 @@
      * Debug logging helper
      */
     log: function(message, data) {
-      if (this.config && this.config.debugMode && window.console) {
-        var prefix = "[GA4 Consent Manager]";
+      if (window.console) {
+        var prefix = "[GA4 Consent]";
         if (data) {
           console.log(prefix + " " + message, data);
         } else {
@@ -1482,26 +1515,40 @@
     },
 
     /**
-     * Load queued events from session storage
+     * Load queued events from localStorage for persistence across page refreshes
      */
     loadQueuedEventsFromSession: function() {
       try {
-        var stored = sessionStorage.getItem(this.sessionStorageKey);
-        if (stored) {
-          var storedEvents = JSON.parse(stored);
-          if (Array.isArray(storedEvents) && storedEvents.length > 0) {
-            // Filter out events older than 1 hour to prevent stale events
-            var oneHour = 60 * 60 * 1000;
-            var now = Date.now();
-            var validEvents = storedEvents.filter(function(event) {
-              return event.timestamp && (now - event.timestamp) < oneHour;
+        this.log("🔍 Starting queue restoration from localStorage", {
+          storageKey: this.storageKey,
+          currentQueueLength: this.eventQueue.length
+        });
+        
+        // Load from localStorage (persistent across page refreshes)
+        const storedData = localStorage.getItem(this.storageKey);
+        
+        this.log("🔍 localStorage check", {
+          hasData: !!storedData,
+          dataSize: storedData ? storedData.length : 0,
+          preview: storedData ? storedData.substring(0, 100) + '...' : 'none'
+        });
+        
+        if (storedData) {
+          const parsed = JSON.parse(storedData);
+          if (parsed && parsed.events && Array.isArray(parsed.events)) {
+            // Filter out events older than 24 hours to prevent stale data
+            const maxAge = 24 * 60 * 60 * 1000; // 24 hours
+            const now = Date.now();
+            const validEvents = parsed.events.filter(function(event) {
+              return event.timestamp && (now - event.timestamp) < maxAge;
             });
             
             this.eventQueue = validEvents;
-            this.log("📦 Loaded queued events from session storage", {
-              totalStored: storedEvents.length,
+            this.log("✅ Loaded queued events from localStorage", {
+              totalFound: parsed.events.length,
               validEvents: validEvents.length,
-              filteredOldEvents: storedEvents.length - validEvents.length,
+              expiredEvents: parsed.events.length - validEvents.length,
+              queueAge: Date.now() - parsed.timestamp + 'ms',
               events: validEvents.map(function(e) { 
                 return {
                   name: e.eventName, 
@@ -1511,47 +1558,112 @@
               })
             });
             
-            // Update session storage with only valid events
-            if (validEvents.length !== storedEvents.length) {
+            // Save back the cleaned events if any were expired
+            if (validEvents.length !== parsed.events.length) {
+              this.log("🧹 Saving cleaned events back to localStorage");
               this.saveQueuedEventsToSession();
             }
+          } else {
+            this.log("📭 Invalid or empty queue data in localStorage", {
+              hasParsed: !!parsed,
+              hasEvents: !!(parsed && parsed.events),
+              isArray: !!(parsed && parsed.events && Array.isArray(parsed.events))
+            });
+            this.eventQueue = [];
           }
+        } else {
+          this.log("📭 No queued events found in localStorage");
+          this.eventQueue = [];
         }
+        
       } catch (e) {
-        this.log("Failed to load queued events from session storage", e);
+        this.log("❌ Failed to load queued events from localStorage", e);
         this.eventQueue = [];
       }
     },
 
     /**
-     * Save queued events to session storage
+     * Save queued events to localStorage for persistence across page refreshes
      */
     saveQueuedEventsToSession: function() {
       try {
-        sessionStorage.setItem(this.sessionStorageKey, JSON.stringify(this.eventQueue));
-        this.log("Saved queued events to session storage", {
-          eventCount: this.eventQueue.length
+        // Save to localStorage for cross-page persistence
+        const persistentData = {
+          events: this.eventQueue,
+          timestamp: Date.now(),
+          version: '1.0'
+        };
+        const serializedData = JSON.stringify(persistentData);
+        
+        this.log("💾 SAVING to localStorage", {
+          eventCount: this.eventQueue.length,
+          storageKey: this.storageKey,
+          dataSize: serializedData.length + ' bytes',
+          timestamp: Date.now(),
+          stackTrace: new Error().stack.split('\n')[2]
+        });
+        
+        localStorage.setItem(this.storageKey, serializedData);
+        
+        this.log("✅ Saved queued events to localStorage for persistence", {
+          eventCount: this.eventQueue.length,
+          storageKey: this.storageKey,
+          dataSize: serializedData.length + ' bytes'
         });
       } catch (e) {
-        this.log("Failed to save queued events to session storage", e);
+        this.log("❌ Failed to save queued events to storage", e);
       }
     },
 
     /**
-     * Clear queued events from session storage
+     * Clear queued events from localStorage
      */
     clearQueuedEventsFromSession: function() {
       try {
-        sessionStorage.removeItem(this.sessionStorageKey);
-        this.log("Cleared queued events from session storage");
+        this.log("🗑️ CLEARING localStorage queue", {
+          storageKey: this.storageKey,
+          currentQueueLength: this.eventQueue.length,
+          stackTrace: new Error().stack
+        });
+        localStorage.removeItem(this.storageKey);
+        this.log("✅ Cleared queued events from localStorage");
       } catch (e) {
-        this.log("Failed to clear queued events from session storage", e);
+        this.log("❌ Failed to clear queued events from localStorage", e);
       }
-    }
+    },
+
 
   };
 
   // Expose globally
   window.GA4ConsentManager = GA4ConsentManager;
+
+  // Debug: Log that consent manager is loaded
+  console.log("[GA4 Consent] Consent manager loaded and ready");
+  
+  // Track localStorage changes for debugging
+  const originalSetItem = localStorage.setItem;
+  const originalRemoveItem = localStorage.removeItem;
+  const originalClear = localStorage.clear;
+  
+  localStorage.setItem = function(key, value) {
+    if (key === 'ga4_queued_events') {
+      console.log("[GA4 Consent] 💾 SETTING localStorage:", key, value ? value.length + ' bytes' : 'null');
+    }
+    return originalSetItem.apply(this, arguments);
+  };
+  
+  localStorage.removeItem = function(key) {
+    if (key === 'ga4_queued_events') {
+      console.log("[GA4 Consent] 🗑️ REMOVING localStorage:", key);
+    }
+    return originalRemoveItem.apply(this, arguments);
+  };
+  
+  localStorage.clear = function() {
+    console.log("[GA4 Consent] 🧹 CLEARING ALL localStorage");
+    return originalClear.apply(this, arguments);
+  };
+  
 
 })(window, jQuery);
