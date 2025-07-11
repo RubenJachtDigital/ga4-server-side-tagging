@@ -2818,17 +2818,18 @@
         
         this.sendSimpleRequest(data, false); // false = no bot detection
       } else if (transmissionMethod === 'wp_endpoint_to_cf' && this.config.cloudflareWorkerUrl) {
-        this.log("🛡️ WordPress Endpoint to Cloudflare transmission - plain JSON with bot validation", {
+        this.log("🛡️ WP Bot Check before sending to CF transmission - optimized WordPress endpoint", {
           eventName: eventName,
           workerUrl: this.config.cloudflareWorkerUrl,
           method: 'wp_endpoint_to_cf',
-          bypassWordPress: true,
+          bypassWordPress: false,
           botDetection: true,
           apiKeyValidation: false,
-          encryption: false
+          encryption: false,
+          asyncForwarding: true
         });
         
-        this.sendSimpleRequest(data, true); // true = with bot detection
+        this.sendAjaxPayload(null, data); // Use optimized WordPress endpoint
       } else {
         this.log("🔒 Secure WordPress to Cloudflare transmission - sending via WordPress endpoint", {
           eventName: eventName,
@@ -2874,8 +2875,8 @@
         this.log("⚡ Direct to Cloudflare batch transmission");
         this.sendBatchToCloudflare(data);
       } else if (transmissionMethod === 'wp_endpoint_to_cf' && this.config.cloudflareWorkerUrl) {
-        this.log("🛡️ WordPress Endpoint to Cloudflare batch transmission");
-        this.sendBatchViaWordPress(data, false); // false = no encryption
+        this.log("🛡️ WP Bot Check before sending to CF batch transmission (balanced)");
+        this.sendBatchViaWordPress(data, false); // Use optimized WordPress endpoint (no encryption)
       } else {
         this.log("🔒 Secure WordPress to Cloudflare batch transmission");
         this.sendBatchViaWordPress(data, true); // true = with encryption
@@ -2891,26 +2892,25 @@
         return;
       }
 
-      // Use sendBeacon for page unload reliability, fallback to fetch
+      // Use fetch with proper headers (sendBeacon doesn't support custom headers)
       try {
         var payload = JSON.stringify(batchData);
         
-        if (navigator.sendBeacon) {
-          var success = navigator.sendBeacon(this.config.cloudflareWorkerUrl, payload);
-          if (success) {
-            this.log("✅ Batch sent via sendBeacon to Cloudflare Worker");
-            return;
-          } else {
-            this.log("⚠️ sendBeacon failed, falling back to fetch");
-          }
+        // Prepare headers for the request
+        const headers = {
+          'Content-Type': 'application/json',
+          'X-Simple-request': 'true'
+        };
+        
+        // Add X-WP-Nonce header if we have a nonce (for wp_endpoint_to_cf method)
+        if (this.config.nonce) {
+          headers['X-WP-Nonce'] = this.config.nonce;
         }
 
-        // Fallback to fetch for browsers without sendBeacon support
+        // Use fetch with proper headers for Cloudflare Worker
         fetch(this.config.cloudflareWorkerUrl, {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
+          headers: headers,
           body: payload,
           keepalive: true // Important for page unload
         }).then(function(response) {
@@ -3216,12 +3216,20 @@
           });
         }
 
+        // Prepare headers for the request
+        const headers = {
+          'Content-Type': 'application/json',
+          'X-Simple-request': 'true'
+        };
+        
+        // Add X-WP-Nonce header if we have a nonce (for wp_endpoint_to_cf method)
+        if (this.config.nonce) {
+          headers['X-WP-Nonce'] = this.config.nonce;
+        }
+
         const response = await fetch(this.config.cloudflareWorkerUrl, {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'X-Simple-request': 'true'
-          },
+          headers: headers,
           body: JSON.stringify({
             event_name: payload.name,
             params: payload.params || {}
@@ -3253,78 +3261,6 @@
       }
     },
 
-    /**
-     * Validate bot for Simple request via WordPress endpoint
-     */
-    validateBotForSimpleRequest: async function () {
-      try {
-        // Build comprehensive headers for bot detection
-        const headers = {
-          'Content-Type': 'application/json',
-          'X-WP-Nonce': this.config.nonce,
-          'Accept': 'application/json, text/plain, */*',
-          'Accept-Language': navigator.language || 'en-US',
-          'Accept-Encoding': 'gzip, deflate, br',
-          'Cache-Control': 'no-cache',
-          'Pragma': 'no-cache'
-        };
-
-        // Add referer if available
-        if (document.referrer) {
-          headers['Referer'] = document.referrer;
-        }
-
-        // Add user agent (browsers automatically include this)
-        // Add connection type if available
-        if (navigator.connection && navigator.connection.effectiveType) {
-          headers['Connection-Type'] = navigator.connection.effectiveType;
-        }
-
-        this.log("🔍 Sending bot validation request with headers", {
-          endpoint: this.config.apiEndpoint + '/validate-bot',
-          headers: headers,
-          userAgent: navigator.userAgent,
-          language: navigator.language,
-          platform: navigator.platform
-        });
-
-        const response = await fetch(this.config.apiEndpoint + '/validate-bot', {
-          method: 'GET',
-          headers: headers,
-          credentials: 'same-origin'
-        });
-
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`);
-        }
-
-        const result = await response.json();
-        
-        this.log("✅ Bot validation response received", {
-          success: result.success,
-          is_bot: result.is_bot,
-          message: result.message,
-          session_cached: result.session_cached,
-          headers_received: result.headers
-        });
-        
-        return result;
-
-      } catch (error) {
-        this.log("❌ Bot validation endpoint failed", {
-          error: error.message,
-          endpoint: this.config.apiEndpoint + '/validate-bot'
-        });
-        
-        // If validation fails, assume it's not a bot to avoid blocking legitimate traffic
-        return { 
-          success: true, 
-          is_bot: false, 
-          message: "Bot validation failed, allowing request",
-          fallback: true 
-        };
-      }
-    },
 
     /**
      * Send AJAX payload to endpoint

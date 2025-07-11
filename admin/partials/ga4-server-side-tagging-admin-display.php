@@ -362,7 +362,7 @@ if (!defined('WPINC')) {
                                         🔒 Secure WordPress to Cloudflare (Most Secure)
                                     </option>
                                     <option value="wp_endpoint_to_cf" <?php selected($transmission_method, 'wp_endpoint_to_cf'); ?>>
-                                        🛡️ WordPress Endpoint to Cloudflare (Balanced)
+                                        🛡️ WP Bot Check before sending to CF (Balanced)
                                     </option>
                                     <option value="direct_to_cf" <?php selected($transmission_method, 'direct_to_cf'); ?>>
                                         ⚡ Direct to Cloudflare (Fastest)
@@ -376,8 +376,8 @@ if (!defined('WPINC')) {
                         </tr>
                     </table>
                     
-                    <!-- Always show Worker URL field -->
-                    <table class="form-table">
+                    <!-- Worker URL field - required for all methods -->
+                    <table class="form-table" id="worker_url_field">
                         <tr>
                             <th scope="row">
                                 <label for="ga4_cloudflare_worker_url">GA4 Cloudflare Worker URL</label>
@@ -821,23 +821,23 @@ jQuery(document).ready(function($) {
             fields: ['worker_api_key', 'jwt_encryption']
         },
         'wp_endpoint_to_cf': {
-            title: '🛡️ WordPress Endpoint to Cloudflare (Balanced)',
-            description: 'Balanced approach with WordPress security validation but no encryption or API key overhead.',
+            title: '🛡️ WP Bot Check before sending to CF (Balanced)',
+            description: 'WordPress validates and forwards events to Cloudflare Worker with optimized performance.',
             pros: [
-                '✅ <strong>Good Security:</strong> WordPress bot detection and origin validation',
-                '✅ <strong>Better Performance:</strong> No encryption or API key validation overhead',
-                '✅ <strong>Bot Filtering:</strong> WordPress-level bot detection with session caching',
-                '✅ <strong>Origin Validation:</strong> Validates requests come from legitimate sources',
-                '✅ <strong>Simple Setup:</strong> No API keys or encryption to manage',
-                '✅ <strong>Debug Friendly:</strong> Plain JSON makes troubleshooting easier'
+                '✅ <strong>WordPress Bot Detection:</strong> Comprehensive server-side bot validation via /send-events endpoint',
+                '✅ <strong>Async CF Forwarding:</strong> Fire-and-forget transmission to Cloudflare Worker for maximum performance',
+                '✅ <strong>Session Caching:</strong> Bot validation results cached for performance',
+                '✅ <strong>Single Request:</strong> Only one request needed (to WordPress /send-events endpoint)',
+                '✅ <strong>Simple Setup:</strong> No API keys or encryption configuration needed',
+                '✅ <strong>Batch Processing:</strong> Multiple events handled efficiently in single request'
             ],
             cons: [
-                '❌ <strong>No API Key Protection:</strong> No server-side API key validation',
+                '❌ <strong>WordPress Processing:</strong> Events processed through WordPress before forwarding',
                 '❌ <strong>No Encryption:</strong> Data sent as plain JSON (but still over HTTPS)',
-                '❌ <strong>WordPress Dependency:</strong> Still requires WordPress processing for each event',
+                '❌ <strong>WordPress Dependency:</strong> Relies on WordPress for all event processing',
                 '❌ <strong>Moderate Performance:</strong> Slower than direct method due to WordPress processing'
             ],
-            when: 'Use for most websites that need good security with better performance. Ideal for e-commerce sites and business websites that want bot filtering without API key complexity.',
+            when: 'Use for sites needing WordPress-level bot detection with optimized performance. Perfect for most business sites.',
             fields: []
         },
         'direct_to_cf': {
@@ -906,6 +906,9 @@ jQuery(document).ready(function($) {
     // Function to toggle field visibility based on transmission method
     function toggleTransmissionFields() {
         const selectedMethod = $('#ga4_transmission_method').val();
+        
+        // Show/hide worker URL field - needed for all methods except none
+        $('#worker_url_field').show(); // All methods need Worker URL to forward events
         
         // Show/hide secure config fields
         if (selectedMethod === 'secure_wp_to_cf') {

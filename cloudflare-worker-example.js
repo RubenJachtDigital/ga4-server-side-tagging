@@ -5,7 +5,29 @@
  * This worker receives events from the WordPress plugin and forwards them to GA4
  * with full GDPR compliance and consent management
  *
- * @version 2.2.0 - GDPR Enhanced
+ * @version 2.3.0 - Multi-Transmission Method Support
+ * 
+ * TRANSMISSION METHODS SUPPORTED:
+ * ==============================
+ * 1. direct_to_cf (Simple): Direct client-to-worker, minimal security, no API key
+ *    - Headers: X-Simple-request: true
+ *    - Payload: Plain JSON
+ *    - Security: Basic rate limiting only
+ * 
+ * 2. wp_endpoint_to_cf (Standard): WordPress endpoint to worker, balanced security
+ *    - Headers: X-WP-Nonce: [nonce]
+ *    - Payload: Plain JSON
+ *    - Security: WordPress validation + rate limiting
+ * 
+ * 3. secure_wp_to_cf (Encrypted): WordPress endpoint to worker, maximum security
+ *    - Headers: X-WP-Nonce: [nonce], X-Encrypted: true
+ *    - Payload: JWT encrypted (time_jwt field)
+ *    - Security: WordPress validation + JWT encryption + rate limiting
+ * 
+ * 4. regular (Legacy): Direct with API key, full security validation
+ *    - Headers: Authorization: Bearer [api_key]
+ *    - Payload: Plain JSON or JWT encrypted
+ *    - Security: API key + origin validation + rate limiting
  * 
  * IMPORTANT: CONFIGURATION REQUIRED
  * ================================
@@ -15,7 +37,7 @@
  * 
  * GA4_MEASUREMENT_ID    = Your GA4 Measurement ID (e.g., G-XXXXXXXXXX)
  * GA4_API_SECRET        = Your GA4 API Secret from Google Analytics
- * API_KEY              = API key from WordPress plugin admin
+ * API_KEY              = API key from WordPress plugin admin (for legacy method)
  * ENCRYPTION_KEY       = JWT encryption key from WordPress plugin admin
  * ALLOWED_DOMAINS      = Comma-separated domains (e.g., example.com,www.example.com)
  * 
@@ -1298,15 +1320,24 @@ async function handleRequest(request, env) {
     });
   }
 
-  // Check if this is a Simple request (bypasses most security checks)
+  // Detect request type for proper security handling
   const isSimpleRequest = request.headers.get("X-Simple-request") === "true";
+  const isWordPressRequest = request.headers.get("X-WP-Nonce") !== null;
+  const isEncryptedRequest = request.headers.get("X-Encrypted") === "true";
+  
+  let requestType = "regular";
+  if (isWordPressRequest) {
+    requestType = isEncryptedRequest ? "wp_encrypted" : "wp_standard";
+  } else if (isSimpleRequest) {
+    requestType = "simple";
+  }
   
   if (DEBUG_MODE) {
-    console.log(`🔍 Processing ${isSimpleRequest ? 'Simple' : 'Regular'} request`);
+    console.log(`🔍 Processing ${requestType} request`);
   }
 
   // SECURITY CHECKS - Run validation based on request type
-  if (!isSimpleRequest) {
+  if (requestType === "regular") {
     // Regular requests: Full security validation (payload, API key, origin, rate limiting)
     const securityCheck = await runSecurityChecks(request);
     if (!securityCheck.passed) {
@@ -1338,7 +1369,7 @@ async function handleRequest(request, env) {
         rateLimit: `${securityCheck.rateLimit?.count}/${securityCheck.rateLimit?.limit}`
       }));
     }
-  } else {
+  } else if (requestType === "simple") {
     // Simple requests: Only essential checks (payload size, basic rate limiting)
     // Skip API key validation and origin validation for performance
     
@@ -1382,6 +1413,60 @@ async function handleRequest(request, env) {
         }
       );
     }
+  } else if (requestType === "wp_standard" || requestType === "wp_encrypted") {
+    // WordPress requests: Skip API key validation but run other security checks
+    // These come from WordPress endpoint and don't need API key validation
+    
+    if (DEBUG_MODE) {
+      console.log(`🔒 WordPress ${requestType === "wp_encrypted" ? "encrypted" : "standard"} request - skipping API key validation`);
+    }
+    
+    // Still validate payload size for WordPress requests
+    if (!validatePayloadSize(request)) {
+      return new Response(
+        JSON.stringify({
+          success: false,
+          error: "Payload too large",
+          details: `Payload exceeds ${MAX_PAYLOAD_SIZE} bytes`
+        }),
+        {
+          status: 413,
+          headers: {
+            "Content-Type": "application/json",
+            ...getCORSHeaders(request),
+          },
+        }
+      );
+    }
+    
+    // Apply rate limiting for WordPress requests
+    const rateLimitCheck = await checkRateLimit(request);
+    if (!rateLimitCheck.allowed) {
+      return new Response(
+        JSON.stringify({
+          success: false,
+          error: "Rate limit exceeded",
+          details: `${rateLimitCheck.count}/${rateLimitCheck.limit} requests in window`
+        }),
+        {
+          status: 429,
+          headers: {
+            "Content-Type": "application/json",
+            ...getCORSHeaders(request),
+          },
+        }
+      );
+    }
+    
+    // Optional: Validate origin for WordPress requests (less strict than regular)
+    const originCheck = validateOrigin(request);
+    if (!originCheck.valid) {
+      if (DEBUG_MODE) {
+        console.log("WordPress request origin validation failed:", JSON.stringify(originCheck));
+      }
+      // Could return error here if strict origin validation is required
+      // For now, just log the warning but continue processing
+    }
   }
 
   try {
@@ -1389,29 +1474,48 @@ async function handleRequest(request, env) {
     let payload = await request.json();
 
     // Check if the request uses JWT encryption (skip for Simple requests)
-    const isJWTEncrypted = !isSimpleRequest && request.headers.get('X-Encrypted') === 'true';
+    const isJWTEncrypted = requestType === "wp_encrypted" || 
+                          (requestType === "regular" && request.headers.get('X-Encrypted') === 'true');
+    
     if (isJWTEncrypted) {
       if (!JWT_ENCRYPTION_ENABLED) {
         console.warn("❌ X-Encrypted header present but JWT_ENCRYPTION_ENABLED is false");
       } else if (!ENCRYPTION_KEY) {
         console.warn("❌ X-Encrypted header present but ENCRYPTION_KEY is not set");
       } else {
-      
-        
         try {
-          // Check for legacy JWT format first
-          if (payload.jwt) {
-            const decryptedData = await decrypt(payload.jwt, ENCRYPTION_KEY);
-            payload = JSON.parse(decryptedData);
-            
-            if (DEBUG_MODE) {
-              console.log("Decrypted payload:", JSON.stringify(payload));
+          // Handle different JWT formats based on request type
+          if (requestType === "wp_encrypted") {
+            // WordPress encrypted requests use time_jwt format
+            if (payload.time_jwt) {
+              const decryptedData = await decrypt(payload.time_jwt, ENCRYPTION_KEY);
+              payload = JSON.parse(decryptedData);
+              
+              if (DEBUG_MODE) {
+                console.log("Decrypted WordPress payload:", JSON.stringify(payload));
+              }
+            } else {
+              console.warn("❌ WordPress encrypted request but no time_jwt token found");
+              if (DEBUG_MODE) {
+                console.log("Available payload fields:", Object.keys(payload));
+                console.log("Full payload:", JSON.stringify(payload));
+              }
             }
           } else {
-            console.warn("❌ Request marked as JWT encrypted but no JWT token found");
-            if (DEBUG_MODE) {
-              console.log("Available payload fields:", Object.keys(payload));
-              console.log("Full payload:", JSON.stringify(payload));
+            // Regular encrypted requests use legacy jwt format
+            if (payload.jwt) {
+              const decryptedData = await decrypt(payload.jwt, ENCRYPTION_KEY);
+              payload = JSON.parse(decryptedData);
+              
+              if (DEBUG_MODE) {
+                console.log("Decrypted regular payload:", JSON.stringify(payload));
+              }
+            } else {
+              console.warn("❌ Request marked as JWT encrypted but no JWT token found");
+              if (DEBUG_MODE) {
+                console.log("Available payload fields:", Object.keys(payload));
+                console.log("Full payload:", JSON.stringify(payload));
+              }
             }
           }
         } catch (decryptError) {
@@ -2736,7 +2840,7 @@ function getCORSHeaders(request) {
   return {
     "Access-Control-Allow-Origin": origin,
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization, X-API-Key, X-Encrypted, X-Simple-request",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization, X-API-Key, X-Encrypted, X-Simple-request, X-WP-Nonce",
     "Access-Control-Max-Age": "86400",
   };
 }
