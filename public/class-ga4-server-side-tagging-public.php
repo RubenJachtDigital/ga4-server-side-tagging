@@ -151,12 +151,15 @@ class GA4_Server_Side_Tagging_Public
             false
         );
 
+        // Add cache-busting for development/debug mode to ensure fresh script loading
+        $script_version = (defined('WP_DEBUG') && WP_DEBUG) ? time() : GA4_SERVER_SIDE_TAGGING_VERSION;
+        
         // 3. Enqueue the main tracking script (depends on both utilities and consent)
         wp_enqueue_script(
             'ga4-server-side-tagging-public',
             GA4_SERVER_SIDE_TAGGING_PLUGIN_URL . 'public/js/ga4-server-side-tagging-public.js',
             array('jquery', 'ga4-utilities', 'ga4-server-side-tagging-consent-management'),
-            GA4_SERVER_SIDE_TAGGING_VERSION,
+            $script_version,
             false
         );
 
@@ -259,6 +262,30 @@ class GA4_Server_Side_Tagging_Public
             'ga4ServerSideTagging',
             $script_data
         );
+
+        // Add inline script to ensure fresh nonce on each page load (bypasses page caching)
+        $fresh_nonce = wp_create_nonce('wp_rest');
+        $inline_nonce_script = '
+        (function() {
+            if (window.ga4ServerSideTagging) {
+                // Always refresh nonce on page load to bypass caching
+                var oldNonce = window.ga4ServerSideTagging.nonce;
+                window.ga4ServerSideTagging.nonce = "' . $fresh_nonce . '";
+                window.ga4ServerSideTagging.nonceTimestamp = ' . time() . ';
+                
+                // Debug logging to track nonce refresh
+                if (window.ga4ServerSideTagging.debugMode) {
+                    console.log("[GA4 Nonce Refresh] Nonce updated on page load", {
+                        oldNonce: oldNonce ? oldNonce.substring(0, 10) + "..." : "none",
+                        newNonce: "' . substr($fresh_nonce, 0, 10) . '...",
+                        timestamp: ' . time() . ',
+                        pageUrl: window.location.href
+                    });
+                }
+            }
+        })();
+        ';
+        wp_add_inline_script('ga4-server-side-tagging-public', $inline_nonce_script, 'after');
 
         // NOTE: Consent manager initialization is now handled by the main tracking script
         // to ensure proper tracking instance reference is passed

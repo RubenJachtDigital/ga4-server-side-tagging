@@ -2312,7 +2312,8 @@
 
         // Add nonce for WordPress REST API endpoints and handle encryption
         if (config && config.apiEndpoint && endpoint.startsWith(config.apiEndpoint)) {
-          headers["X-WP-Nonce"] = config.nonce || "";
+          // Use refreshed nonce if available, fallback to original config nonce
+          headers["X-WP-Nonce"] = window.ga4ServerSideTagging?.nonce || config.nonce || "";
           
           // Check if this is the send-event endpoint and encryption is enabled
           if (endpoint.includes('/send-events') && config.encryptionEnabled) {
@@ -2404,6 +2405,61 @@
 
           if (!response.ok) {
             const errorText = await response.text();
+            
+            // Check if it's a nonce error (403) and try to extract fresh nonce
+            if (response.status === 403 && errorText.includes('rest_cookie_invalid_nonce')) {
+              try {
+                const errorData = JSON.parse(errorText);
+                if (errorData.data && errorData.data.fresh_nonce) {
+                  GA4Utils.helpers.log(
+                    "Received fresh nonce from server, retrying request",
+                    { freshNonce: errorData.data.fresh_nonce.substring(0, 10) + "..." },
+                    config,
+                    logPrefix
+                  );
+                  
+                  // Update nonce in headers and retry
+                  headers["X-WP-Nonce"] = errorData.data.fresh_nonce;
+                  
+                  // Update the nonce in the main configuration if available
+                  if (window.ga4ServerSideTagging) {
+                    window.ga4ServerSideTagging.nonce = errorData.data.fresh_nonce;
+                  }
+                  
+                  // Retry the request with fresh nonce
+                  const retryResponse = await fetch(endpoint, {
+                    method: "POST",
+                    headers: headers,
+                    body: requestBody,
+                  });
+                  
+                  if (!retryResponse.ok) {
+                    const retryErrorText = await retryResponse.text();
+                    throw new Error(
+                      "Network response was not ok after nonce refresh: " + retryResponse.status + " - " + retryErrorText
+                    );
+                  }
+                  
+                  let retryData = await retryResponse.json();
+                  GA4Utils.helpers.log(
+                    "Request successful after nonce refresh",
+                    retryData,
+                    config,
+                    logPrefix
+                  );
+                  return retryData;
+                }
+              } catch (parseError) {
+                // If parsing fails, continue with original error
+                GA4Utils.helpers.log(
+                  "Failed to parse error response for nonce refresh",
+                  parseError,
+                  config,
+                  logPrefix
+                );
+              }
+            }
+            
             throw new Error(
               "Network response was not ok: " + response.status + " - " + errorText
             );

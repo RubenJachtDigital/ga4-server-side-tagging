@@ -2903,8 +2903,9 @@
         };
         
         // Add X-WP-Nonce header if we have a nonce (for wp_endpoint_to_cf method)
-        if (this.config.nonce) {
-          headers['X-WP-Nonce'] = this.config.nonce;
+        const currentNonce = window.ga4ServerSideTagging?.nonce || this.config.nonce;
+        if (currentNonce) {
+          headers['X-WP-Nonce'] = currentNonce;
         }
 
         // Use fetch with proper headers for Cloudflare Worker
@@ -2953,7 +2954,7 @@
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'X-WP-Nonce': this.config.nonce || ''
+            'X-WP-Nonce': window.ga4ServerSideTagging?.nonce || this.config.nonce || ''
           },
           body: payload,
           keepalive: true // Important for page unload
@@ -3223,8 +3224,9 @@
         };
         
         // Add X-WP-Nonce header if we have a nonce (for wp_endpoint_to_cf method)
-        if (this.config.nonce) {
-          headers['X-WP-Nonce'] = this.config.nonce;
+        const currentNonce = window.ga4ServerSideTagging?.nonce || this.config.nonce;
+        if (currentNonce) {
+          headers['X-WP-Nonce'] = currentNonce;
         }
 
         const response = await fetch(this.config.cloudflareWorkerUrl, {

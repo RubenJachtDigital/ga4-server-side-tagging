@@ -92,12 +92,30 @@ class GA4_Server_Side_Tagging_Endpoint
      *
      * @since    1.0.0
      * @param    \WP_REST_Request    $request    The request object.
-     * @return   bool                           Whether the request has permission.
+     * @return   bool|\WP_Error                  Whether the request has permission or error with fresh nonce.
      */
     public function check_strong_permission($request)
     {
         $session_id = session_id();
         $client_ip = $this->get_client_ip($request);
+        
+        // Check WordPress nonce first
+        $nonce = $request->get_header('X-WP-Nonce');
+        if (!empty($nonce)) {
+            if (!wp_verify_nonce($nonce, 'wp_rest')) {
+                $this->logger->warning('Nonce verification failed for IP: ' . $client_ip . ', generating fresh nonce');
+                
+                // Return error with fresh nonce for JavaScript retry
+                return new \WP_Error(
+                    'rest_cookie_invalid_nonce',
+                    'Cookie controle mislukt',
+                    array(
+                        'status' => 403,
+                        'fresh_nonce' => wp_create_nonce('wp_rest')
+                    )
+                );
+            }
+        }
         
         // Check if this session has already passed heavy validation
         $session_validated = isset($_SESSION[$this->validation_session_key]) && $_SESSION[$this->validation_session_key] === true;
