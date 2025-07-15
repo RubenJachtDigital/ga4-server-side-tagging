@@ -2450,13 +2450,75 @@
                   return retryData;
                 }
               } catch (parseError) {
-                // If parsing fails, continue with original error
+                // If parsing fails, try AJAX nonce refresh as fallback
                 GA4Utils.helpers.log(
-                  "Failed to parse error response for nonce refresh",
+                  "Failed to parse error response for nonce refresh, trying AJAX fallback",
                   parseError,
                   config,
                   logPrefix
                 );
+                
+                // Try to refresh nonce via AJAX if the global function is available
+                if (window.ga4ServerSideTagging && typeof window.ga4ServerSideTagging.refreshNonce === 'function') {
+                  try {
+                    GA4Utils.helpers.log("Attempting AJAX nonce refresh", {}, config, logPrefix);
+                    
+                    // Call the refresh function and wait for it to complete
+                    await new Promise((resolve, reject) => {
+                      const originalNonce = window.ga4ServerSideTagging.nonce;
+                      
+                      // Set up a temporary listener for nonce changes
+                      const checkNonceChange = setInterval(() => {
+                        if (window.ga4ServerSideTagging.nonce && window.ga4ServerSideTagging.nonce !== originalNonce) {
+                          clearInterval(checkNonceChange);
+                          resolve();
+                        }
+                      }, 100);
+                      
+                      // Timeout after 5 seconds
+                      setTimeout(() => {
+                        clearInterval(checkNonceChange);
+                        reject(new Error('AJAX nonce refresh timeout'));
+                      }, 5000);
+                      
+                      // Trigger the refresh
+                      window.ga4ServerSideTagging.refreshNonce();
+                    });
+                    
+                    // Update headers with new nonce and retry
+                    headers["X-WP-Nonce"] = window.ga4ServerSideTagging.nonce;
+                    
+                    const retryResponse = await fetch(endpoint, {
+                      method: "POST",
+                      headers: headers,
+                      body: requestBody,
+                    });
+                    
+                    if (!retryResponse.ok) {
+                      const retryErrorText = await retryResponse.text();
+                      throw new Error(
+                        "Network response was not ok after AJAX nonce refresh: " + retryResponse.status + " - " + retryErrorText
+                      );
+                    }
+                    
+                    let retryData = await retryResponse.json();
+                    GA4Utils.helpers.log(
+                      "Request successful after AJAX nonce refresh",
+                      retryData,
+                      config,
+                      logPrefix
+                    );
+                    return retryData;
+                    
+                  } catch (ajaxError) {
+                    GA4Utils.helpers.log(
+                      "AJAX nonce refresh failed",
+                      ajaxError,
+                      config,
+                      logPrefix
+                    );
+                  }
+                }
               }
             }
             

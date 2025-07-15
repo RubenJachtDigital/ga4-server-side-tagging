@@ -126,6 +126,10 @@ class GA4_Server_Side_Tagging
         // Register REST API endpoint
         $plugin_endpoint = new GA4_Server_Side_Tagging_Endpoint($this->logger);
         $this->loader->add_action('rest_api_init', $plugin_endpoint, 'register_routes');
+
+        // Add AJAX handlers for nonce refresh (both logged in and non-logged in users)
+        $this->loader->add_action('wp_ajax_ga4_refresh_nonce', $plugin_public, 'ajax_refresh_nonce');
+        $this->loader->add_action('wp_ajax_nopriv_ga4_refresh_nonce', $plugin_public, 'ajax_refresh_nonce');
     }
 
 

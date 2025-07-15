@@ -263,25 +263,51 @@ class GA4_Server_Side_Tagging_Public
             $script_data
         );
 
-        // Add inline script to ensure fresh nonce on each page load (bypasses page caching)
-        $fresh_nonce = wp_create_nonce('wp_rest');
+        // Add inline script to refresh nonce via AJAX (cache-proof implementation)
         $inline_nonce_script = '
         (function() {
             if (window.ga4ServerSideTagging) {
-                // Always refresh nonce on page load to bypass caching
-                var oldNonce = window.ga4ServerSideTagging.nonce;
-                window.ga4ServerSideTagging.nonce = "' . $fresh_nonce . '";
-                window.ga4ServerSideTagging.nonceTimestamp = ' . time() . ';
-                
-                // Debug logging to track nonce refresh
-                if (window.ga4ServerSideTagging.debugMode) {
-                    console.log("[GA4 Nonce Refresh] Nonce updated on page load", {
-                        oldNonce: oldNonce ? oldNonce.substring(0, 10) + "..." : "none",
-                        newNonce: "' . substr($fresh_nonce, 0, 10) . '...",
-                        timestamp: ' . time() . ',
-                        pageUrl: window.location.href
-                    });
+                // Function to refresh nonce via AJAX
+                function refreshNonce() {
+                    var xhr = new XMLHttpRequest();
+                    xhr.open("POST", "' . admin_url('admin-ajax.php') . '", true);
+                    xhr.setRequestHeader("Content-Type", "application/x-www-form-urlencoded");
+                    
+                    xhr.onreadystatechange = function() {
+                        if (xhr.readyState === 4 && xhr.status === 200) {
+                            try {
+                                var response = JSON.parse(xhr.responseText);
+                                if (response.success && response.data.nonce) {
+                                    var oldNonce = window.ga4ServerSideTagging.nonce;
+                                    window.ga4ServerSideTagging.nonce = response.data.nonce;
+                                    window.ga4ServerSideTagging.nonceTimestamp = response.data.timestamp;
+                                    
+                                    // Debug logging to track nonce refresh
+                                    if (window.ga4ServerSideTagging.debugMode) {
+                                        console.log("[GA4 Nonce Refresh] Nonce updated via AJAX", {
+                                            oldNonce: oldNonce ? oldNonce.substring(0, 10) + "..." : "none",
+                                            newNonce: response.data.nonce.substring(0, 10) + "...",
+                                            timestamp: response.data.timestamp,
+                                            pageUrl: window.location.href
+                                        });
+                                    }
+                                } else {
+                                    console.error("[GA4 Nonce Refresh] Failed to refresh nonce:", response);
+                                }
+                            } catch (e) {
+                                console.error("[GA4 Nonce Refresh] Error parsing response:", e);
+                            }
+                        }
+                    };
+                    
+                    xhr.send("action=ga4_refresh_nonce");
                 }
+                
+                // Refresh nonce immediately on page load
+                refreshNonce();
+                
+                // Store refresh function globally for manual calls if needed
+                window.ga4ServerSideTagging.refreshNonce = refreshNonce;
             }
         })();
         ';
@@ -909,6 +935,33 @@ class GA4_Server_Side_Tagging_Public
             // Log the error and return false as safe default
             error_log('GA4 Time-based encryption check failed: ' . $e->getMessage());
             return false;
+        }
+    }
+
+    /**
+     * AJAX handler for nonce refresh (cache-proof implementation)
+     * 
+     * @since 1.0.0
+     */
+    public function ajax_refresh_nonce()
+    {
+        try {
+            // Generate fresh nonce
+            $fresh_nonce = wp_create_nonce('wp_rest');
+            
+            // Return JSON response with fresh nonce
+            wp_send_json_success(array(
+                'nonce' => $fresh_nonce,
+                'timestamp' => time(),
+                'message' => 'Nonce refreshed successfully'
+            ));
+            
+        } catch (\Exception $e) {
+            $this->logger->error('Failed to refresh nonce: ' . $e->getMessage());
+            wp_send_json_error(array(
+                'message' => 'Failed to refresh nonce',
+                'error' => $e->getMessage()
+            ));
         }
     }
 
