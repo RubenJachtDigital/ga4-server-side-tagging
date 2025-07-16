@@ -1518,18 +1518,14 @@
       this.log("Consent reset - events will be queued again");
     },
 
-    /**
-     * Debug logging helper
-     */
-    log: function(message, data) {
-      if (window.console) {
-        var prefix = "[GA4 Consent]";
-        if (data) {
-          console.log(prefix + " " + message, data);
-        } else {
-          console.log(prefix + " " + message);
-        }
-      }
+    // Log messages if debug mode is enabled
+    log: function (message, data) {
+      GA4Utils.helpers.log(
+        message,
+        data,
+        this.config,
+        "[GA4 Consent Manager]"
+      );
     },
 
 
@@ -1636,9 +1632,6 @@
 
   // Expose globally
   window.GA4ConsentManager = GA4ConsentManager;
-
-  // Debug: Log that consent manager is loaded
-  console.log("[GA4 Consent] Consent manager loaded and ready");
   
   // Track localStorage changes for debugging
   const originalSetItem = localStorage.setItem;
@@ -1650,9 +1643,9 @@
       try {
         var parsed = JSON.parse(value);
         var batchEventCount = parsed.batchEvents ? parsed.batchEvents.length : 0;
-        console.log("[GA4 Consent] 💾 SETTING unified storage:", key, value ? value.length + ' bytes' : 'null', 'batchEvents:', batchEventCount);
+        window.GA4ConsentManager.log("[GA4 Consent] 💾 SETTING unified storage:", key, value ? value.length + ' bytes' : 'null', 'batchEvents:', batchEventCount);
       } catch (e) {
-        console.log("[GA4 Consent] 💾 SETTING unified storage:", key, value ? value.length + ' bytes' : 'null');
+        window.GA4ConsentManager.log("[GA4 Consent] 💾 SETTING unified storage:", key, value ? value.length + ' bytes' : 'null');
       }
     }
     return originalSetItem.apply(this, arguments);
@@ -1660,13 +1653,13 @@
   
   localStorage.removeItem = function(key) {
     if (key === 'ga4_user_data') {
-      console.log("[GA4 Consent] 🗑️ REMOVING unified storage:", key);
+      window.GA4ConsentManager.log("[GA4 Consent] 🗑️ REMOVING unified storage:", key);
     }
     return originalRemoveItem.apply(this, arguments);
   };
   
   localStorage.clear = function() {
-    console.log("[GA4 Consent] 🧹 CLEARING ALL localStorage");
+    window.GA4ConsentManager.log("[GA4 Consent] 🧹 CLEARING ALL localStorage");
     return originalClear.apply(this, arguments);
   };
   
