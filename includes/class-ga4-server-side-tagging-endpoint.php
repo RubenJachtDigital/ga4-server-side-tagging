@@ -636,7 +636,6 @@ class GA4_Server_Side_Tagging_Endpoint
                     }
                 }
                 
-                $this->logger->info("Validated batch with " . count($request_data['events']) . " events");
             } elseif (isset($request_data['event_name']) || isset($request_data['name'])) {
                 // Single event request - convert to batch format
                 $event_name = $request_data['event_name'] ?? $request_data['name'];
@@ -654,7 +653,6 @@ class GA4_Server_Side_Tagging_Endpoint
                     )
                 );
                 
-                $this->logger->info("Converted single event to batch format: {$event_name}");
             } else {
                 return new \WP_REST_Response(array('error' => 'Missing events array or single event data'), 400);
             }
@@ -672,7 +670,6 @@ class GA4_Server_Side_Tagging_Endpoint
 
             // Log batch info
             $event_count = count($request_data['events']);
-            $this->logger->info("Processing batch of {$event_count} events for session: {$session_id}");
 
             // Get configuration from database
             $cloudflare_url = get_option('ga4_cloudflare_worker_url', '');

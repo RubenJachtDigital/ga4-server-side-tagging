@@ -454,10 +454,6 @@ function enhanceWithIPGeolocation(payload, request) {
       payload.params.geo_continent = cf.continent;
     }
     
-    // Add postal code if available
-    if (cf.postalCode && cf.postalCode !== 'Unknown') {
-      payload.params.geo_postal_code = cf.postalCode;
-    }
     
     console.log(`🌍 IP geolocation enhancement applied (consent granted)`, {
       country: cf.country,
