@@ -393,9 +393,10 @@ async function verifyJWTApiKey(jwtToken) {
 /**
  * Process consent data and apply GDPR compliance rules
  * @param {Object} payload - The event payload
+ * @param {Object} request - The request object (for IP geolocation)
  * @returns {Object} Processed payload with consent applied
  */
-function processGDPRConsent(payload) {
+function processGDPRConsent(payload, request) {
   // Extract consent data from payload, default to DENIED if no consent data
   const consent = payload.params?.consent || {};
   
@@ -409,6 +410,9 @@ function processGDPRConsent(payload) {
   // Use ad_user_data for analytics consent (user data collection)
   if (processedConsent.ad_user_data === "DENIED") {
     payload = applyAnalyticsConsentDenied(payload);
+  } else if (processedConsent.ad_user_data === "GRANTED") {
+    // When consent is granted, enhance with IP-based geolocation
+    payload = enhanceWithIPGeolocation(payload, request);
   }
 
   // Use ad_personalization for advertising consent
@@ -419,6 +423,54 @@ function processGDPRConsent(payload) {
   // Always add consent signals to the GA4 payload at the top level
   payload.consent = processedConsent;
 
+  return payload;
+}
+
+/**
+ * Enhance payload with IP-based geolocation when consent is granted
+ * @param {Object} payload - The event payload
+ * @param {Object} request - The request object (for IP geolocation)
+ * @returns {Object} Enhanced payload with IP geolocation
+ */
+function enhanceWithIPGeolocation(payload, request) {
+  try {
+    // Get IP-based geolocation from Cloudflare
+    const cf = request.cf || {};
+    
+    // Add IP-based geolocation data to params (higher priority than timezone fallback)
+    if (cf.country && cf.country !== 'T1' && cf.country !== 'XX') {
+      payload.params.geo_country = cf.country;
+    }
+    
+    if (cf.city && cf.city !== 'Unknown') {
+      payload.params.geo_city = cf.city;
+    }
+    
+    if (cf.region && cf.region !== 'Unknown') {
+      payload.params.geo_region = cf.region;
+    }
+    
+    if (cf.continent && cf.continent !== 'XX') {
+      payload.params.geo_continent = cf.continent;
+    }
+    
+    // Add postal code if available
+    if (cf.postalCode && cf.postalCode !== 'Unknown') {
+      payload.params.geo_postal_code = cf.postalCode;
+    }
+    
+    console.log(`🌍 IP geolocation enhancement applied (consent granted)`, {
+      country: cf.country,
+      city: cf.city,
+      region: cf.region,
+      continent: cf.continent,
+      postalCode: cf.postalCode
+    });
+    
+  } catch (error) {
+    console.error('❌ Failed to enhance with IP geolocation:', error);
+  }
+  
   return payload;
 }
 
@@ -1544,7 +1596,7 @@ async function handleRequest(request, env) {
     }
 
     // GDPR CONSENT PROCESSING - Apply before bot detection (single event)
-    const consentProcessedPayload = processGDPRConsent(payload);
+    const consentProcessedPayload = processGDPRConsent(payload, request);
 
     // BOT DETECTION CHECK
     const botDetection = detectBot(request, consentProcessedPayload);
@@ -1799,7 +1851,7 @@ async function handleBatchEvents(batchPayload, request) {
         }
         
         // Use existing GDPR processing
-        const consentProcessedPayload = processGDPRConsent(singleEventPayload);
+        const consentProcessedPayload = processGDPRConsent(singleEventPayload, request);
 
         // Bot detection for batch (use first event's data as representative)
         if (i === 0) {
