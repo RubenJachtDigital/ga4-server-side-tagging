@@ -2404,6 +2404,7 @@
             method: "POST",
             headers: headers,
             body: requestBody,
+            keepalive: true
           });
 
           if (!response.ok) {
@@ -2434,6 +2435,7 @@
                     method: "POST",
                     headers: headers,
                     body: requestBody,
+                    keepalive: true
                   });
                   
                   if (!retryResponse.ok) {
@@ -2495,6 +2497,7 @@
                       method: "POST",
                       headers: headers,
                       body: requestBody,
+                      keepalive: true
                     });
                     
                     if (!retryResponse.ok) {
@@ -2598,7 +2601,11 @@
         // Check payload size (prevent oversized requests)
         try {
           var payloadSize = JSON.stringify(payload).length;
-          if (payloadSize > 50000) { // 50KB limit
+          // Allow larger payloads for batch requests (identified by events array)
+          var isBatchRequest = payload && Array.isArray(payload.events) && payload.events.length > 1;
+          var sizeLimit = isBatchRequest ? 1000000 : 500000; // 1MB for batch, 50KB for single events
+          
+          if (payloadSize > sizeLimit) {
             return { valid: false, reason: "payload_too_large" };
           }
         } catch (e) {
@@ -2612,7 +2619,9 @@
         }
 
         // Rate limiting check (basic client-side protection)
-        if (!this.checkClientRateLimit(endpoint)) {
+        // Be more lenient for batch requests as they consolidate multiple events
+        var isBatchRequest = payload && Array.isArray(payload.events) && payload.events.length > 1;
+        if (!this.checkClientRateLimit(endpoint, isBatchRequest)) {
           return { valid: false, reason: "rate_limit_exceeded" };
         }
 
@@ -2625,7 +2634,7 @@
        * @param {string} endpoint URL endpoint
        * @returns {boolean} True if within rate limits
        */
-      checkClientRateLimit: function(endpoint) {
+      checkClientRateLimit: function(endpoint, isBatchRequest) {
         var now = Date.now();
         var rateLimitKey = 'ga4_rate_limit_' + btoa(endpoint).substr(0, 10);
         
@@ -2638,8 +2647,9 @@
             return now - timestamp < 60000;
           });
           
-          // Check if we've exceeded 100 requests per minute
-          if (requests.length >= 100) {
+          // More lenient rate limit for batch requests (200 vs 100)
+          var rateLimit = isBatchRequest ? 200 : 100;
+          if (requests.length >= rateLimit) {
             return false;
           }
           

@@ -61,7 +61,7 @@
 
       // Log initialization
       this.log(
-        "%c GA4 Server-Side Tagging initialized v1",
+        "%c GA4 Server-Side Tagging initialized v2",
         "background: #4CAF50; color: white; font-size: 16px; font-weight: bold; padding: 8px 12px; border-radius: 4px;"
       );
     },
@@ -3073,27 +3073,38 @@
       var endpoint = this.config.apiEndpoint + '/send-events';
       
       try {
-        var payload = JSON.stringify(batchData);
-        
-        // For batch requests, prefer fetch over sendBeacon to ensure proper headers
-        // sendBeacon doesn't allow setting Content-Type header properly
-        if (navigator.sendBeacon && false) { // Disabled for batch requests
-          var success = navigator.sendBeacon(endpoint, payload);
-          if (success) {
-            this.log("✅ Batch sent via sendBeacon to WordPress endpoint");
-            return;
-          } else {
-            this.log("⚠️ sendBeacon failed, falling back to fetch");
-          }
+        // If encryption is enabled, use sendPayloadFetch which handles encryption
+        if (useEncryption && this.config.encryptionEnabled) {
+          GA4Utils.ajax.sendPayloadFetch(endpoint, batchData, this.config, "[GA4 Batch Encrypted]")
+            .then(function(response) {
+              this.log("✅ Encrypted batch sent via sendPayloadFetch to WordPress endpoint", {
+                encrypted: true,
+                useEncryption: useEncryption
+              });
+            }.bind(this))
+            .catch(function(error) {
+              this.log("❌ Error sending encrypted batch to WordPress endpoint", error);
+            }.bind(this));
+          return;
         }
+        
+        // For non-encrypted batch requests, use direct fetch
+        var payload = JSON.stringify(batchData);     
 
         // Use fetch for batch requests
+        // Use comprehensive headers for proper validation handling
+        var headers = {
+          "Content-Type": "application/json",
+          "Origin": window.location.origin,
+          "Referer": window.location.href,
+          "Accept": "application/json, text/plain, */*",
+          "Accept-Language": navigator.language || "en-US",
+          "X-WP-Nonce": window.ga4ServerSideTagging?.nonce || this.config.nonce || ""
+        };
+
         fetch(endpoint, {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'X-WP-Nonce': window.ga4ServerSideTagging?.nonce || this.config.nonce || ''
-          },
+          headers: headers,
           body: payload,
           keepalive: true // Important for page unload
         }).then(function(response) {
