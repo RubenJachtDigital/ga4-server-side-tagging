@@ -21,7 +21,7 @@
     trackingInstance: null, // Reference to main tracking instance
     consentProcessed: false, // Flag to prevent duplicate consent processing
     eventsProcessed: false, // Flag to prevent duplicate event processing
-    storageKey: 'ga4_queued_events', // Key for storing events in localStorage (persistent across page refreshes)
+    storageKey: 'ga4_user_data', // Key for storing events in unified user data storage (persistent across page refreshes)
 
     /**
      * Initialize the consent manager
@@ -170,23 +170,34 @@
         queuedEvent.pageTitle = document.title;
       }
       
-      this.eventQueue.push(queuedEvent);
+      // Store directly in userData - no in-memory queue needed
+      var userData = GA4Utils.storage.getUserData();
+      if (!userData.batchEvents) {
+        userData.batchEvents = [];
+      }
+      userData.batchEvents.push(queuedEvent);
+      GA4Utils.storage.saveUserData(userData);
       
-      this.log("📦 Event queued for consent", {
+      // Keep in-memory queue in sync for compatibility - load from storage to ensure sync
+      this.eventQueue = userData.batchEvents;
+      
+      this.log("📦 Event stored directly in unified storage", {
         eventName: eventName,
-        queueLength: this.eventQueue.length,
+        queueLength: userData.batchEvents.length,
+        inMemoryQueueLength: this.eventQueue.length,
         timestamp: queuedEvent.timestamp,
         isCompleteData: isCompleteData
       });
-      
-      // Save to localStorage to persist across page navigation
-      this.saveQueuedEventsToSession();
     },
 
     /**
      * Process all queued events (NEW: no longer sends events, just marks consent as ready)
      */
     processQueuedEvents: function() {
+      // Get events directly from userData storage
+      var userData = GA4Utils.storage.getUserData();
+      var batchEvents = userData.batchEvents || [];
+      
       // NEW BEHAVIOR: Don't send events immediately
       // Just ensure that consent tracking instances are notified
       if (typeof GA4ServerSideTagging !== 'undefined' && GA4ServerSideTagging.onConsentReady) {
@@ -194,7 +205,7 @@
       }
       
       this.log("📋 Events remain queued for batch sending on page unload", {
-        queuedEvents: this.eventQueue.length
+        queuedEvents: batchEvents.length
       });
     },
 
@@ -203,7 +214,11 @@
      * Only sends events if consent has been determined (granted or denied)
      */
     sendBatchEvents: function() {
-      if (!this.eventQueue || this.eventQueue.length === 0) {
+      // Get events directly from userData storage
+      var userData = GA4Utils.storage.getUserData();
+      var batchEvents = userData.batchEvents || [];
+      
+      if (!batchEvents || batchEvents.length === 0) {
         this.log("📤 No events to send in batch");
         return;
       }
@@ -211,7 +226,7 @@
       // Check if consent has been processed - only send if consent has been determined
       if (!this.consentProcessed) {
         this.log("❌ Consent not yet processed - not sending batch events", {
-          queuedEvents: this.eventQueue.length,
+          queuedEvents: batchEvents.length,
           consentGiven: this.consentGiven,
           consentProcessed: this.consentProcessed,
           consentStatus: this.consentStatus
@@ -220,7 +235,7 @@
       }
 
       this.log("✅ Consent confirmed - proceeding with batch send", {
-        queuedEvents: this.eventQueue.length,
+        queuedEvents: batchEvents.length,
         consentGiven: this.consentGiven,
         consentStatus: this.consentStatus
       });
@@ -236,12 +251,12 @@
         timestamp: Date.now()
       };
 
-      // Process each event in the queue with size validation
+      // Process each event in the batch with size validation
       const maxBatchSize = 500 * 1024; // 500KB max batch size
       let currentBatchSize = JSON.stringify(batchPayload).length;
       
-      for (let i = 0; i < this.eventQueue.length; i++) {
-        const queuedEvent = this.eventQueue[i];
+      for (let i = 0; i < batchEvents.length; i++) {
+        const queuedEvent = batchEvents[i];
         const eventData = {
           name: queuedEvent.eventName,
           params: queuedEvent.eventParams,
@@ -262,7 +277,7 @@
             currentSize: currentBatchSize,
             maxSize: maxBatchSize,
             eventsIncluded: batchPayload.events.length,
-            eventsSkipped: this.eventQueue.length - batchPayload.events.length,
+            eventsSkipped: batchEvents.length - batchPayload.events.length,
             skipReason: "batch_size_limit"
           });
           break; // Stop processing more events
@@ -288,9 +303,12 @@
 
       // Only clear events if they were actually sent
       if (batchSent) {
-        // Clear both in-memory queue and localStorage since events are being sent
+        // Clear events directly from userData storage
+        userData.batchEvents = [];
+        GA4Utils.storage.saveUserData(userData);
+        
+        // Clear in-memory queue for compatibility
         this.eventQueue = [];
-        this.clearQueuedEventsFromSession();
         
         this.log("📤 Batch events sent successfully, all queues cleared", {
           eventsSent: batchPayload.events.length,
@@ -298,7 +316,7 @@
         });
       } else {
         this.log("❌ Batch events not sent, queues preserved", {
-          queueLength: this.eventQueue.length
+          queueLength: batchEvents.length
         });
       }
     },
@@ -1514,122 +1532,103 @@
       }
     },
 
+
     /**
-     * Load queued events from localStorage for persistence across page refreshes
+     * Load queued events from unified user data storage for persistence across page refreshes
      */
     loadQueuedEventsFromSession: function() {
       try {
-        this.log("🔍 Starting queue restoration from localStorage", {
-          storageKey: this.storageKey,
+        this.log("🔍 Starting queue restoration from unified user data storage", {
           currentQueueLength: this.eventQueue.length
         });
         
-        // Load from localStorage (persistent across page refreshes)
-        const storedData = localStorage.getItem(this.storageKey);
+        // Load from unified user data storage (same as attribution data)
+        var userData = GA4Utils.storage.getUserData();
+        var batchEvents = userData.batchEvents || [];
         
-        this.log("🔍 localStorage check", {
-          hasData: !!storedData,
-          dataSize: storedData ? storedData.length : 0,
-          preview: storedData ? storedData.substring(0, 100) + '...' : 'none'
+        // Clean up old storage key if it exists (migration)
+        try {
+          var oldStorageData = localStorage.getItem('ga4_queued_events');
+          if (oldStorageData) {
+            this.log("🔄 Migrating events from old storage key to unified storage");
+            var oldData = JSON.parse(oldStorageData);
+            if (oldData && oldData.events && Array.isArray(oldData.events) && oldData.events.length > 0) {
+              // Merge old events with new ones (if any)
+              batchEvents = batchEvents.concat(oldData.events);
+              this.log("📦 Merged " + oldData.events.length + " events from old storage");
+            }
+            // Remove old storage key
+            localStorage.removeItem('ga4_queued_events');
+            this.log("🧹 Cleaned up old storage key");
+          }
+        } catch (e) {
+          this.log("⚠️ Failed to migrate from old storage key:", e);
+        }
+        
+        this.log("🔍 User data storage check", {
+          hasUserData: !!userData,
+          hasBatchEvents: !!batchEvents,
+          batchEventCount: batchEvents.length,
+          userDataTimestamp: userData.timestamp
         });
         
-        if (storedData) {
-          const parsed = JSON.parse(storedData);
-          if (parsed && parsed.events && Array.isArray(parsed.events)) {
-            // Filter out events older than 24 hours to prevent stale data
-            const maxAge = 24 * 60 * 60 * 1000; // 24 hours
-            const now = Date.now();
-            const validEvents = parsed.events.filter(function(event) {
-              return event.timestamp && (now - event.timestamp) < maxAge;
-            });
-            
-            this.eventQueue = validEvents;
-            this.log("✅ Loaded queued events from localStorage", {
-              totalFound: parsed.events.length,
-              validEvents: validEvents.length,
-              expiredEvents: parsed.events.length - validEvents.length,
-              queueAge: Date.now() - parsed.timestamp + 'ms',
-              events: validEvents.map(function(e) { 
-                return {
-                  name: e.eventName, 
-                  isComplete: e.isCompleteData,
-                  pageUrl: e.isCompleteData ? e.eventParams.page_location : e.pageUrl
-                };
-              })
-            });
-            
-            // Save back the cleaned events if any were expired
-            if (validEvents.length !== parsed.events.length) {
-              this.log("🧹 Saving cleaned events back to localStorage");
-              this.saveQueuedEventsToSession();
-            }
-          } else {
-            this.log("📭 Invalid or empty queue data in localStorage", {
-              hasParsed: !!parsed,
-              hasEvents: !!(parsed && parsed.events),
-              isArray: !!(parsed && parsed.events && Array.isArray(parsed.events))
-            });
-            this.eventQueue = [];
+        if (batchEvents && Array.isArray(batchEvents) && batchEvents.length > 0) {
+          // Filter out events older than 24 hours to prevent stale data
+          const maxAge = 24 * 60 * 60 * 1000; // 24 hours
+          const now = Date.now();
+          const validEvents = batchEvents.filter(function(event) {
+            return event.timestamp && (now - event.timestamp) < maxAge;
+          });
+          
+          // Update both in-memory queue and storage
+          this.eventQueue = validEvents;
+          
+          // If we cleaned up expired events, save back to storage
+          if (validEvents.length !== batchEvents.length) {
+            this.log("🧹 Saving cleaned events back to unified storage");
+            userData.batchEvents = validEvents;
+            GA4Utils.storage.saveUserData(userData);
           }
+          
+          this.log("✅ Loaded queued events from unified user data storage", {
+            totalFound: batchEvents.length,
+            validEvents: validEvents.length,
+            expiredEvents: batchEvents.length - validEvents.length,
+            events: validEvents.map(function(e) { 
+              return {
+                name: e.eventName, 
+                isComplete: e.isCompleteData,
+                pageUrl: e.isCompleteData ? e.eventParams.page_location : e.pageUrl
+              };
+            })
+          });
         } else {
-          this.log("📭 No queued events found in localStorage");
+          this.log("📭 No queued events found in unified user data storage");
           this.eventQueue = [];
         }
         
       } catch (e) {
-        this.log("❌ Failed to load queued events from localStorage", e);
+        this.log("❌ Failed to load queued events from unified user data storage", e);
         this.eventQueue = [];
       }
     },
 
     /**
-     * Save queued events to localStorage for persistence across page refreshes
+     * Save queued events to unified user data storage for persistence across page refreshes
+     * NOTE: This function is now largely obsolete since events are stored directly in queueEvent
      */
     saveQueuedEventsToSession: function() {
-      try {
-        // Save to localStorage for cross-page persistence
-        const persistentData = {
-          events: this.eventQueue,
-          timestamp: Date.now(),
-          version: '1.0'
-        };
-        const serializedData = JSON.stringify(persistentData);
-        
-        this.log("💾 SAVING to localStorage", {
-          eventCount: this.eventQueue.length,
-          storageKey: this.storageKey,
-          dataSize: serializedData.length + ' bytes',
-          timestamp: Date.now(),
-          stackTrace: new Error().stack.split('\n')[2]
-        });
-        
-        localStorage.setItem(this.storageKey, serializedData);
-        
-        this.log("✅ Saved queued events to localStorage for persistence", {
-          eventCount: this.eventQueue.length,
-          storageKey: this.storageKey,
-          dataSize: serializedData.length + ' bytes'
-        });
-      } catch (e) {
-        this.log("❌ Failed to save queued events to storage", e);
-      }
+      // This function is kept for compatibility but events are now stored directly
+      this.log("⚠️ saveQueuedEventsToSession called but events are now stored directly");
     },
 
     /**
-     * Clear queued events from localStorage
+     * Clear queued events from unified user data storage
+     * NOTE: This function is now largely obsolete since clearing is done directly in sendBatchEvents
      */
     clearQueuedEventsFromSession: function() {
-      try {
-        this.log("🗑️ CLEARING localStorage queue", {
-          storageKey: this.storageKey,
-          currentQueueLength: this.eventQueue.length,
-          stackTrace: new Error().stack
-        });
-        localStorage.removeItem(this.storageKey);
-        this.log("✅ Cleared queued events from localStorage");
-      } catch (e) {
-        this.log("❌ Failed to clear queued events from localStorage", e);
-      }
+      // This function is kept for compatibility but clearing is now done directly
+      this.log("⚠️ clearQueuedEventsFromSession called but clearing is now done directly");
     },
 
 
@@ -1647,15 +1646,21 @@
   const originalClear = localStorage.clear;
   
   localStorage.setItem = function(key, value) {
-    if (key === 'ga4_queued_events') {
-      console.log("[GA4 Consent] 💾 SETTING localStorage:", key, value ? value.length + ' bytes' : 'null');
+    if (key === 'ga4_user_data') {
+      try {
+        var parsed = JSON.parse(value);
+        var batchEventCount = parsed.batchEvents ? parsed.batchEvents.length : 0;
+        console.log("[GA4 Consent] 💾 SETTING unified storage:", key, value ? value.length + ' bytes' : 'null', 'batchEvents:', batchEventCount);
+      } catch (e) {
+        console.log("[GA4 Consent] 💾 SETTING unified storage:", key, value ? value.length + ' bytes' : 'null');
+      }
     }
     return originalSetItem.apply(this, arguments);
   };
   
   localStorage.removeItem = function(key) {
-    if (key === 'ga4_queued_events') {
-      console.log("[GA4 Consent] 🗑️ REMOVING localStorage:", key);
+    if (key === 'ga4_user_data') {
+      console.log("[GA4 Consent] 🗑️ REMOVING unified storage:", key);
     }
     return originalRemoveItem.apply(this, arguments);
   };

@@ -61,7 +61,7 @@
 
       // Log initialization
       this.log(
-        "%c GA4 Server-Side Tagging initialized v2",
+        "%c GA4 Server-Side Tagging initialized v1",
         "background: #4CAF50; color: white; font-size: 16px; font-weight: bold; padding: 8px 12px; border-radius: 4px;"
       );
     },
@@ -1322,12 +1322,49 @@
     setupPageUnloadListener: function() {
       var self = this;
       var isLeavingWebsite = false;
+      var lastClickedLink = null;
+      var navigationDestination = null;
+      var lastClickTime = 0;
+      
+      // Track link clicks to detect internal vs external navigation
+      document.addEventListener('click', function(e) {
+        var target = e.target;
+        var link = target.closest('a');
+        
+        if (link && link.href) {
+          lastClickedLink = link;
+          navigationDestination = link.href;
+          lastClickTime = Date.now();
+          
+          // Log the clicked link for debugging
+          self.log("🔗 Link clicked", {
+            href: link.href,
+            isInternal: self.isInternalUrl(link.href),
+            target: link.target,
+            timestamp: Date.now()
+          });
+        }
+      });
       
       // Handle beforeunload - only send events if not internal navigation
       window.addEventListener('beforeunload', function() {
-          isLeavingWebsite = true;
-          self.log("📤 BEFOREUNLOAD triggered - user leaving website, sending batch events");
-          self.sendBatchEventsOnUnload();
+          var shouldSendBatch = self.shouldSendBatchOnUnload(navigationDestination, lastClickTime);
+          
+          if (shouldSendBatch) {
+            isLeavingWebsite = true;
+            self.log("📤 BEFOREUNLOAD triggered - user leaving website, sending batch events", {
+              destination: navigationDestination,
+              isInternal: navigationDestination ? self.isInternalUrl(navigationDestination) : 'unknown',
+              lastClickTime: lastClickTime
+            });
+            self.sendBatchEventsOnUnload();
+          } else {
+            self.log("🔄 BEFOREUNLOAD triggered - internal navigation detected, NOT sending batch events", {
+              destination: navigationDestination,
+              isInternal: navigationDestination ? self.isInternalUrl(navigationDestination) : 'unknown',
+              lastClickTime: lastClickTime
+            });
+          }
       });
       
       // Handle page visibility changes - only for tab switching/closing, not internal navigation
@@ -1336,11 +1373,25 @@
           // Add a small delay to distinguish between tab switching and internal navigation
           setTimeout(function() {
             if (document.visibilityState === 'hidden') {
-              isLeavingWebsite = true;
-              self.log("📤 VISIBILITYCHANGE hidden - user likely left website, sending batch events", {
-                visibilityState: document.visibilityState
-              });
-              self.sendBatchEventsOnUnload();
+              var shouldSendBatch = self.shouldSendBatchOnUnload(navigationDestination, lastClickTime);
+              
+              if (shouldSendBatch) {
+                isLeavingWebsite = true;
+                self.log("📤 VISIBILITYCHANGE hidden - user likely left website, sending batch events", {
+                  visibilityState: document.visibilityState,
+                  destination: navigationDestination,
+                  isInternal: navigationDestination ? self.isInternalUrl(navigationDestination) : 'unknown',
+                  lastClickTime: lastClickTime
+                });
+                self.sendBatchEventsOnUnload();
+              } else {
+                self.log("🔄 VISIBILITYCHANGE hidden - internal navigation detected, NOT sending batch events", {
+                  visibilityState: document.visibilityState,
+                  destination: navigationDestination,
+                  isInternal: navigationDestination ? self.isInternalUrl(navigationDestination) : 'unknown',
+                  lastClickTime: lastClickTime
+                });
+              }
             }
           }, 100); // Small delay to let internal navigation complete
         }
@@ -1348,12 +1399,99 @@
       
       // Handle page freeze/resume - only if not internal navigation
       window.addEventListener('pagehide', function() {
-          isLeavingWebsite = true;
-          self.log("📤 PAGEHIDE triggered - user leaving website, sending batch events");
-          self.sendBatchEventsOnUnload();
+          var shouldSendBatch = self.shouldSendBatchOnUnload(navigationDestination, lastClickTime);
+          
+          if (shouldSendBatch) {
+            isLeavingWebsite = true;
+            self.log("📤 PAGEHIDE triggered - user leaving website, sending batch events", {
+              destination: navigationDestination,
+              isInternal: navigationDestination ? self.isInternalUrl(navigationDestination) : 'unknown',
+              lastClickTime: lastClickTime
+            });
+            self.sendBatchEventsOnUnload();
+          } else {
+            self.log("🔄 PAGEHIDE triggered - internal navigation detected, NOT sending batch events", {
+              destination: navigationDestination,
+              isInternal: navigationDestination ? self.isInternalUrl(navigationDestination) : 'unknown',
+              lastClickTime: lastClickTime
+            });
+          }
       });
 
-      this.log("👂 Page unload listeners configured for batch event sending (website exit only)");
+      this.log("👂 Page unload listeners configured for batch event sending (external navigation and tab close only)");
+    },
+
+    /**
+     * Check if a URL is internal (same domain) or external
+     */
+    isInternalUrl: function(url) {
+      if (!url) return false;
+      
+      try {
+        var urlObject = new URL(url, window.location.origin);
+        var currentHost = window.location.hostname;
+        var targetHost = urlObject.hostname;
+        
+        // Check if the domains match (including subdomains)
+        return targetHost === currentHost;
+      } catch (e) {
+        this.log("Error parsing URL for internal check:", e);
+        return false;
+      }
+    },
+    
+    /**
+     * Determine if batch events should be sent on page unload
+     * Only send if:
+     * - Navigation destination is external
+     * - No navigation destination (tab close/refresh) AND no recent internal link click
+     */
+    shouldSendBatchOnUnload: function(navigationDestination, lastClickTime) {
+      var now = Date.now();
+      var recentClickThreshold = 1000; // 1 second
+      
+      // If we have a navigation destination, check if it's internal or external
+      if (navigationDestination) {
+        // Check if we're already on the destination page (navigation completed)
+        if (navigationDestination === window.location.href) {
+          this.log("🔄 Already on destination page, not sending batch", {
+            destination: navigationDestination,
+            currentUrl: window.location.href
+          });
+          return false;
+        }
+        
+        // If destination is internal, don't send batch
+        if (this.isInternalUrl(navigationDestination)) {
+          this.log("🔄 Internal navigation detected, not sending batch", {
+            destination: navigationDestination
+          });
+          return false;
+        }
+        
+        // If destination is external, send batch
+        this.log("🌍 External navigation detected, sending batch", {
+          destination: navigationDestination
+        });
+        return true;
+      }
+      
+      // No navigation destination detected
+      // Check if there was a recent click (might be internal navigation)
+      if (lastClickTime && (now - lastClickTime) < recentClickThreshold) {
+        this.log("🔄 Recent click detected, likely internal navigation, not sending batch", {
+          clickAge: now - lastClickTime,
+          threshold: recentClickThreshold
+        });
+        return false;
+      }
+      
+      // No recent click, assume tab close/refresh
+      this.log("❓ No navigation destination or recent click, assuming tab close/refresh", {
+        destination: navigationDestination,
+        lastClickTime: lastClickTime
+      });
+      return true;
     },
 
     /**

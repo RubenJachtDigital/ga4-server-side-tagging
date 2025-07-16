@@ -82,6 +82,9 @@
           // Location data
           location: null,
           
+          // Batch events (for persistence across internal navigation)
+          batchEvents: [],
+          
           // Consent data (separate from main data for compliance)
           // consent: null, // Keep this separate in ga4_consent_status
           
