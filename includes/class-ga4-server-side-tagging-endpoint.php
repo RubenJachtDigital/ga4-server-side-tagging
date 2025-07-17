@@ -636,9 +636,6 @@ class GA4_Server_Side_Tagging_Endpoint
                     }
                 }
                 
-                // Consent data should already be at request level for unified structure
-                $this->logger->info("Unified batch structure received: " . count($request_data['events']) . " event(s) - Batch flag: " . ($request_data['batch'] ?? 'not set') . " - Has consent: " . (isset($request_data['consent']) ? 'yes' : 'no') . " - IP: {$client_ip}");
-                
             } elseif (isset($request_data['event_name']) || isset($request_data['name'])) {
                 // Legacy single event format - convert to unified batch structure
                 $event_name = $request_data['event_name'] ?? $request_data['name'];
@@ -686,15 +683,10 @@ class GA4_Server_Side_Tagging_Endpoint
                     'consent_mode' => 'DENIED',
                     'consent_reason' => 'missing_data'
                 );
-            } else {
-                $this->logger->info("Consent data found - Analytics: " . ($request_data['consent']['analytics_storage'] ?? 'unknown') . " - Ads: " . ($request_data['consent']['ad_storage'] ?? 'unknown') . " - Reason: " . ($request_data['consent']['consent_reason'] ?? 'unknown') . " - IP: {$client_ip}");
             }
 
             // Log batch info with type distinction
-            $event_count = count($request_data['events']);
-            $event_type = $event_count === 1 ? 'single_event' : 'batch_events';
-            
-            $this->logger->info("Processing {$event_type}: {$event_count} event(s) - IP: {$client_ip} - Session: {$session_id} - First event: " . ($request_data['events'][0]['name'] ?? 'unknown'));
+            $event_count = count($request_data['events']);            
 
             // Get configuration from database
             $cloudflare_url = get_option('ga4_cloudflare_worker_url', '');
