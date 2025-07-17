@@ -654,10 +654,10 @@
       );
 
       if (isNewSession) {
-        this.trackEvent("custom_session_start", sessionParams);
+        await this.trackEvent("custom_session_start", sessionParams);
       }
       if (session.isFirstVisit && isNewSession) {
-        this.trackEvent("custom_first_visit", sessionParams);
+        await this.trackEvent("custom_first_visit", sessionParams);
       }
 
       await this.completePageViewTracking(sessionParams, isNewSession);
@@ -1058,19 +1058,19 @@
 
       // Track appropriate event based on page type
       if (GA4Utils.page.isProductListPage()) {
-        this.trackProductListView(sessionParams);
+        await this.trackProductListView(sessionParams);
       } else if (GA4Utils.page.isProductPage(this.config)) {
-        this.trackProductView(sessionParams);
+        await this.trackProductView(sessionParams);
       } else {
         // Regular page - track page_view
-        this.trackEvent("page_view", sessionParams);
+        await this.trackEvent("page_view", sessionParams);
       }
     },
 
     /**
      * Track product list view
      */
-    trackProductListView: function (sessionParams) {
+    trackProductListView: async function (sessionParams) {
       var productListData = this.getProductListItems();
 
       if (productListData.items.length > 0) {
@@ -1082,7 +1082,7 @@
           items: productListData.items,
         };
 
-        this.trackEvent("view_item_list", itemListData);
+        await this.trackEvent("view_item_list", itemListData);
 
         // Setup click tracking for products
         this.setupProductClickTracking(
@@ -1092,14 +1092,14 @@
         );
       } else {
         // Fall back to page_view if no products found
-        this.trackEvent("page_view", sessionParams);
+        await this.trackEvent("page_view", sessionParams);
       }
     },
 
     /**
      * Track single product view
      */
-    trackProductView: function (sessionParams) {
+    trackProductView: async function (sessionParams) {
       var productData = this.config.productData;
 
       var viewItemData = {
@@ -1109,7 +1109,7 @@
         items: [productData],
       };
 
-      this.trackEvent("view_item", viewItemData);
+      await this.trackEvent("view_item", viewItemData);
     },
 
     // Set up event listeners
@@ -1498,9 +1498,9 @@
      * Send batch events on page unload - uses consent manager if available
      */
     sendBatchEventsOnUnload: function() {
-      // If consent manager is available, use its sendBatchEvents method
+      // If consent manager is available, use its sendBatchEvents method with critical flag
       if (window.GA4ConsentManager && typeof window.GA4ConsentManager.sendBatchEvents === 'function') {
-        window.GA4ConsentManager.sendBatchEvents();
+        window.GA4ConsentManager.sendBatchEvents(true); // true = critical event
       } else {
         // Fallback: if no consent manager, we can't send events as they would be queued there
         this.log("⚠️ No consent manager available for batch event sending");
@@ -2629,7 +2629,7 @@
       );
     },
 
-    trackEvent: function (eventName, eventParams = {}) {
+    trackEvent: async function (eventName, eventParams = {}) {
       this.log("Tracking event: " + eventName, {
         eventName: eventName,
         hasPageLocation: !!eventParams.page_location,
@@ -2700,8 +2700,21 @@
         eventParams.event_timestamp = Math.floor(Date.now() / 1000);
       }
 
-      // ALWAYS ensure basic location data is present for all events
-      this.ensureBasicLocationData(eventParams);
+      // ALWAYS ensure complete location data is present for all events
+      try {
+        eventParams = await this.enrichEventWithLocationData(eventParams, eventName);
+        this.log("✅ Event enriched with location data", {
+          eventName: eventName,
+          hasLocationData: !!(eventParams.geo_latitude && eventParams.geo_longitude)
+        });
+      } catch (error) {
+        this.log("⚠️ Failed to enrich event with location data, using fallback", {
+          eventName: eventName,
+          error: error.message
+        });
+        // Still ensure basic location data as fallback
+        this.ensureBasicLocationData(eventParams);
+      }
 
       // Add stored attribution data for non-foundational events only
       this.addStoredAttributionData(eventParams, eventName);
@@ -2987,13 +3000,16 @@
      * Send multiple events as a batch payload
      * @param {Object} batchPayload - Batch payload with events array
      */
-    sendBatchEvents: function(batchPayload) {
+    sendBatchEvents: function(batchPayload, isCritical = false) {
       if (!batchPayload || !batchPayload.events || batchPayload.events.length === 0) {
         this.log("No events in batch payload");
         return;
       }
 
-      this.log("📦 Processing batch payload with " + batchPayload.events.length + " events", batchPayload);
+      this.log("📦 Processing batch payload with " + batchPayload.events.length + " events", {
+        ...batchPayload,
+        isCritical: isCritical
+      });
 
       // Determine transmission method based on configuration
       const transmissionMethod = this.config.transmissionMethod || 'secure_wp_to_cf';
@@ -3009,80 +3025,112 @@
       this.log("🚀 Sending batch via " + transmissionMethod, {
         eventCount: data.events.length,
         transmissionMethod: transmissionMethod,
-        consent: data.consent
+        consent: data.consent,
+        isCritical: isCritical
       });
 
       if (transmissionMethod === 'direct_to_cf' && this.config.cloudflareWorkerUrl) {
         this.log("⚡ Direct to Cloudflare batch transmission");
-        this.sendBatchToCloudflare(data);
+        this.sendBatchToCloudflare(data, isCritical);
       } else if (transmissionMethod === 'wp_endpoint_to_cf' && this.config.cloudflareWorkerUrl) {
         this.log("🛡️ WP Bot Check before sending to CF batch transmission (balanced)");
-        this.sendBatchViaWordPress(data, false); // Use optimized WordPress endpoint (no encryption)
+        this.sendBatchViaWordPress(data, false, isCritical); // Use optimized WordPress endpoint (no encryption)
       } else {
         this.log("🔒 Secure WordPress to Cloudflare batch transmission");
-        this.sendBatchViaWordPress(data, true); // true = with encryption
+        this.sendBatchViaWordPress(data, true, isCritical); // true = with encryption
       }
     },
 
     /**
      * Send batch directly to Cloudflare Worker (direct transmission)
+     * @param {Object} batchData - The batch data to send
+     * @param {boolean} isCritical - Whether this is a critical event
      */
-    sendBatchToCloudflare: function(batchData) {
+    sendBatchToCloudflare: function(batchData, isCritical = false) {
       if (!this.config.cloudflareWorkerUrl) {
         this.log("❌ Cloudflare Worker URL not configured for direct transmission");
         return;
       }
 
-      // Use fetch with proper headers (sendBeacon doesn't support custom headers)
-      try {
-        var payload = JSON.stringify(batchData);
-        
-        // Prepare headers for the request
-        const headers = {
-          'Content-Type': 'application/json',
-          'X-Simple-request': 'true'
-        };
-        
-        // Add X-WP-Nonce header if we have a nonce (for wp_endpoint_to_cf method)
-        const currentNonce = window.ga4ServerSideTagging?.nonce || this.config.nonce;
-        if (currentNonce) {
-          headers['X-WP-Nonce'] = currentNonce;
+      // For critical events, use reliable sending method with sendBeacon fallback
+      if (isCritical) {
+        this.log("🚨 Critical batch event - using reliable sending method");
+        try {
+          // For direct to Cloudflare, we need to use a simple payload format
+          GA4Utils.ajax.sendPayloadReliable(
+            this.config.cloudflareWorkerUrl,
+            batchData,
+            this.config,
+            "[GA4 Critical Batch CF]",
+            true // isCritical
+          ).then(function(response) {
+            this.log("✅ Critical batch sent reliably to Cloudflare Worker", {
+              method: response.method || 'fetch',
+              success: response.success
+            });
+          }.bind(this)).catch(function(error) {
+            this.log("❌ Critical batch sending failed", error);
+          }.bind(this));
+        } catch (error) {
+          this.log("❌ Error with reliable batch sending", error);
         }
+      } else {
+        // Use standard fetch with proper headers for non-critical events
+        try {
+          var payload = JSON.stringify(batchData);
+          
+          // Prepare headers for the request
+          const headers = {
+            'Content-Type': 'application/json',
+            'X-Simple-request': 'true'
+          };
+          
+          // Add X-WP-Nonce header if we have a nonce (for wp_endpoint_to_cf method)
+          const currentNonce = window.ga4ServerSideTagging?.nonce || this.config.nonce;
+          if (currentNonce) {
+            headers['X-WP-Nonce'] = currentNonce;
+          }
 
-        // Use fetch with proper headers for Cloudflare Worker
-        fetch(this.config.cloudflareWorkerUrl, {
-          method: 'POST',
-          headers: headers,
-          body: payload,
-          keepalive: true // Important for page unload
-        }).then(function(response) {
-          this.log("✅ Batch sent via fetch to Cloudflare Worker", {
-            status: response.status,
-            ok: response.ok
-          });
-        }.bind(this)).catch(function(error) {
-          this.log("❌ Error sending batch to Cloudflare Worker", error);
-        }.bind(this));
+          // Use fetch with proper headers for Cloudflare Worker
+          fetch(this.config.cloudflareWorkerUrl, {
+            method: 'POST',
+            headers: headers,
+            body: payload,
+            keepalive: true // Important for page unload
+          }).then(function(response) {
+            this.log("✅ Batch sent via fetch to Cloudflare Worker", {
+              status: response.status,
+              ok: response.ok
+            });
+          }.bind(this)).catch(function(error) {
+            this.log("❌ Error sending batch to Cloudflare Worker", error);
+          }.bind(this));
 
-      } catch (error) {
-        this.log("❌ Error preparing batch for Cloudflare Worker", error);
+        } catch (error) {
+          this.log("❌ Error preparing batch for Cloudflare Worker", error);
+        }
       }
     },
 
     /**
      * Send batch via WordPress endpoint (balanced or secure transmission)
+     * @param {Object} batchData - The batch data to send
+     * @param {boolean} useEncryption - Whether to use encryption
+     * @param {boolean} isCritical - Whether this is a critical event
      */
-    sendBatchViaWordPress: function(batchData, useEncryption) {
+    sendBatchViaWordPress: function(batchData, useEncryption, isCritical = false) {
       var endpoint = this.config.apiEndpoint + '/send-events';
       
       try {
-        // If encryption is enabled, use sendPayloadFetch which handles encryption
+        // If encryption is enabled, use sendPayloadReliable which handles encryption
         if (useEncryption && this.config.encryptionEnabled) {
-          GA4Utils.ajax.sendPayloadFetch(endpoint, batchData, this.config, "[GA4 Batch Encrypted]")
+          GA4Utils.ajax.sendPayloadReliable(endpoint, batchData, this.config, "[GA4 Batch Encrypted]", isCritical)
             .then(function(response) {
-              this.log("✅ Encrypted batch sent via sendPayloadFetch to WordPress endpoint", {
+              this.log("✅ Encrypted batch sent via sendPayloadReliable to WordPress endpoint", {
                 encrypted: true,
-                useEncryption: useEncryption
+                useEncryption: useEncryption,
+                isCritical: isCritical,
+                method: response.method || 'fetch'
               });
             }.bind(this))
             .catch(function(error) {
@@ -3091,37 +3139,53 @@
           return;
         }
         
-        // For non-encrypted batch requests, use direct fetch
-        var payload = JSON.stringify(batchData);     
+        // For non-encrypted batch requests, use reliable method for critical events
+        if (isCritical) {
+          this.log("🚨 Critical batch event - using reliable sending method (non-encrypted)");
+          GA4Utils.ajax.sendPayloadReliable(endpoint, batchData, this.config, "[GA4 Batch Critical]", isCritical)
+            .then(function(response) {
+              this.log("✅ Critical batch sent via sendPayloadReliable to WordPress endpoint", {
+                encrypted: false,
+                useEncryption: useEncryption,
+                isCritical: isCritical,
+                method: response.method || 'fetch'
+              });
+            }.bind(this))
+            .catch(function(error) {
+              this.log("❌ Error sending critical batch to WordPress endpoint", error);
+            }.bind(this));
+        } else {
+          // For non-critical events, use direct fetch
+          var payload = JSON.stringify(batchData);     
 
-        // Use fetch for batch requests
-        // Use comprehensive headers for proper validation handling
-        var headers = {
-          "Content-Type": "application/json",
-          "Origin": window.location.origin,
-          "Referer": window.location.href,
-          "Accept": "application/json, text/plain, */*",
-          "Accept-Language": navigator.language || "en-US",
-          "X-WP-Nonce": window.ga4ServerSideTagging?.nonce || this.config.nonce || ""
-        };
+          // Use fetch for batch requests
+          // Use comprehensive headers for proper validation handling
+          var headers = {
+            "Content-Type": "application/json",
+            "Origin": window.location.origin,
+            "Referer": window.location.href,
+            "Accept": "application/json, text/plain, */*",
+            "Accept-Language": navigator.language || "en-US",
+            "X-WP-Nonce": window.ga4ServerSideTagging?.nonce || this.config.nonce || ""
+          };
 
-        fetch(endpoint, {
-          method: 'POST',
-          headers: headers,
-          body: payload,
-          keepalive: true // Important for page unload
-        }).then(function(response) {
-          if (response.ok) {
-            this.log("✅ Batch sent via fetch to WordPress endpoint", {
-              status: response.status,
-              ok: response.ok,
-              encrypted: useEncryption
-            });
-          } else {
-            this.log("❌ WordPress endpoint returned error", {
-              status: response.status,
-              statusText: response.statusText,
-              ok: response.ok
+          fetch(endpoint, {
+            method: 'POST',
+            headers: headers,
+            body: payload,
+            keepalive: true // Important for page unload
+          }).then(function(response) {
+            if (response.ok) {
+              this.log("✅ Batch sent via fetch to WordPress endpoint", {
+                status: response.status,
+                ok: response.ok,
+                encrypted: useEncryption
+              });
+            } else {
+              this.log("❌ WordPress endpoint returned error", {
+                status: response.status,
+                statusText: response.statusText,
+                ok: response.ok
             });
             
             // Try to parse error response
@@ -3134,6 +3198,7 @@
         }.bind(this)).catch(function(error) {
           this.log("❌ Network error sending batch to WordPress endpoint", error);
         }.bind(this));
+        }
 
       } catch (error) {
         this.log("❌ Error preparing batch for WordPress endpoint", error);
@@ -3429,7 +3494,8 @@
             queueLength: this.eventQueue.length + 1
           });
           
-          this.queueEventForConsent(payload);
+          // Queue event with location data enrichment
+          await this.queueEventForConsent(payload);
           return Promise.resolve({ queued: true });
         }
         
@@ -3478,11 +3544,28 @@
     /**
      * Queue event for consent decision with persistent storage
      */
-    queueEventForConsent: function(payload) {
+    queueEventForConsent: async function(payload) {
       this.log("📦 QUEUEING EVENT - Starting persistent queue process", {
         eventName: payload.name,
-        currentQueueLength: this.eventQueue.length
+        currentQueueLength: this.eventQueue.length,
+        hasLocationData: !!(payload.params && payload.params.geo_latitude && payload.params.geo_longitude)
       });
+      
+      // Enrich payload with location data before queuing
+      try {
+        if (payload.params) {
+          payload.params = await this.enrichEventWithLocationData(payload.params, payload.name);
+          this.log("✅ Payload enriched with location data", {
+            eventName: payload.name,
+            hasLocationData: !!(payload.params.geo_latitude && payload.params.geo_longitude)
+          });
+        }
+      } catch (error) {
+        this.log("⚠️ Failed to enrich payload with location data", {
+          eventName: payload.name,
+          error: error.message
+        });
+      }
       
       const queuedEvent = {
         payload: payload,
@@ -3497,12 +3580,130 @@
       this.log("💾 Persisting event queue to localStorage...");
       this.persistEventQueue();
       
-      this.log("📦 Event queued for consent decision", {
+      this.log("📦 Event queued for consent decision with complete data", {
         eventName: payload.name,
         queueLength: this.eventQueue.length,
         eventId: queuedEvent.id,
-        persistedToStorage: true
+        persistedToStorage: true,
+        hasLocationData: !!(payload.params && payload.params.geo_latitude && payload.params.geo_longitude)
       });
+      
+      // Check if batch size limit reached and send automatically
+      this.checkBatchSizeLimit();
+    },
+
+    /**
+     * Enrich event parameters with complete location data
+     * @param {Object} eventParams - Event parameters to enrich
+     * @param {string} eventName - Event name for logging
+     * @returns {Promise<Object>} - Enriched event parameters
+     */
+    enrichEventWithLocationData: async function(eventParams, eventName) {
+      this.log("🌍 Enriching event with location data", {
+        eventName: eventName,
+        hasTimezone: !!eventParams.timezone,
+        hasBasicGeo: !!(eventParams.geo_continent || eventParams.geo_country_tz)
+      });
+      
+      // First ensure basic location data from timezone
+      this.ensureBasicLocationData(eventParams);
+      
+      // Check if we should get precise IP location data
+      var shouldGetPreciseLocation = false;
+      
+      // Since this function is called for queued events (before consent is set),
+      // we should ALWAYS fetch IP location data for accurate geolocation
+      // The Cloudflare Worker will handle consent-based filtering later
+      shouldGetPreciseLocation = true;
+      var fetchReason = "pre_consent_queue";
+      
+      // Check current consent status for logging purposes
+      var consentData = null;
+      if (window.GA4ConsentManager && typeof window.GA4ConsentManager.getConsentForServerSide === 'function') {
+        consentData = window.GA4ConsentManager.getConsentForServerSide();
+      } else {
+        consentData = GA4Utils.consent.getForServerSide();
+      }
+      
+      if (consentData && consentData.analytics_storage === "GRANTED") {
+        fetchReason = "consent_granted";
+      }
+      
+      // Check if IP geolocation is disabled by admin
+      if (this.config.consentSettings && this.config.consentSettings.disableAllIP) {
+        shouldGetPreciseLocation = false;
+        this.log("IP geolocation disabled by admin - using timezone fallback only");
+      }
+      
+      // Get precise location data (always for queued events)
+      if (shouldGetPreciseLocation) {
+        try {
+          this.log("🎯 Fetching precise location data for queue", {
+            reason: fetchReason,
+            consentStatus: consentData?.analytics_storage || "unknown"
+          });
+          
+          const locationData = await this.getUserLocation();
+          
+          if (locationData && locationData.latitude && locationData.longitude) {
+            // Add precise location data
+            eventParams.geo_latitude = locationData.latitude;
+            eventParams.geo_longitude = locationData.longitude;
+            if (locationData.city) eventParams.geo_city = locationData.city;
+            if (locationData.country) eventParams.geo_country = locationData.country;
+            if (locationData.region) eventParams.geo_region = locationData.region;
+            
+            this.log("✅ Precise location data added to queued event", {
+              city: locationData.city,
+              country: locationData.country,
+              region: locationData.region,
+              hasCoordinates: !!(locationData.latitude && locationData.longitude),
+              reason: fetchReason
+            });
+          } else {
+            this.log("⚠️ Precise location data incomplete, using timezone fallback");
+          }
+        } catch (error) {
+          this.log("❌ Failed to get precise location data for queue", {
+            eventName: eventName,
+            error: error.message,
+            fallbackUsed: "timezone-based location"
+          });
+        }
+      } else {
+        this.log("🔒 IP geolocation disabled - using timezone fallback only");
+      }
+      
+      return eventParams;
+    },
+
+    /**
+     * Check if batch size limit (35+ events) is reached and send automatically
+     */
+    checkBatchSizeLimit: function() {
+      var batchSizeLimit = this.config?.batchSizeLimit || 35;
+      var currentBatchSize = this.eventQueue.length;
+      
+      if (currentBatchSize >= batchSizeLimit) {
+        this.log("🚨 Batch size limit reached - automatically sending batch", {
+          currentBatchSize: currentBatchSize,
+          batchSizeLimit: batchSizeLimit,
+          triggerReason: "batch_size_limit"
+        });
+        
+        // Use consent manager to send batch if available
+        if (window.GA4ConsentManager && typeof window.GA4ConsentManager.sendBatchEvents === 'function') {
+          window.GA4ConsentManager.sendBatchEvents(false); // false = not critical (not during page unload)
+        } else {
+          this.log("⚠️ No consent manager available for batch sending");
+        }
+      } else {
+        this.log("📊 Batch size check", {
+          currentBatchSize: currentBatchSize,
+          batchSizeLimit: batchSizeLimit,
+          remaining: batchSizeLimit - currentBatchSize
+        });
+      }
     },
 
     /**
@@ -3796,7 +3997,7 @@
      * Test function for debugging persistent queue functionality
      * Use this in browser console: GA4ServerSideTagging.testPersistentQueue()
      */
-    testPersistentQueue: function() {
+    testPersistentQueue: async function() {
       this.log("🧪 TESTING PERSISTENT QUEUE FUNCTIONALITY");
       
       // Test 1: Check current state
@@ -3814,7 +4015,7 @@
       };
       
       this.log("📦 Queuing test event...");
-      this.queueEventForConsent(testPayload);
+      await this.queueEventForConsent(testPayload);
       
       // Test 3: Check state after queuing
       const newStats = this.getQueueStorageStats();

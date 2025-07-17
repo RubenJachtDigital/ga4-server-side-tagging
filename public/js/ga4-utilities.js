@@ -2285,6 +2285,102 @@
     ajax: {
 
       /**
+       * Send payload reliably using sendBeacon fallback for critical events
+       * @param {string} endpoint URL to send to
+       * @param {Object} payload Data to send
+       * @param {Object} config Configuration object
+       * @param {string} logPrefix Prefix for log messages
+       * @param {boolean} isCritical Whether this is a critical event (page unload)
+       * @returns {Promise}
+       */
+      sendPayloadReliable: async function (endpoint, payload, config, logPrefix, isCritical = false) {
+        logPrefix = logPrefix || "[GA4Utils Reliable]";
+        
+        // For critical events (page unload), try sendBeacon first
+        if (isCritical && navigator.sendBeacon) {
+          try {
+            // SECURITY VALIDATION - Do not send request if security checks fail
+            const securityValidation = this.validateRequestSecurity(endpoint, payload, config);
+            if (!securityValidation.valid) {
+              GA4Utils.helpers.log("🚫 Request blocked by security validation: " + securityValidation.reason, null, config, logPrefix);
+              return Promise.reject(new Error("Security validation failed: " + securityValidation.reason));
+            }
+
+            // Prepare headers for sendBeacon (limited header support)
+            const beaconData = new Blob([JSON.stringify(payload)], { type: 'application/json' });
+            
+            GA4Utils.helpers.log("🚨 Critical event detected - attempting sendBeacon", {
+              endpoint: endpoint,
+              payloadSize: JSON.stringify(payload).length,
+              timestamp: new Date().toISOString()
+            }, config, logPrefix);
+            
+            // sendBeacon returns boolean indicating if the beacon was successfully queued
+            const beaconSent = navigator.sendBeacon(endpoint, beaconData);
+            
+            if (beaconSent) {
+              GA4Utils.helpers.log("✅ Critical event sent successfully via sendBeacon", {
+                endpoint: endpoint,
+                payloadSize: JSON.stringify(payload).length,
+                timestamp: new Date().toISOString()
+              }, config, logPrefix);
+              
+              return Promise.resolve({ success: true, method: 'sendBeacon' });
+            } else {
+              GA4Utils.helpers.log("⚠️ sendBeacon failed, falling back to fetch", {
+                endpoint: endpoint,
+                reason: "beacon_queue_full_or_rejected"
+              }, config, logPrefix);
+            }
+          } catch (beaconError) {
+            GA4Utils.helpers.log("⚠️ sendBeacon error, falling back to fetch", {
+              error: beaconError.message,
+              endpoint: endpoint
+            }, config, logPrefix);
+          }
+        }
+        
+        // Fallback to regular fetch (either not critical or sendBeacon failed)
+        try {
+          const response = await this.sendPayloadFetch(endpoint, payload, config, logPrefix);
+          
+          if (isCritical) {
+            GA4Utils.helpers.log("✅ Critical event sent successfully via fetch fallback", {
+              endpoint: endpoint,
+              timestamp: new Date().toISOString()
+            }, config, logPrefix);
+          }
+          
+          return response;
+        } catch (fetchError) {
+          // If both methods fail for critical events, try one more time with sendBeacon
+          if (isCritical && navigator.sendBeacon) {
+            try {
+              const beaconData = new Blob([JSON.stringify(payload)], { type: 'application/json' });
+              const lastAttempt = navigator.sendBeacon(endpoint, beaconData);
+              
+              if (lastAttempt) {
+                GA4Utils.helpers.log("✅ Critical event sent on final sendBeacon attempt", {
+                  endpoint: endpoint,
+                  timestamp: new Date().toISOString()
+                }, config, logPrefix);
+                
+                return Promise.resolve({ success: true, method: 'sendBeacon_final' });
+              }
+            } catch (finalError) {
+              GA4Utils.helpers.log("❌ All reliable sending methods failed", {
+                fetchError: fetchError.message,
+                beaconError: finalError.message,
+                endpoint: endpoint
+              }, config, logPrefix);
+            }
+          }
+          
+          throw fetchError;
+        }
+      },
+
+      /**
        * Send payload using Fetch API (alternative to jQuery AJAX)
        * @param {string} endpoint URL to send to
        * @param {Object} payload Data to send

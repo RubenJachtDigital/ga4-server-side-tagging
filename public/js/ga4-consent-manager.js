@@ -76,16 +76,6 @@
      */
     setupPageUnloadListener: function() {
       var self = this;
-      
-      // Send batches when user is leaving the page
-      window.addEventListener('beforeunload', function() {
-        self.log("📤 BEFOREUNLOAD triggered - sending batch events", {
-          eventQueueLength: self.eventQueue?.length || 0,
-          consentGiven: self.consentGiven
-        });
-        self.sendBatchEvents();
-      });
-      
       // Handle page visibility changes (mobile browsers, tab switching)
       document.addEventListener('visibilitychange', function() {
         if (document.visibilityState === 'hidden') {
@@ -94,8 +84,17 @@
             consentGiven: self.consentGiven,
             visibilityState: document.visibilityState
           });
-          self.sendBatchEvents();
+          self.sendBatchEvents(true); // Critical event
         }
+      });
+
+      // Send batches when user is leaving the page
+      window.addEventListener('beforeunload', function() {
+        self.log("📤 BEFOREUNLOAD triggered - sending batch events", {
+          eventQueueLength: self.eventQueue?.length || 0,
+          consentGiven: self.consentGiven
+        });
+        self.sendBatchEvents(true); // Critical event
       });
       
       // Handle page freeze/resume (modern browsers)
@@ -104,7 +103,19 @@
           eventQueueLength: self.eventQueue?.length || 0,
           consentGiven: self.consentGiven
         });
-        self.sendBatchEvents();
+        self.sendBatchEvents(true); // Critical event
+      });
+      
+      // Handle page restoration from cache (Back/Forward Cache)
+      window.addEventListener('pageshow', function(event) {
+        if (event.persisted) {
+          self.log("📄 PAGESHOW (persisted) - page restored from cache", {
+            persisted: event.persisted,
+            eventQueueLength: self.eventQueue?.length || 0,
+            consentGiven: self.consentGiven
+          });
+          // Don't send batch events on page restore, just log for debugging
+        }
       });
 
       this.log("👂 Page unload listeners configured for batch event sending");
@@ -141,7 +152,7 @@
       });
       
       // NEW: Always queue events regardless of consent status
-      // Queue the event with complete data if available
+      // Queue the event with complete data if available (async operation)
       if (completeEventData) {
         this.queueEvent(eventName, completeEventData, true); // true = isCompleteData
       } else {
@@ -156,19 +167,39 @@
      * @param {Object} eventParams - Event parameters (basic or complete)
      * @param {boolean} isCompleteData - Whether eventParams contains complete enriched data
      */
-    queueEvent: function(eventName, eventParams, isCompleteData = false) {
+    queueEvent: async function(eventName, eventParams, isCompleteData = false) {
+      this.log("📦 Starting event queue process", {
+        eventName: eventName,
+        isCompleteData: isCompleteData,
+        hasLocationData: !!(eventParams.geo_latitude && eventParams.geo_longitude)
+      });
+      
+      // If not complete data, ensure we have full location data before queuing
+      if (!isCompleteData) {
+        try {
+          eventParams = await this.enrichEventWithLocationData(eventParams);
+          this.log("✅ Event enriched with location data", {
+            eventName: eventName,
+            hasLocationData: !!(eventParams.geo_latitude && eventParams.geo_longitude)
+          });
+        } catch (error) {
+          this.log("⚠️ Failed to enrich event with location data, using fallback", {
+            eventName: eventName,
+            error: error.message
+          });
+        }
+      }
+      
       var queuedEvent = {
         eventName: eventName,
         eventParams: eventParams,
         timestamp: Date.now(),
-        isCompleteData: isCompleteData
+        isCompleteData: true // Now always complete after location enrichment
       };
       
-      // If we don't have complete data, add basic page context for reference
-      if (!isCompleteData) {
-        queuedEvent.pageUrl = window.location.href;
-        queuedEvent.pageTitle = document.title;
-      }
+      // Add basic page context for reference
+      queuedEvent.pageUrl = window.location.href;
+      queuedEvent.pageTitle = document.title;
       
       // Store directly in userData - no in-memory queue needed
       var userData = GA4Utils.storage.getUserData();
@@ -181,13 +212,139 @@
       // Keep in-memory queue in sync for compatibility - load from storage to ensure sync
       this.eventQueue = userData.batchEvents;
       
-      this.log("📦 Event stored directly in unified storage", {
+      this.log("📦 Event stored directly in unified storage with complete data", {
         eventName: eventName,
         queueLength: userData.batchEvents.length,
         inMemoryQueueLength: this.eventQueue.length,
         timestamp: queuedEvent.timestamp,
-        isCompleteData: isCompleteData
+        hasLocationData: !!(eventParams.geo_latitude && eventParams.geo_longitude),
+        isCompleteData: true
       });
+      
+      // Check if batch size limit reached and send automatically
+      this.checkBatchSizeLimit();
+    },
+
+    /**
+     * Enrich event with complete location data before queuing
+     * @param {Object} eventParams - Event parameters to enrich
+     * @returns {Promise<Object>} - Enriched event parameters
+     */
+    enrichEventWithLocationData: async function(eventParams) {
+      this.log("🌍 Enriching event with location data", {
+        hasTimezone: !!eventParams.timezone,
+        hasBasicGeo: !!(eventParams.geo_continent || eventParams.geo_country_tz)
+      });
+      
+      // Ensure we have timezone-based location data as fallback
+      var timezone = eventParams.timezone || GA4Utils.helpers.getTimezone();
+      if (timezone) {
+        eventParams.timezone = timezone;
+        var timezoneLocation = GA4Utils.helpers.getLocationFromTimezone(timezone);
+        if (!eventParams.geo_continent && timezoneLocation.continent) {
+          eventParams.geo_continent = timezoneLocation.continent;
+        }
+        if (!eventParams.geo_country_tz && timezoneLocation.country) {
+          eventParams.geo_country_tz = timezoneLocation.country;
+        }
+        if (!eventParams.geo_city_tz && timezoneLocation.city) {
+          eventParams.geo_city_tz = timezoneLocation.city;
+        }
+      }
+      
+      // Check if we should get precise IP location data
+      var shouldGetPreciseLocation = false;
+      
+      // Since this function is called for queued events (before consent is set),
+      // we should ALWAYS fetch IP location data for accurate geolocation
+      // The Cloudflare Worker will handle consent-based filtering later
+      shouldGetPreciseLocation = true;
+      var fetchReason = "pre_consent_queue";
+      
+      // Check current consent status for logging purposes
+      if (this.consentGiven && this.consentStatus && this.consentStatus.analytics_storage === "GRANTED") {
+        fetchReason = "consent_granted";
+      }
+      
+      // Check if IP geolocation is disabled by admin
+      if (this.config && this.config.consentSettings && this.config.consentSettings.disableAllIP) {
+        shouldGetPreciseLocation = false;
+        this.log("IP geolocation disabled by admin - using timezone fallback only");
+      }
+      
+      // Get precise location data (always for queued events)
+      if (shouldGetPreciseLocation) {
+        try {
+          this.log("🎯 Fetching precise location data for queue", {
+            reason: fetchReason,
+            consentGiven: this.consentGiven,
+            consentStatus: this.consentStatus?.analytics_storage || "unknown"
+          });
+          
+          // Get location data from tracking instance if available
+          var locationData = null;
+          if (this.trackingInstance && typeof this.trackingInstance.getUserLocation === 'function') {
+            locationData = await this.trackingInstance.getUserLocation();
+          } else {
+            // Fallback to utilities
+            locationData = await GA4Utils.location.get();
+          }
+          
+          if (locationData && locationData.latitude && locationData.longitude) {
+            // Add precise location data
+            eventParams.geo_latitude = locationData.latitude;
+            eventParams.geo_longitude = locationData.longitude;
+            if (locationData.city) eventParams.geo_city = locationData.city;
+            if (locationData.country) eventParams.geo_country = locationData.country;
+            if (locationData.region) eventParams.geo_region = locationData.region;
+            
+            this.log("✅ Precise location data added to queued event", {
+              city: locationData.city,
+              country: locationData.country,
+              region: locationData.region,
+              hasCoordinates: !!(locationData.latitude && locationData.longitude),
+              reason: fetchReason
+            });
+          } else {
+            this.log("⚠️ Precise location data incomplete, using timezone fallback");
+          }
+        } catch (error) {
+          this.log("❌ Failed to get precise location data", {
+            error: error.message,
+            fallbackUsed: "timezone-based location"
+          });
+        }
+      } else {
+        this.log("🔒 IP geolocation disabled - using timezone fallback only");
+      }
+      
+      return eventParams;
+    },
+
+    /**
+     * Check if batch size limit (35+ events) is reached and send automatically
+     */
+    checkBatchSizeLimit: function() {
+      var userData = GA4Utils.storage.getUserData();
+      var batchEvents = userData.batchEvents || [];
+      var batchSizeLimit = this.config?.batchSizeLimit || 35;
+      
+      if (batchEvents.length >= batchSizeLimit) {
+        this.log("🚨 Batch size limit reached - automatically sending batch", {
+          currentBatchSize: batchEvents.length,
+          batchSizeLimit: batchSizeLimit,
+          triggerReason: "batch_size_limit"
+        });
+        
+        // Send batch events immediately when limit is reached
+        this.sendBatchEvents(false); // false = not critical (not during page unload)
+      } else {
+        this.log("📊 Batch size check", {
+          currentBatchSize: batchEvents.length,
+          batchSizeLimit: batchSizeLimit,
+          remaining: batchSizeLimit - batchEvents.length
+        });
+      }
     },
 
     /**
@@ -212,8 +369,9 @@
     /**
      * Send all queued events as a single batch payload
      * Only sends events if consent has been determined (granted or denied)
+     * @param {boolean} isCritical - Whether this is a critical event (page unload)
      */
-    sendBatchEvents: function() {
+    sendBatchEvents: function(isCritical = false) {
       // Get events directly from userData storage
       var userData = GA4Utils.storage.getUserData();
       var batchEvents = userData.batchEvents || [];
@@ -292,10 +450,10 @@
       // Send batch to the tracking instance
       let batchSent = false;
       if (this.trackingInstance && typeof this.trackingInstance.sendBatchEvents === 'function') {
-        this.trackingInstance.sendBatchEvents(batchPayload);
+        this.trackingInstance.sendBatchEvents(batchPayload, isCritical);
         batchSent = true;
       } else if (typeof GA4ServerSideTagging !== 'undefined' && typeof GA4ServerSideTagging.sendBatchEvents === 'function') {
-        GA4ServerSideTagging.sendBatchEvents(batchPayload);
+        GA4ServerSideTagging.sendBatchEvents(batchPayload, isCritical);
         batchSent = true;
       } else {
         this.log("❌ No batch sending method available");
@@ -1643,9 +1801,13 @@
       try {
         var parsed = JSON.parse(value);
         var batchEventCount = parsed.batchEvents ? parsed.batchEvents.length : 0;
-        window.GA4ConsentManager.log("[GA4 Consent] 💾 SETTING unified storage:", key, value ? value.length + ' bytes' : 'null', 'batchEvents:', batchEventCount);
+        if(window.GA4ServerSideTagging.debugMode){
+          console.log("[GA4 Consent] 💾 SETTING unified storage:", key, value ? value.length + ' bytes' : 'null', 'batchEvents:', batchEventCount);
+        }
       } catch (e) {
-        window.GA4ConsentManager.log("[GA4 Consent] 💾 SETTING unified storage:", key, value ? value.length + ' bytes' : 'null');
+          if(window.GA4ServerSideTagging.debugMode){
+          console.log("[GA4 Consent] 💾 SETTING unified storage:", key, value ? value.length + ' bytes' : 'null', 'batchEvents:', batchEventCount);
+        }      
       }
     }
     return originalSetItem.apply(this, arguments);
@@ -1653,13 +1815,17 @@
   
   localStorage.removeItem = function(key) {
     if (key === 'ga4_user_data') {
-      window.GA4ConsentManager.log("[GA4 Consent] 🗑️ REMOVING unified storage:", key);
+      if(window.GA4ServerSideTagging.debugMode){
+      console.log("[GA4 Consent] 🗑️ REMOVING unified storage:", key);
     }
+  }
     return originalRemoveItem.apply(this, arguments);
   };
   
   localStorage.clear = function() {
-    window.GA4ConsentManager.log("[GA4 Consent] 🧹 CLEARING ALL localStorage");
+    if(window.GA4ServerSideTagging.debugMode){
+      console.log("[GA4 Consent] 🧹 CLEARING ALL localStorage");
+    }
     return originalClear.apply(this, arguments);
   };
   
