@@ -427,44 +427,34 @@ function processGDPRConsent(payload, request) {
 }
 
 /**
- * Enhance payload with IP-based geolocation when consent is granted
+ * Enhance payload with location data when consent is granted
+ * Prioritizes client-sent location data over Cloudflare IP headers
  * @param {Object} payload - The event payload
- * @param {Object} request - The request object (for IP geolocation)
- * @returns {Object} Enhanced payload with IP geolocation
+ * @param {Object} request - The request object (for continent fallback)
+ * @returns {Object} Enhanced payload with location data
  */
 function enhanceWithIPGeolocation(payload, request) {
   try {
-    // Get IP-based geolocation from Cloudflare
+    // Get continent from Cloudflare as fallback only
     const cf = request.cf || {};
     
-    // Add IP-based geolocation data to params (higher priority than timezone fallback)
-    if (cf.country && cf.country !== 'T1' && cf.country !== 'XX') {
-      payload.params.geo_country = cf.country;
-    }
-    
-    if (cf.city && cf.city !== 'Unknown') {
-      payload.params.geo_city = cf.city;
-    }
-    
-    if (cf.region && cf.region !== 'Unknown') {
-      payload.params.geo_region = cf.region;
-    }
-    
-    if (cf.continent && cf.continent !== 'XX') {
+    // Client-sent location data takes priority over Cloudflare IP headers
+    // Only use Cloudflare continent if client hasn't provided it
+    if (cf.continent && cf.continent !== 'XX' && !payload.params.geo_continent) {
       payload.params.geo_continent = cf.continent;
     }
     
     
-    console.log(`🌍 IP geolocation enhancement applied (consent granted)`, {
-      country: cf.country,
-      city: cf.city,
-      region: cf.region,
-      continent: cf.continent,
-      postalCode: cf.postalCode
+    console.log(`🌍 Location enhancement applied (consent granted)`, {
+      client_continent: payload.params.geo_continent,
+      client_country_tz: payload.params.geo_country_tz,
+      client_city_tz: payload.params.geo_city_tz,
+      cloudflare_continent: cf.continent,
+      priority: "client-sent data preferred"
     });
     
   } catch (error) {
-    console.error('❌ Failed to enhance with IP geolocation:', error);
+    console.error('❌ Failed to enhance with location data:', error);
   }
   
   return payload;
