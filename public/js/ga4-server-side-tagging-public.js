@@ -692,11 +692,11 @@
         campaign = referrerAttribution.campaign;
       }
 
-      // If we have a gclid but no UTM source/medium/campaign was set, override with Google Ads attribution
-      if (gclid && !utmParams.utm_source && !utmParams.utm_medium) {
+      // If we have a gclid, always override with Google Ads attribution (gclid is definitive proof of paid traffic)
+      if (gclid) {
         source = "google";
         medium = "cpc";
-        campaign = "(organic)";
+        campaign = utmParams.utm_campaign || "(not set)";
       }
 
       // Handle cases where no attribution is determined yet
@@ -727,7 +727,7 @@
       if (referrerDomain.indexOf("google") > -1) {
         // Check if it's Google Ads or organic
         if (referrer.indexOf("gclid=") > -1 || gclid) {
-          return { source: "google", medium: "cpc", campaign: "(organic)" };
+          return { source: "google", medium: "cpc", campaign: "(not set)" };
         } else {
           return { source: "google", medium: "organic", campaign: "(organic)" };
         }
@@ -2665,6 +2665,9 @@
         }
         if (storedAttribution.term) {
           eventParams.term = storedAttribution.term;
+        }
+        if (storedAttribution.gclid) {
+          eventParams.gclid = storedAttribution.gclid;
         }
         
         // Force traffic_type based on stored attribution
