@@ -2749,7 +2749,7 @@
           var payloadSize = JSON.stringify(payload).length;
           // Allow larger payloads for batch requests (identified by events array)
           var isBatchRequest = payload && Array.isArray(payload.events) && payload.events.length > 1;
-          var sizeLimit = isBatchRequest ? 1000000 : 500000; // 1MB for batch, 50KB for single events
+          var sizeLimit = 500000;
           
           if (payloadSize > sizeLimit) {
             return { valid: false, reason: "payload_too_large" };
