@@ -61,7 +61,7 @@
 
       // Log initialization
       this.log(
-        "%c GA4 Server-Side Tagging initialized v2",
+        "%c GA4 Server-Side Tagging initialized v3",
         "background: #4CAF50; color: white; font-size: 16px; font-weight: bold; padding: 8px 12px; border-radius: 4px;"
       );
     },
@@ -3387,7 +3387,8 @@
           body: JSON.stringify({
             event_name: payload.name,
             params: payload.params || {}
-          })
+          }),
+          keepalive: true // Important for page unload
         });
 
         if (!response.ok) {
