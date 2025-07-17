@@ -48,7 +48,145 @@ A comprehensive WordPress plugin that provides advanced server-side tagging for 
 - **🔒 CORS protection** with explicit header allowlisting
 - **🔗 Cross-platform encryption** compatible across PHP, JavaScript, and Cloudflare Worker
 
-## 🔄 Data Flow & Encryption Architecture
+## 🔄 Data Flow & Transmission Methods
+
+### 📡 Multi-Transmission Method Support
+
+The plugin supports **4 different transmission methods** to accommodate various security and performance requirements:
+
+| Method | Security Level | Performance | Use Case |
+|--------|---------------|-------------|----------|
+| **🔄 Direct to CF** | Basic | Fastest | Development/Testing |
+| **🔒 WordPress Endpoint** | Standard | Fast | Production Sites |
+| **🔐 Encrypted WordPress** | Maximum | Moderate | High-Security Sites |
+| **🔑 Legacy API Key** | Full | Moderate | Existing Implementations |
+
+### 🔄 **Method 1: Direct to Cloudflare** (`direct_to_cf`)
+**Direct client-to-worker communication with minimal security overhead**
+
+```javascript
+// Client Request
+fetch('https://your-worker.workers.dev/', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+    'X-Simple-request': 'true'  // Identifies simple transmission
+  },
+  body: JSON.stringify({
+    name: 'page_view',
+    params: { client_id: 'xxx', session_id: 'yyy' }
+  })
+})
+```
+
+**Security Features:**
+- ✅ **Basic Rate Limiting**: IP-based request throttling
+- ✅ **CORS Protection**: Origin validation
+- ✅ **Payload Validation**: Basic structure checks
+- ❌ **No API Key Required**: Minimal authentication
+- ❌ **No Encryption**: Plain JSON transmission
+
+**Best For:** Development, testing, low-security environments
+
+### 🔒 **Method 2: WordPress Endpoint** (`wp_endpoint_to_cf`)
+**Balanced security through WordPress validation with standard transmission**
+
+```javascript
+// Client Request
+fetch('/wp-json/ga4-server-side-tagging/v1/send-event', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+    'X-WP-Nonce': 'wordpress-nonce-value'  // WordPress security nonce
+  },
+  body: JSON.stringify({
+    name: 'purchase',
+    params: { transaction_id: '12345', value: 99.99 }
+  })
+})
+```
+
+**Security Features:**
+- ✅ **WordPress Validation**: Nonce-based request authentication
+- ✅ **Rate Limiting**: 100 requests/minute per IP
+- ✅ **Bot Detection**: 70+ user agent patterns
+- ✅ **Origin Validation**: Same-domain CORS checking
+- ✅ **Field Validation**: Required GA4 fields verification
+- ❌ **No Payload Encryption**: Plain JSON transmission
+
+**Best For:** Standard production sites, balanced security/performance
+
+### 🔐 **Method 3: Encrypted WordPress** (`secure_wp_to_cf`)
+**Maximum security with JWT encryption and WordPress validation**
+
+```javascript
+// Client Request (with JWT encryption)
+fetch('/wp-json/ga4-server-side-tagging/v1/send-event', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+    'X-WP-Nonce': 'wordpress-nonce-value',
+    'X-Encrypted': 'true'  // Indicates JWT encrypted payload
+  },
+  body: JSON.stringify({
+    time_jwt: 'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...'  // Encrypted event data
+  })
+})
+```
+
+**Security Features:**
+- ✅ **WordPress Validation**: Nonce-based authentication
+- ✅ **JWT Encryption**: Time-based payload encryption
+- ✅ **Rate Limiting**: 100 requests/minute per IP
+- ✅ **Bot Detection**: Multi-layered analysis
+- ✅ **Origin Validation**: Strict same-domain checking
+- ✅ **Payload Encryption**: Complete event data encrypted
+- ✅ **Key Rotation**: Automatic 5-minute key rotation
+
+**Best For:** High-security sites, sensitive data, compliance requirements
+
+### 🔑 **Method 4: Legacy API Key** (`regular`)
+**Full security validation with direct API key authentication**
+
+```javascript
+// Client Request (with API key)
+fetch('https://your-worker.workers.dev/', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+    'Authorization': 'Bearer your-api-key',
+    'X-Encrypted': 'true'  // Optional encryption
+  },
+  body: JSON.stringify({
+    name: 'add_to_cart',
+    params: { item_id: 'product_123', value: 29.99 }
+  })
+})
+```
+
+**Security Features:**
+- ✅ **API Key Authentication**: Bearer token validation
+- ✅ **Full Security Validation**: Complete security checks
+- ✅ **Origin Validation**: Header consistency validation
+- ✅ **Rate Limiting**: IP-based throttling
+- ✅ **Bot Detection**: Advanced pattern analysis
+- ✅ **Optional Encryption**: JWT payload encryption available
+- ✅ **Domain Whitelisting**: Configurable allowed domains
+
+**Best For:** Existing implementations, API-first architectures
+
+### 🛡️ **Security Comparison Matrix**
+
+| Security Feature | Direct CF | WordPress | Encrypted WP | Legacy API |
+|------------------|-----------|-----------|--------------|------------|
+| **Authentication** | None | WP Nonce | WP Nonce | API Key |
+| **Rate Limiting** | Basic | Standard | Standard | Advanced |
+| **Bot Detection** | None | Standard | Advanced | Advanced |
+| **Origin Validation** | Basic | Standard | Strict | Advanced |
+| **Payload Encryption** | ❌ | ❌ | ✅ | Optional |
+| **Key Rotation** | N/A | N/A | Auto | Manual |
+| **CORS Protection** | Basic | Standard | Strict | Advanced |
+| **Field Validation** | Basic | Standard | Advanced | Advanced |
 
 ### Complete Data Flow Pipeline
 
@@ -261,14 +399,19 @@ if (DEBUG_MODE) {
 
 ### Cloudflare Worker Setup (Recommended)
 
-For optimal server-side tagging with enhanced bot protection and security:
+For optimal server-side tagging with enhanced bot protection and multi-transmission method support:
 
 1. **Create Cloudflare Worker**: Set up a new worker in your Cloudflare dashboard
 2. **Deploy Script**: Use the provided `cloudflare-worker-example.js`
 3. **Configure Variables and Secrets**: Set up environment variables (see below)
 4. **Set Worker URL**: Enter the worker URL in plugin settings
-5. **Generate API Key**: Click "Generate New Key" in WordPress admin
-6. **Enable Server-Side Tracking**: Toggle server-side option in admin
+5. **Choose Transmission Method**: Select from 4 available methods:
+   - **Direct to CF**: Simple development setup (no API key required)
+   - **WordPress Endpoint**: Balanced security for production
+   - **Encrypted WordPress**: Maximum security with JWT encryption
+   - **Legacy API Key**: Full validation with direct authentication
+6. **Generate API Key**: Click "Generate New Key" in WordPress admin (for Legacy method)
+7. **Enable Server-Side Tracking**: Toggle server-side option in admin
 
 ### 🔧 **Cloudflare Worker Variables and Secrets Setup**
 
@@ -279,13 +422,13 @@ Instead of hardcoding values in your worker script, use Cloudflare's Variables a
 2. Navigate to **Settings → Variables and Secrets**
 3. Add the following variables with type "secret":
 
-| Variable Name | Type | Value | Description |
-|---------------|------|-------|-------------|
-| `GA4_MEASUREMENT_ID` | Secret | `G-XXXXXXXXXX` | Your GA4 Measurement ID |
-| `GA4_API_SECRET` | Secret | `your-api-secret-here` | Your GA4 API Secret |
-| `API_KEY` | Secret | `api-key-from-wordpress` | API key from WordPress admin |
-| `ENCRYPTION_KEY` | Secret | `64-char-hex-key` | Encryption key from WordPress admin |
-| `ALLOWED_DOMAINS` | Secret | `yourdomain.com,www.yourdomain.com` | Comma-separated list of allowed domains |
+| Variable Name | Type | Value | Description | Required For |
+|---------------|------|-------|-------------|--------------|
+| `GA4_MEASUREMENT_ID` | Secret | `G-XXXXXXXXXX` | Your GA4 Measurement ID | All methods |
+| `GA4_API_SECRET` | Secret | `your-api-secret-here` | Your GA4 API Secret | All methods |
+| `API_KEY` | Secret | `api-key-from-wordpress` | API key from WordPress admin | Legacy API method only |
+| `ENCRYPTION_KEY` | Secret | `64-char-hex-key` | Encryption key from WordPress admin | Encrypted WordPress method |
+| `ALLOWED_DOMAINS` | Secret | `yourdomain.com,www.yourdomain.com` | Comma-separated list of allowed domains | All methods (recommended) |
 
 **Step 2: Variable Formats**
 
@@ -308,6 +451,34 @@ yourdomain.com,www.yourdomain.com,subdomain.yourdomain.com
 
 **Step 3: Deploy Worker**
 The worker script will automatically load these values from the environment at runtime.
+
+**Step 4: Configure Transmission Method**
+Choose the appropriate transmission method for your security requirements:
+
+```javascript
+// WordPress Plugin Configuration
+// Set transmission method in plugin settings:
+
+// Method 1: Direct to CF (Development)
+transmission_method: 'direct_to_cf'
+// Required: GA4_MEASUREMENT_ID, GA4_API_SECRET
+// Optional: ALLOWED_DOMAINS
+
+// Method 2: WordPress Endpoint (Production)
+transmission_method: 'wp_endpoint_to_cf'
+// Required: GA4_MEASUREMENT_ID, GA4_API_SECRET
+// Optional: ALLOWED_DOMAINS
+
+// Method 3: Encrypted WordPress (High Security)
+transmission_method: 'secure_wp_to_cf'
+// Required: GA4_MEASUREMENT_ID, GA4_API_SECRET, ENCRYPTION_KEY
+// Optional: ALLOWED_DOMAINS
+
+// Method 4: Legacy API Key (Existing Sites)
+transmission_method: 'regular'
+// Required: GA4_MEASUREMENT_ID, GA4_API_SECRET, API_KEY
+// Optional: ENCRYPTION_KEY, ALLOWED_DOMAINS
+```
 
 **Benefits of Using Variables and Secrets:**
 - ✅ **Secure Storage**: Sensitive data encrypted by Cloudflare
@@ -831,15 +1002,17 @@ add_filter('ga4_purchase_data', function($purchase_data, $order) {
 - **🚫 Query Parameter Filtering**: Blocks suspicious parameters (cmd, exec, eval, etc.)
 
 **Cloudflare Worker Security:**
-- **🔑 JWT API Key Decryption**: Automatic detection and decryption of encrypted API keys
-- **🔐 Multiple Authentication Formats**: JWT, Base64, and plain text API key support
+- **🔑 Multi-Method Authentication**: Supports 4 transmission methods with varying security levels
+- **📡 Automatic Method Detection**: Headers-based transmission method identification
+- **🔐 JWT API Key Decryption**: Automatic detection and decryption of encrypted API keys
 - **🌍 Domain Whitelisting**: Configurable allowed domains with origin validation
-- **⚡ Advanced Rate Limiting**: Configurable requests per IP per time window
+- **⚡ Adaptive Rate Limiting**: Method-specific rate limiting (basic to advanced)
 - **📏 Payload Size Validation**: Prevents oversized requests (default: 50KB max)
 - **🔒 CORS Protection**: Explicit header allowlisting with secure defaults
 - **🤖 Multi-Layer Bot Detection**: Comprehensive filtering with behavioral analysis and scoring
 - **🚫 IP Reputation Filtering**: Cloudflare threat score integration
 - **🔍 Request Pattern Analysis**: Suspicious header and behavior detection
+- **🎯 Method-Specific Validation**: Security checks tailored to transmission method
 
 ### 🔒 **Client-Side Privacy**
 - **📋 Consent Mode v2**: Google's latest consent framework implementation

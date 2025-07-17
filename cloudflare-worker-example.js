@@ -56,7 +56,7 @@ const BOT_LOG_ENABLED = true; // Set to false to disable bot logging
 // These are loaded from Cloudflare Variables and Secrets - DO NOT HARDCODE
 const RATE_LIMIT_REQUESTS = 100; // Max requests per IP per minute
 const RATE_LIMIT_WINDOW = 60; // Rate limit window in seconds
-const MAX_PAYLOAD_SIZE = 50000; // Max payload size in bytes (50KB)
+const MAX_PAYLOAD_SIZE = 1000000; // Max payload size in bytes (50KB)
 const REQUIRE_API_KEY = true; // Set to true to require API key authentication
 
 // JWT Encryption Configuration
