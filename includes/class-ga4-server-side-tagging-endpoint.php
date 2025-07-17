@@ -613,9 +613,9 @@ class GA4_Server_Side_Tagging_Endpoint
                 return new \WP_REST_Response(array('error' => 'Invalid request data'), 400);
             }
 
-            // Support both single events and batch events
+            // Support unified batch structure for both single events and batch events
             if (isset($request_data['events']) && is_array($request_data['events'])) {
-                // Already a batch request - validate it
+                // Unified batch structure - validate it
                 if (empty($request_data['events'])) {
                     return new \WP_REST_Response(array('error' => 'Empty events array'), 400);
                 }
@@ -636,22 +636,42 @@ class GA4_Server_Side_Tagging_Endpoint
                     }
                 }
                 
+                // Consent data should already be at request level for unified structure
+                $this->logger->info("Unified batch structure received: " . count($request_data['events']) . " event(s) - Batch flag: " . ($request_data['batch'] ?? 'not set') . " - Has consent: " . (isset($request_data['consent']) ? 'yes' : 'no') . " - IP: {$client_ip}");
+                
             } elseif (isset($request_data['event_name']) || isset($request_data['name'])) {
-                // Single event request - convert to batch format
+                // Legacy single event format - convert to unified batch structure
                 $event_name = $request_data['event_name'] ?? $request_data['name'];
                 $event_params = $request_data['params'] ?? $request_data;
                 
-                // Remove event-level fields from params
-                unset($event_params['event_name'], $event_params['name'], $event_params['consent']);
+                // Preserve consent data from root level or params level
+                $consent_data = null;
+                if (isset($request_data['consent'])) {
+                    $consent_data = $request_data['consent'];
+                } elseif (isset($event_params['consent'])) {
+                    $consent_data = $event_params['consent'];
+                }
                 
-                $request_data['events'] = array(
-                    array(
-                        'name' => $event_name,
-                        'params' => $event_params,
-                        'isCompleteData' => true,
-                        'timestamp' => $request_data['timestamp'] ?? time() * 1000
-                    )
+                // Remove event-level fields from params to avoid duplication
+                unset($event_params['event_name'], $event_params['name'], $event_params['consent'], $event_params['timestamp']);
+                
+                $single_event = array(
+                    'name' => $event_name,
+                    'params' => $event_params,
+                    'isCompleteData' => true,
+                    'timestamp' => $request_data['timestamp'] ?? time() * 1000
                 );
+                
+                // Convert to unified batch structure
+                $request_data['events'] = array($single_event);
+                $request_data['batch'] = false;
+                
+                // Preserve consent data at request level
+                if ($consent_data) {
+                    $request_data['consent'] = $consent_data;
+                }
+                
+                $this->logger->info("Legacy single event converted to unified batch format: {$event_name} - Params: " . count($event_params) . " - Has consent: " . ($consent_data ? 'yes' : 'no') . " - IP: {$client_ip}");
                 
             } else {
                 return new \WP_REST_Response(array('error' => 'Missing events array or single event data'), 400);
@@ -659,17 +679,22 @@ class GA4_Server_Side_Tagging_Endpoint
 
             // Validate consent data (optional for debugging)
             if (!isset($request_data['consent'])) {
-                $this->logger->warning("Missing consent data - using default DENIED consent");
+                $this->logger->warning("Missing consent data - using default DENIED consent - IP: {$client_ip} - Session: {$session_id} - Events: " . count($request_data['events']) . " - First: " . ($request_data['events'][0]['name'] ?? 'unknown') . " - Keys: " . implode(',', array_keys($request_data)) . " - Has params consent: " . (isset($request_data['events'][0]['params']['consent']) ? 'yes' : 'no'));
                 $request_data['consent'] = array(
                     'analytics_storage' => 'DENIED',
                     'ad_storage' => 'DENIED',
                     'consent_mode' => 'DENIED',
                     'consent_reason' => 'missing_data'
                 );
+            } else {
+                $this->logger->info("Consent data found - Analytics: " . ($request_data['consent']['analytics_storage'] ?? 'unknown') . " - Ads: " . ($request_data['consent']['ad_storage'] ?? 'unknown') . " - Reason: " . ($request_data['consent']['consent_reason'] ?? 'unknown') . " - IP: {$client_ip}");
             }
 
-            // Log batch info
+            // Log batch info with type distinction
             $event_count = count($request_data['events']);
+            $event_type = $event_count === 1 ? 'single_event' : 'batch_events';
+            
+            $this->logger->info("Processing {$event_type}: {$event_count} event(s) - IP: {$client_ip} - Session: {$session_id} - First event: " . ($request_data['events'][0]['name'] ?? 'unknown'));
 
             // Get configuration from database
             $cloudflare_url = get_option('ga4_cloudflare_worker_url', '');

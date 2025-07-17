@@ -72,53 +72,12 @@
     },
 
     /**
-     * Setup page unload listener to send batch events when user leaves
+     * Setup page unload listener - REMOVED: No longer needed with immediate event sending
+     * Events are now sent immediately when consent is available
      */
     setupPageUnloadListener: function() {
-      var self = this;
-      // Handle page visibility changes (mobile browsers, tab switching)
-      document.addEventListener('visibilitychange', function() {
-        if (document.visibilityState === 'hidden') {
-          self.log("📤 VISIBILITYCHANGE hidden - sending batch events", {
-            eventQueueLength: self.eventQueue?.length || 0,
-            consentGiven: self.consentGiven,
-            visibilityState: document.visibilityState
-          });
-          self.sendBatchEvents(true); // Critical event
-        }
-      });
-
-      // Send batches when user is leaving the page
-      window.addEventListener('beforeunload', function() {
-        self.log("📤 BEFOREUNLOAD triggered - sending batch events", {
-          eventQueueLength: self.eventQueue?.length || 0,
-          consentGiven: self.consentGiven
-        });
-        self.sendBatchEvents(true); // Critical event
-      });
-      
-      // Handle page freeze/resume (modern browsers)
-      window.addEventListener('pagehide', function() {
-        self.log("📤 PAGEHIDE triggered - sending batch events", {
-          eventQueueLength: self.eventQueue?.length || 0,
-          consentGiven: self.consentGiven
-        });
-        self.sendBatchEvents(true); // Critical event
-      });
-      
-      // Handle page restoration from cache (Back/Forward Cache)
-      window.addEventListener('pageshow', function(event) {
-        if (event.persisted) {
-          self.log("📄 PAGESHOW (persisted) - page restored from cache", {
-            persisted: event.persisted,
-            eventQueueLength: self.eventQueue?.length || 0,
-            consentGiven: self.consentGiven
-          });
-          // Don't send batch events on page restore, just log for debugging
-        }
-      });
-
-      this.log("👂 Page unload listeners configured for batch event sending");
+      this.log("👂 Page unload listeners removed - using immediate event sending with consent");
+      // No unload listeners needed - events are sent immediately when consent is available
     },
     
 
@@ -138,27 +97,42 @@
 
     /**
      * Check if an event should be sent or queued
-     * NEW BEHAVIOR: Always queue events - never send immediately
+     * NEW BEHAVIOR: Only queue if consent not given, otherwise send immediately
      * @param {string} eventName - The event name
      * @param {Object} eventParams - The basic event parameters
      * @param {Object} completeEventData - The complete event data with all context (optional)
-     * @returns {boolean} - Always false to queue events
+     * @returns {boolean} - True if event should be sent immediately, false if queued
      */
     shouldSendEvent: function(eventName, eventParams, completeEventData) {
       this.log("🔍 shouldSendEvent called", {
         eventName: eventName,
         hasCompleteData: !!completeEventData,
+        consentGiven: this.consentGiven,
         currentQueueLength: this.eventQueue.length
       });
       
-      // NEW: Always queue events regardless of consent status
+      // If consent is already given, send immediately
+      if (this.consentGiven) {
+        this.log("✅ Consent given - sending event immediately", {
+          eventName: eventName,
+          consentStatus: this.consentStatus
+        });
+        return true; // Send immediately
+      }
+      
+      // No consent yet - queue the event
+      this.log("⏳ No consent yet - queuing event", {
+        eventName: eventName,
+        currentQueueLength: this.eventQueue.length
+      });
+      
       // Queue the event with complete data if available (async operation)
       if (completeEventData) {
         this.queueEvent(eventName, completeEventData, true); // true = isCompleteData
       } else {
         this.queueEvent(eventName, eventParams, false); // false = basicParams only
       }
-      return false; // Always queue, never send immediately
+      return false; // Queue until consent
     },
 
     /**
@@ -221,8 +195,7 @@
         isCompleteData: true
       });
       
-      // Check if batch size limit reached and send automatically
-      this.checkBatchSizeLimit();
+      // No batch size limit check needed - events are only queued until consent is given
     },
 
     /**
@@ -348,22 +321,32 @@
     },
 
     /**
-     * Process all queued events (NEW: no longer sends events, just marks consent as ready)
+     * Process all queued events immediately when consent is granted
+     * NEW: Send all queued events as a single batch using sendBeacon for reliability
      */
     processQueuedEvents: function() {
       // Get events directly from userData storage
       var userData = GA4Utils.storage.getUserData();
       var batchEvents = userData.batchEvents || [];
       
-      // NEW BEHAVIOR: Don't send events immediately
-      // Just ensure that consent tracking instances are notified
+      if (!batchEvents || batchEvents.length === 0) {
+        this.log("📋 No queued events to process");
+        return;
+      }
+      
+      this.log("🚀 Processing queued events as batch immediately with consent", {
+        queuedEvents: batchEvents.length,
+        consentStatus: this.consentStatus
+      });
+      
+      // Send all queued events as a single batch using reliable method (sendBeacon)
+      // Note: sendBatchEvents will handle queue clearing after successful send
+      this.sendBatchEvents(true); // true = critical (use sendBeacon)
+      
+      // Notify tracking instances that consent is ready
       if (typeof GA4ServerSideTagging !== 'undefined' && GA4ServerSideTagging.onConsentReady) {
         GA4ServerSideTagging.onConsentReady();
       }
-      
-      this.log("📋 Events remain queued for batch sending on page unload", {
-        queuedEvents: batchEvents.length
-      });
     },
 
     /**
@@ -1419,6 +1402,9 @@
           security_storage: consent.security_storage
         });
       }
+
+      // Process queued events now that consent is determined
+      this.processQueuedEvents();
 
       // Trigger custom event for other scripts to listen to
       $(document).trigger('ga4ConsentUpdated', [consent]);

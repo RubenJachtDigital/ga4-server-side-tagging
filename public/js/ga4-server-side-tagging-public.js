@@ -1317,194 +1317,12 @@
     },
 
     /**
-     * Setup page unload listener to send batch events when user leaves the entire website
+     * Setup page unload listener - REMOVED: No longer needed with immediate event sending
+     * Events are now sent immediately when consent is available
      */
     setupPageUnloadListener: function() {
-      var self = this;
-      var isLeavingWebsite = false;
-      var lastClickedLink = null;
-      var navigationDestination = null;
-      var lastClickTime = 0;
-      
-      // Track link clicks to detect internal vs external navigation
-      document.addEventListener('click', function(e) {
-        var target = e.target;
-        var link = target.closest('a');
-        
-        if (link && link.href) {
-          lastClickedLink = link;
-          navigationDestination = link.href;
-          lastClickTime = Date.now();
-          
-          // Log the clicked link for debugging
-          self.log("🔗 Link clicked", {
-            href: link.href,
-            isInternal: self.isInternalUrl(link.href),
-            target: link.target,
-            timestamp: Date.now()
-          });
-        }
-      });
-      
-      // Handle beforeunload - only send events if not internal navigation
-      window.addEventListener('beforeunload', function() {
-          var shouldSendBatch = self.shouldSendBatchOnUnload(navigationDestination, lastClickTime);
-          
-          if (shouldSendBatch) {
-            isLeavingWebsite = true;
-            self.log("📤 BEFOREUNLOAD triggered - user leaving website, sending batch events", {
-              destination: navigationDestination,
-              isInternal: navigationDestination ? self.isInternalUrl(navigationDestination) : 'unknown',
-              lastClickTime: lastClickTime
-            });
-            self.sendBatchEventsOnUnload();
-          } else {
-            self.log("🔄 BEFOREUNLOAD triggered - internal navigation detected, NOT sending batch events", {
-              destination: navigationDestination,
-              isInternal: navigationDestination ? self.isInternalUrl(navigationDestination) : 'unknown',
-              lastClickTime: lastClickTime
-            });
-          }
-      });
-      
-      // Handle page visibility changes - only for tab switching/closing, not internal navigation
-      document.addEventListener('visibilitychange', function() {
-        if (document.visibilityState === 'hidden') {
-          // Add a small delay to distinguish between tab switching and internal navigation
-          setTimeout(function() {
-            if (document.visibilityState === 'hidden') {
-              var shouldSendBatch = self.shouldSendBatchOnUnload(navigationDestination, lastClickTime);
-              
-              if (shouldSendBatch) {
-                isLeavingWebsite = true;
-                self.log("📤 VISIBILITYCHANGE hidden - user likely left website, sending batch events", {
-                  visibilityState: document.visibilityState,
-                  destination: navigationDestination,
-                  isInternal: navigationDestination ? self.isInternalUrl(navigationDestination) : 'unknown',
-                  lastClickTime: lastClickTime
-                });
-                self.sendBatchEventsOnUnload();
-              } else {
-                self.log("🔄 VISIBILITYCHANGE hidden - internal navigation detected, NOT sending batch events", {
-                  visibilityState: document.visibilityState,
-                  destination: navigationDestination,
-                  isInternal: navigationDestination ? self.isInternalUrl(navigationDestination) : 'unknown',
-                  lastClickTime: lastClickTime
-                });
-              }
-            }
-          }, 100); // Small delay to let internal navigation complete
-        }
-      });
-      
-      // Handle page freeze/resume - only if not internal navigation
-      window.addEventListener('pagehide', function() {
-          var shouldSendBatch = self.shouldSendBatchOnUnload(navigationDestination, lastClickTime);
-          
-          if (shouldSendBatch) {
-            isLeavingWebsite = true;
-            self.log("📤 PAGEHIDE triggered - user leaving website, sending batch events", {
-              destination: navigationDestination,
-              isInternal: navigationDestination ? self.isInternalUrl(navigationDestination) : 'unknown',
-              lastClickTime: lastClickTime
-            });
-            self.sendBatchEventsOnUnload();
-          } else {
-            self.log("🔄 PAGEHIDE triggered - internal navigation detected, NOT sending batch events", {
-              destination: navigationDestination,
-              isInternal: navigationDestination ? self.isInternalUrl(navigationDestination) : 'unknown',
-              lastClickTime: lastClickTime
-            });
-          }
-      });
-
-      this.log("👂 Page unload listeners configured for batch event sending (external navigation and tab close only)");
-    },
-
-    /**
-     * Check if a URL is internal (same domain) or external
-     */
-    isInternalUrl: function(url) {
-      if (!url) return false;
-      
-      try {
-        var urlObject = new URL(url, window.location.origin);
-        var currentHost = window.location.hostname;
-        var targetHost = urlObject.hostname;
-        
-        // Check if the domains match (including subdomains)
-        return targetHost === currentHost;
-      } catch (e) {
-        this.log("Error parsing URL for internal check:", e);
-        return false;
-      }
-    },
-    
-    /**
-     * Determine if batch events should be sent on page unload
-     * Only send if:
-     * - Navigation destination is external
-     * - No navigation destination (tab close/refresh) AND no recent internal link click
-     */
-    shouldSendBatchOnUnload: function(navigationDestination, lastClickTime) {
-      var now = Date.now();
-      var recentClickThreshold = 1000; // 1 second
-      
-      // If we have a navigation destination, check if it's internal or external
-      if (navigationDestination) {
-        // Check if we're already on the destination page (navigation completed)
-        if (navigationDestination === window.location.href) {
-          this.log("🔄 Already on destination page, not sending batch", {
-            destination: navigationDestination,
-            currentUrl: window.location.href
-          });
-          return false;
-        }
-        
-        // If destination is internal, don't send batch
-        if (this.isInternalUrl(navigationDestination)) {
-          this.log("🔄 Internal navigation detected, not sending batch", {
-            destination: navigationDestination
-          });
-          return false;
-        }
-        
-        // If destination is external, send batch
-        this.log("🌍 External navigation detected, sending batch", {
-          destination: navigationDestination
-        });
-        return true;
-      }
-      
-      // No navigation destination detected
-      // Check if there was a recent click (might be internal navigation)
-      if (lastClickTime && (now - lastClickTime) < recentClickThreshold) {
-        this.log("🔄 Recent click detected, likely internal navigation, not sending batch", {
-          clickAge: now - lastClickTime,
-          threshold: recentClickThreshold
-        });
-        return false;
-      }
-      
-      // No recent click, assume tab close/refresh
-      this.log("❓ No navigation destination or recent click, assuming tab close/refresh", {
-        destination: navigationDestination,
-        lastClickTime: lastClickTime
-      });
-      return true;
-    },
-
-    /**
-     * Send batch events on page unload - uses consent manager if available
-     */
-    sendBatchEventsOnUnload: function() {
-      // If consent manager is available, use its sendBatchEvents method with critical flag
-      if (window.GA4ConsentManager && typeof window.GA4ConsentManager.sendBatchEvents === 'function') {
-        window.GA4ConsentManager.sendBatchEvents(true); // true = critical event
-      } else {
-        // Fallback: if no consent manager, we can't send events as they would be queued there
-        this.log("⚠️ No consent manager available for batch event sending");
-      }
+      this.log("👂 Page unload listeners removed - using immediate event sending with consent");
+      // No unload listeners needed - events are sent immediately when consent is available
     },
 
     // Setup scroll depth tracking
@@ -2730,7 +2548,7 @@
         var criticalEvents = ['page_view', 'custom_session_start', 'custom_first_visit'];
         
         if (criticalEvents.includes(eventName) && hasCompleteData) {
-          // eventParams already contains complete session data - queue it directly
+          // eventParams already contains complete session data - check if should send immediately
           var shouldSend = window.GA4ConsentManager.shouldSendEvent(eventName, eventParams, eventParams);
           
           if (!shouldSend) {
@@ -2742,6 +2560,11 @@
               currentPageLocation: window.location.href
             });
             return; // Event was queued with complete data
+          } else {
+            // Send immediately with sendBeacon for reliability
+            this.log("✅ Consent available - sending critical event immediately: " + eventName);
+            this.sendServerSideEventReliable(eventName, eventParams, true); // true = critical
+            return;
           }
         } else {
           // Regular processing for non-critical events or events without complete data
@@ -2750,13 +2573,12 @@
           if (!shouldSend) {
             this.log("Event queued by consent manager: " + eventName);
             return; // Event was queued, don't send now
+          } else {
+            // Send immediately with sendBeacon for reliability
+            this.log("✅ Consent available - sending event immediately: " + eventName);
+            this.sendServerSideEventReliable(eventName, eventParams, false); // false = not critical
+            return;
           }
-        }
-        
-        // Consent manager says we can send, ensure our flag is also set
-        if (!this.consentReady) {
-          this.log("🔧 Consent manager says send, updating consentReady flag");
-          this.consentReady = true;
         }
       } else if (!this.consentReady) {
         this.log("Consent not ready, skipping event: " + eventName, {
@@ -2766,7 +2588,7 @@
         return;
       }
 
-      // Send the event
+      // Fallback: Send the event normally if no consent manager
       this.trackEventInternal(eventName, eventParams);
     },
 
@@ -2993,6 +2815,226 @@
         });
         
         this.sendAjaxPayload(null, data);
+      }
+    },
+
+    /**
+     * Send single event immediately using reliable method (sendBeacon)
+     * @param {string} eventName - The event name
+     * @param {Object} eventParams - Event parameters
+     * @param {boolean} isCritical - Whether this is a critical event
+     */
+    sendServerSideEventReliable: async function(eventName, eventParams, isCritical = false) {
+      try {
+        // Use existing sendServerSideEvent logic but with reliable transmission
+        this.log("🚨 Sending event with reliable method: " + eventName, {
+          eventName: eventName,
+          isCritical: isCritical,
+          payloadSizeEstimate: JSON.stringify(eventParams).length + " bytes"
+        });
+        
+        // Create a copy of the event params
+        var params = JSON.parse(JSON.stringify(eventParams));
+        var session = GA4Utils.session.get();
+
+        // Get consent data from consent manager
+        var consentData = null;
+        if (window.GA4ConsentManager && typeof window.GA4ConsentManager.getConsentForServerSide === 'function') {
+          consentData = window.GA4ConsentManager.getConsentForServerSide();
+        } else {
+          // Fallback to GA4Utils
+          consentData = GA4Utils.consent.getForServerSide();
+        }
+
+        this.log("Current consent status for reliable event", consentData);
+
+        // Add user ID if available and consent allows
+        if (!params.hasOwnProperty("user_id") && this.config.user_id) {
+          if (consentData.analytics_storage === "GRANTED") {
+            params.user_id = this.config.user_id;
+          }
+        }
+
+        // Add session information
+        if (!params.hasOwnProperty("session_id")) {
+          params.session_id = session.id;
+        }
+        if (!params.hasOwnProperty("session_count")) {
+          params.session_count = session.sessionCount;
+        }
+        if (!params.hasOwnProperty("engagement_time_msec")) {
+          params.engagement_time_msec = GA4Utils.time.calculateEngagementTime(
+            session.start
+          );
+        }
+
+        // Handle location data based on consent
+        this.log("📍 Adding location data with consent");
+        await this.addLocationDataWithConsent(params, consentData);
+        this.log("✅ Location data added successfully");
+
+        // Get client ID (handle consent-based anonymization)
+        var clientId = this.getConsentAwareClientId(consentData);
+        if (clientId) {
+          params.client_id = clientId;
+          this.log("Using client ID: " + clientId);
+        }
+
+        // Bot detection removed - not needed for immediate reliable sending
+        
+        // Prepare event data
+        this.log("📦 Preparing event data");
+        var data = {
+          name: eventName,
+          params: params,
+          consent: consentData,
+          clientId: clientId,
+          timestamp: Date.now()
+        };
+
+        // Send with reliable method
+        const transmissionMethod = this.config.transmissionMethod || 'secure_wp_to_cf';
+        
+        this.log("🚀 Sending reliable event via " + transmissionMethod, {
+          eventName: eventName,
+          transmissionMethod: transmissionMethod,
+          consent: consentData,
+          isCritical: isCritical
+        });
+
+        if (transmissionMethod === 'direct_to_cf' && this.config.cloudflareWorkerUrl) {
+          this.log("⚡ Direct to Cloudflare reliable transmission");
+          await this.sendEventToCloudflareReliable(data, isCritical);
+        } else if (transmissionMethod === 'wp_endpoint_to_cf' && this.config.cloudflareWorkerUrl) {
+          this.log("🛡️ WP Bot Check before sending to CF reliable transmission");
+          await this.sendEventViaWordPressReliable(data, false, isCritical);
+        } else {
+          this.log("🔒 Secure WordPress to Cloudflare reliable transmission");
+          await this.sendEventViaWordPressReliable(data, true, isCritical);
+        }
+      } catch (error) {
+        this.log("❌ Error in sendServerSideEventReliable", {
+          eventName: eventName,
+          error: error.message,
+          stack: error.stack
+        });
+        // Fallback to regular tracking
+        this.log("🔄 Falling back to regular event tracking");
+        this.trackEventInternal(eventName, eventParams);
+      }
+    },
+
+    /**
+     * Send single event to Cloudflare using reliable method
+     * @param {Object} eventData - The event data
+     * @param {boolean} isCritical - Whether this is a critical event
+     */
+    sendEventToCloudflareReliable: async function(eventData, isCritical = false) {
+      if (!this.config.cloudflareWorkerUrl) {
+        this.log("❌ Cloudflare Worker URL not configured for reliable transmission");
+        return;
+      }
+
+      try {
+        // Format event data using batch payload structure
+        var payloadData = {
+          batch: false, // Mark as single event
+          events: [
+            {
+              name: eventData.name,
+              params: eventData.params || {},
+              isCompleteData: true,
+              timestamp: eventData.timestamp || Date.now()
+            }
+          ],
+          consent: eventData.consent || {},
+          timestamp: eventData.timestamp || Date.now()
+        };
+        
+        await GA4Utils.ajax.sendPayloadReliable(
+          this.config.cloudflareWorkerUrl,
+          payloadData,
+          this.config,
+          "[GA4 Reliable Event CF]",
+          isCritical
+        );
+        this.log("✅ Single event sent reliably to Cloudflare Worker (batch structure)", {
+          eventName: eventData.name,
+          isCritical: isCritical,
+          hasConsent: !!(eventData.consent)
+        });
+      } catch (error) {
+        this.log("❌ Reliable event sending failed", error);
+      }
+    },
+
+    /**
+     * Send single event via WordPress using reliable method
+     * @param {Object} eventData - The event data
+     * @param {boolean} withEncryption - Whether to use encryption
+     * @param {boolean} isCritical - Whether this is a critical event
+     */
+    sendEventViaWordPressReliable: async function(eventData, withEncryption = false, isCritical = false) {
+      var endpoint = this.config.apiEndpoint + '/send-events';
+
+      if (!endpoint || !this.config.apiEndpoint) {
+        this.log("❌ WordPress endpoint not configured for reliable transmission", {
+          apiEndpoint: this.config.apiEndpoint,
+          endpoint: endpoint
+        });
+        return;
+      }
+
+      try {
+        // Format the event data for WordPress endpoint using batch payload structure
+        var payloadData = {
+          batch: false, // Mark as single event
+          events: [
+            {
+              name: eventData.name,
+              params: eventData.params || {},
+              isCompleteData: true,
+              timestamp: eventData.timestamp || Date.now()
+            }
+          ],
+          consent: eventData.consent || {},
+          timestamp: eventData.timestamp || Date.now()
+        };
+        
+        this.log("📤 Sending single event via WordPress endpoint (batch structure)", {
+          endpoint: endpoint,
+          eventName: eventData.name,
+          withEncryption: withEncryption,
+          isCritical: isCritical,
+          hasConsent: !!(eventData.consent),
+          payloadSize: JSON.stringify(payloadData).length + ' bytes'
+        });
+        
+        // Create a modified config with encryption enabled if needed
+        var configWithEncryption = JSON.parse(JSON.stringify(this.config));
+        if (withEncryption) {
+          configWithEncryption.encryptionEnabled = true;
+          
+          this.log("🔒 Enabling encryption for reliable transmission", {
+            encryptionEnabled: true
+          });
+        }
+        
+        await GA4Utils.ajax.sendPayloadReliable(
+          endpoint,
+          payloadData,
+          configWithEncryption,
+          "[GA4 Reliable Event WP]",
+          isCritical
+        );
+        this.log("✅ Single event sent reliably via WordPress (batch structure)", {
+          eventName: eventData.name,
+          isCritical: isCritical,
+          withEncryption: withEncryption,
+          hasConsent: !!(eventData.consent)
+        });
+      } catch (error) {
+        this.log("❌ Reliable event sending via WordPress failed", error);
       }
     },
 

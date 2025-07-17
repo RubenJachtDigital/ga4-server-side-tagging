@@ -2306,12 +2306,36 @@
               return Promise.reject(new Error("Security validation failed: " + securityValidation.reason));
             }
 
-            // Prepare headers for sendBeacon (limited header support)
-            const beaconData = new Blob([JSON.stringify(payload)], { type: 'application/json' });
+            // Prepare payload for sendBeacon (handle encryption if enabled)
+            let beaconPayload = payload;
+            
+            // Check if encryption is enabled for send-events endpoint
+            if (endpoint.includes('/send-events') && config.encryptionEnabled) {
+              try {
+                // Generate time-based JWT token for sendBeacon
+                const timeBasedJWT = await GA4Utils.encryption.createSelfGeneratedTimeBasedJWT(payload);
+                
+                beaconPayload = {
+                  time_jwt: timeBasedJWT
+                };
+                
+                GA4Utils.helpers.log("🔐 Payload encrypted with self-generated time-based JWT for sendBeacon", {
+                  jwt_length: timeBasedJWT.length
+                }, config, logPrefix);
+              } catch (encryptionError) {
+                GA4Utils.helpers.log("⚠️ Encryption failed for sendBeacon, sending unencrypted", {
+                  error: encryptionError.message
+                }, config, logPrefix);
+                // Continue with original payload if encryption fails
+              }
+            }
+            
+            const beaconData = new Blob([JSON.stringify(beaconPayload)], { type: 'application/json' });
             
             GA4Utils.helpers.log("🚨 Critical event detected - attempting sendBeacon", {
               endpoint: endpoint,
-              payloadSize: JSON.stringify(payload).length,
+              payloadSize: JSON.stringify(beaconPayload).length,
+              encrypted: endpoint.includes('/send-events') && config.encryptionEnabled,
               timestamp: new Date().toISOString()
             }, config, logPrefix);
             
@@ -2321,7 +2345,8 @@
             if (beaconSent) {
               GA4Utils.helpers.log("✅ Critical event sent successfully via sendBeacon", {
                 endpoint: endpoint,
-                payloadSize: JSON.stringify(payload).length,
+                payloadSize: JSON.stringify(beaconPayload).length,
+                encrypted: endpoint.includes('/send-events') && config.encryptionEnabled,
                 timestamp: new Date().toISOString()
               }, config, logPrefix);
               
@@ -2356,12 +2381,37 @@
           // If both methods fail for critical events, try one more time with sendBeacon
           if (isCritical && navigator.sendBeacon) {
             try {
-              const beaconData = new Blob([JSON.stringify(payload)], { type: 'application/json' });
+              // Prepare payload for final sendBeacon attempt (handle encryption if enabled)
+              let finalBeaconPayload = payload;
+              
+              // Check if encryption is enabled for send-events endpoint
+              if (endpoint.includes('/send-events') && config.encryptionEnabled) {
+                try {
+                  // Generate time-based JWT token for final sendBeacon attempt
+                  const timeBasedJWT = await GA4Utils.encryption.createSelfGeneratedTimeBasedJWT(payload);
+                  
+                  finalBeaconPayload = {
+                    time_jwt: timeBasedJWT
+                  };
+                  
+                  GA4Utils.helpers.log("🔐 Final attempt: Payload encrypted with JWT for sendBeacon", {
+                    jwt_length: timeBasedJWT.length
+                  }, config, logPrefix);
+                } catch (encryptionError) {
+                  GA4Utils.helpers.log("⚠️ Final attempt: Encryption failed, sending unencrypted", {
+                    error: encryptionError.message
+                  }, config, logPrefix);
+                  // Continue with original payload if encryption fails
+                }
+              }
+              
+              const beaconData = new Blob([JSON.stringify(finalBeaconPayload)], { type: 'application/json' });
               const lastAttempt = navigator.sendBeacon(endpoint, beaconData);
               
               if (lastAttempt) {
                 GA4Utils.helpers.log("✅ Critical event sent on final sendBeacon attempt", {
                   endpoint: endpoint,
+                  encrypted: endpoint.includes('/send-events') && config.encryptionEnabled,
                   timestamp: new Date().toISOString()
                 }, config, logPrefix);
                 
