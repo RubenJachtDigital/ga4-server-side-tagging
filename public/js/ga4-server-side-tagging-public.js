@@ -2938,7 +2938,7 @@
       try {
         // Format event data using batch payload structure
         var payloadData = {
-          batch: false, // Mark as single event
+          batch: true, // Mark as batch event
           events: [
             {
               name: eventData.name,
@@ -2988,7 +2988,7 @@
       try {
         // Format the event data for WordPress endpoint using batch payload structure
         var payloadData = {
-          batch: false, // Mark as single event
+          batch: true, // Mark as batch event
           events: [
             {
               name: eventData.name,
@@ -3124,7 +3124,7 @@
           // Prepare headers for the request
           const headers = {
             'Content-Type': 'application/json',
-            'X-Simple-request': 'true'
+            'X-Simple-Request': 'true'
           };
           
           // Add X-WP-Nonce header if we have a nonce (for wp_endpoint_to_cf method)
@@ -3479,7 +3479,7 @@
         // Prepare headers for the request
         const headers = {
           'Content-Type': 'application/json',
-          'X-Simple-request': 'true'
+          'X-Simple-Request': 'true'
         };
         
         // Add X-WP-Nonce header if we have a nonce (for wp_endpoint_to_cf method)
@@ -3492,8 +3492,17 @@
           method: 'POST',
           headers: headers,
           body: JSON.stringify({
-            event_name: payload.name,
-            params: payload.params || {}
+            batch: true,
+            events: [
+              {
+                name: payload.name,
+                params: payload.params || {},
+                isCompleteData: true,
+                timestamp: Date.now()
+              }
+            ],
+            consent: payload.consent || {},
+            timestamp: Date.now()
           }),
           keepalive: true // Important for page unload
         });
@@ -3569,8 +3578,17 @@
         return await GA4Utils.ajax.sendPayloadFetch(
           sendEventEndpoint,
           {
-            event_name: payload.name,
-            params: payload.params || {}
+            batch: true,
+            events: [
+              {
+                name: payload.name,
+                params: payload.params || {},
+                isCompleteData: true,
+                timestamp: Date.now()
+              }
+            ],
+            consent: payload.consent || {},
+            timestamp: Date.now()
           },
           this.config,
           "[GA4 Server-Side Tagging]"
