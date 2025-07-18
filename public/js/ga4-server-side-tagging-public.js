@@ -1141,7 +1141,6 @@
       this.setupContactTracking();
       this.setupSocialTracking();
       this.setupButtonTracking();
-      this.setupVisibilityTracking();
       this.setupPageUnloadListener();
     },
 
@@ -1299,22 +1298,6 @@
       });
     },
 
-    /**
-     * Setup visibility tracking
-     */
-    setupVisibilityTracking: function () {
-      var self = this;
-
-      document.addEventListener("visibilitychange", function () {
-        if (document.hidden) {
-          self.trackEvent("page_hidden", {
-            time_on_page: Date.now() - self.pageStartTime,
-          });
-        } else {
-          self.trackEvent("page_visible", {});
-        }
-      });
-    },
 
     /**
      * Setup page unload listener - REMOVED: No longer needed with immediate event sending
