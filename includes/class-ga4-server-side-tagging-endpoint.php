@@ -678,8 +678,6 @@ class GA4_Server_Side_Tagging_Endpoint
             if (!isset($request_data['consent'])) {
                 $this->logger->warning("Missing consent data - using default DENIED consent - IP: {$client_ip} - Session: {$session_id} - Events: " . count($request_data['events']) . " - First: " . ($request_data['events'][0]['name'] ?? 'unknown') . " - Keys: " . implode(',', array_keys($request_data)) . " - Has params consent: " . (isset($request_data['events'][0]['params']['consent']) ? 'yes' : 'no'));
                 $request_data['consent'] = array(
-                    'analytics_storage' => 'DENIED',
-                    'ad_storage' => 'DENIED',
                     'consent_mode' => 'DENIED',
                     'consent_reason' => 'missing_data'
                 );

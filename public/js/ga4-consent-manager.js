@@ -235,7 +235,7 @@
       var fetchReason = "pre_consent_queue";
       
       // Check current consent status for logging purposes
-      if (this.consentGiven && this.consentStatus && this.consentStatus.analytics_storage === "GRANTED") {
+      if (this.consentGiven && this.consentStatus && this.consentStatus.ad_user_data === "GRANTED") {
         fetchReason = "consent_granted";
       }
       
@@ -251,7 +251,7 @@
           this.log("🎯 Fetching precise location data for queue", {
             reason: fetchReason,
             consentGiven: this.consentGiven,
-            consentStatus: this.consentStatus?.analytics_storage || "unknown"
+            consentStatus: this.consentStatus?.ad_user_data || "unknown"
           });
           
           // Get location data from tracking instance if available
@@ -1280,18 +1280,18 @@
      */
     handleConsentGiven: function (reason = 'button_click') {
       // Prevent duplicate processing if consent is already GRANTED
-      if (this.consentProcessed && this.consentGiven && this.consentStatus && this.consentStatus.analytics_storage === 'GRANTED') {
+      if (this.consentProcessed && this.consentGiven && this.consentStatus && this.consentStatus.ad_user_data === 'GRANTED') {
         this.log("⚠️ Consent already granted - ignoring duplicate consent given", {
           consentGiven: this.consentGiven,
           consentProcessed: this.consentProcessed,
-          currentStatus: this.consentStatus.analytics_storage,
+          currentStatus: this.consentStatus.ad_user_data,
           source: "Probably user clicked after auto-accept timeout"
         });
         return;
       }
       
       // Allow updates from DENIED to GRANTED
-      if (this.consentProcessed && this.consentStatus && this.consentStatus.analytics_storage === 'DENIED') {
+      if (this.consentProcessed && this.consentStatus && this.consentStatus.ad_user_data === 'DENIED') {
         this.log("🔄 Updating consent from DENIED to GRANTED");
         // Reset flags to allow update
         this.consentProcessed = false;
@@ -1301,15 +1301,9 @@
       this.clearConsentTimeout();
       
       var consent = {
-        analytics_storage: 'GRANTED',
-        ad_storage: 'GRANTED',
         ad_user_data: 'GRANTED',
         ad_personalization: 'GRANTED',
-        functionality_storage: 'GRANTED',
-        personalization_storage: 'GRANTED',
-        security_storage: 'GRANTED',
         consent_reason: reason,
-        timestamp: Date.now()
       };
 
       this.consentGiven = true;
@@ -1336,16 +1330,16 @@
      */
     handleConsentDenied: function (reason = 'button_click') {
       // Allow updates if consent was previously granted
-      if (this.consentProcessed && this.consentGiven && this.consentStatus && this.consentStatus.analytics_storage === 'DENIED') {
+      if (this.consentProcessed && this.consentGiven && this.consentStatus && this.consentStatus.ad_user_data === 'DENIED') {
         this.log("⚠️ Consent already denied - ignoring duplicate consent denied", {
           consentGiven: this.consentGiven,
           consentProcessed: this.consentProcessed,
-          currentStatus: this.consentStatus.analytics_storage
+          currentStatus: this.consentStatus.ad_user_data
         });
         return;
       }
       
-      if (this.consentProcessed && this.consentStatus && this.consentStatus.analytics_storage === 'GRANTED') {
+      if (this.consentProcessed && this.consentStatus && this.consentStatus.ad_user_data === 'GRANTED') {
         this.log("🔄 Updating consent from GRANTED to DENIED");
         // Reset flags to allow update
         this.consentProcessed = false;
@@ -1354,15 +1348,9 @@
       this.clearConsentTimeout();
       
       var consent = {
-        analytics_storage: 'DENIED',
-        ad_storage: 'DENIED',
         ad_user_data: 'DENIED',
         ad_personalization: 'DENIED',
-        functionality_storage: 'DENIED',
-        personalization_storage: 'DENIED',
-        security_storage: 'GRANTED',
         consent_reason: reason,
-        timestamp: Date.now()
       };
 
       this.consentGiven = true; // Allow events to be sent (but anonymized)
@@ -1392,15 +1380,13 @@
 
       // Update consent mode if enabled
       if (this.config.consentModeEnabled && typeof gtag === 'function') {
-        gtag('consent', 'update', {
-          analytics_storage: consent.analytics_storage,
-          ad_storage: consent.ad_storage,
+        // Create full consent object for Google Consent Mode
+        var fullConsent = {
           ad_user_data: consent.ad_user_data,
           ad_personalization: consent.ad_personalization,
-          functionality_storage: consent.functionality_storage,
-          personalization_storage: consent.personalization_storage,
-          security_storage: consent.security_storage
-        });
+        };
+        
+        gtag('consent', 'update', fullConsent);
       }
 
       // Process queued events now that consent is determined
@@ -1416,14 +1402,8 @@
     initializeConsentMode: function () {
       if (typeof gtag === 'function') {
         gtag('consent', 'default', {
-          analytics_storage: 'DENIED',
-          ad_storage: 'DENIED',
           ad_user_data: 'DENIED',
-          ad_personalization: 'DENIED',
-          functionality_storage: 'DENIED',
-          personalization_storage: 'DENIED',
-          security_storage: 'GRANTED',
-          wait_for_update: 30000 // Wait 30 seconds for consent update
+          ad_personalization: 'DENIED'
         });
 
         this.log("Google Consent Mode v2 initialized with denied defaults");
@@ -1478,37 +1458,23 @@
     },
 
     /**
-     * Get consent data formatted for server-side events
+     * Get consent data formatted for server-side events (GA4 only needs ad_user_data, ad_personalization, and consent_reason)
      */
     getConsentForServerSide: function () {
       var consent = this.consentStatus || this.getStoredConsent();
 
       if (!consent) {
         return {
-          analytics_storage: "DENIED",
-          ad_storage: "DENIED",
           ad_user_data: "DENIED",
           ad_personalization: "DENIED",
-          functionality_storage: "DENIED",
-          personalization_storage: "DENIED",
-          security_storage: "GRANTED",
-          consent_mode: "DENIED",
-          consent_timestamp: null,
-          consent_reason: "automatic_delay"
+          consent_reason: "no_consent"
         };
       }
 
       return {
-        analytics_storage: consent.analytics_storage || "DENIED",
-        ad_storage: consent.ad_storage || "DENIED",
         ad_user_data: consent.ad_user_data || "DENIED",
         ad_personalization: consent.ad_personalization || "DENIED",
-        functionality_storage: consent.functionality_storage || "DENIED",
-        personalization_storage: consent.personalization_storage || "DENIED",
-        security_storage: consent.security_storage || "GRANTED",
-        consent_mode: this.getConsentMode(),
-        consent_timestamp: consent.timestamp,
-        consent_reason: consent.consent_reason || "button_click"
+        consent_reason: consent.consent_reason || "unknown"
       };
     },
 
@@ -1517,7 +1483,7 @@
      */
     isAnalyticsAllowed: function () {
       var consent = this.getStoredConsent();
-      return consent && consent.analytics_storage === 'GRANTED';
+      return consent && consent.ad_user_data === 'GRANTED';
     },
 
     /**
@@ -1525,7 +1491,7 @@
      */
     isAdvertisingAllowed: function () {
       var consent = this.getStoredConsent();
-      return consent && consent.ad_storage === 'GRANTED';
+      return consent && (consent.ad_user_data === 'GRANTED' || consent.ad_personalization === 'GRANTED');
     },
 
     /**
@@ -1538,12 +1504,12 @@
         return 'UNKNOWN';
       }
       
-      if (consent.analytics_storage === 'GRANTED' && consent.ad_storage === 'GRANTED') {
+      if (consent.ad_user_data === 'GRANTED' && consent.ad_personalization === 'GRANTED') {
         return 'GRANTED';
-      } else if (consent.analytics_storage === 'DENIED' && consent.ad_storage === 'DENIED') {
+      } else if (consent.ad_user_data === 'DENIED' && consent.ad_personalization === 'DENIED') {
         return 'DENIED';
       } else {
-        return 'PARTIAL';
+        return 'DENIED';
       }
     },
 
@@ -1553,7 +1519,7 @@
     getConsentAwareClientId: function() {
       var consent = this.getConsentForServerSide();
       
-      if (consent.analytics_storage === "GRANTED") {
+      if (consent.ad_user_data === "GRANTED") {
         return GA4Utils.clientId.get();
       } else {
         // Use session-based client ID for denied consent
@@ -1569,7 +1535,7 @@
       var consent = this.getConsentForServerSide();
       var anonymizedParams = JSON.parse(JSON.stringify(params));
 
-      if (consent.analytics_storage === "DENIED") {
+      if (consent.ad_user_data === "DENIED") {
         // Remove/anonymize personal data
         delete anonymizedParams.user_id;
         
@@ -1586,7 +1552,7 @@
         delete anonymizedParams.geo_country;
       }
 
-      if (consent.ad_storage === "DENIED") {
+      if (consent.ad_user_data === "DENIED" && consent.ad_personalization === "DENIED") {
         // Remove advertising/attribution data
         delete anonymizedParams.gclid;
         delete anonymizedParams.content;
@@ -1632,15 +1598,8 @@
       this.log("🧪 TEST: Force enabling consent for testing (bypass normal flow)");
       this.consentGiven = true;
       this.consentStatus = {
-        analytics_storage: 'GRANTED',
-        ad_storage: 'GRANTED',
         ad_user_data: 'GRANTED',
         ad_personalization: 'GRANTED',
-        functionality_storage: 'GRANTED',
-        personalization_storage: 'GRANTED',
-        security_storage: 'GRANTED',
-        consent_reason: 'test_manual',
-        timestamp: Date.now()
       };
       this.log("🧪 TEST: Consent forced for testing - you can now test batch sending");
     },

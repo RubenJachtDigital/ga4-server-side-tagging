@@ -1044,7 +1044,7 @@ function logBotDetection(detection, request, payload) {
     timestamp: new Date().toISOString(),
     url: request.url,
     userAgent: getUserAgent(payload, request), // Log the actual UA being checked
-    consent_mode: payload.params?.consent?.analytics_storage || 'unknown'
+    consent_mode: payload.params?.consent?.ad_user_data || 'unknown'
   }));
 }
 
@@ -1751,8 +1751,8 @@ async function handleBatchEvents(batchPayload, request) {
           console.log("📋 Added batch consent to individual event:", {
             eventName: event.name,
             consentApplied: !!batchPayload.consent,
-            analyticsConsent: batchPayload.consent?.analytics_storage || 'unknown',
-            adConsent: batchPayload.consent?.ad_storage || 'unknown'
+            analyticsConsent: batchPayload.consent?.ad_user_data || 'unknown',
+            adConsent: batchPayload.consent?.ad_user_data || 'unknown'
           });
         }
         
@@ -1815,7 +1815,7 @@ async function handleBatchEvents(batchPayload, request) {
       results: DEBUG_MODE ? results : undefined,
       errors: errors.length > 0 ? errors : undefined,
       consent_applied: !!batchPayload.consent,
-      consent_mode: batchPayload.consent?.analytics_storage || 'unknown',
+      consent_mode: batchPayload.consent?.ad_user_data || 'unknown',
       request_type: request.headers.get("X-Simple-request") === "true" ? "simple" : "regular"
     };
 

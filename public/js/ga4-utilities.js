@@ -1620,7 +1620,7 @@
         
         // Fallback to checking global status
         var consent = window.GA4ConsentStatus;
-        return consent && consent.analytics_storage === "GRANTED";
+        return consent && consent.ad_user_data === "GRANTED";
       },
 
       /**
@@ -1633,7 +1633,7 @@
         
         // Fallback to checking global status
         var consent = window.GA4ConsentStatus;
-        return consent && consent.ad_storage === "GRANTED";
+        return consent && (consent.ad_user_data === "GRANTED" || consent.ad_personalization === "GRANTED");
       },
 
       /**
@@ -1650,18 +1650,12 @@
           return "UNKNOWN";
         }
 
-        if (
-          consent.analytics_storage === "GRANTED" &&
-          consent.ad_storage === "GRANTED"
-        ) {
+        if (consent.ad_user_data === "GRANTED" && consent.ad_personalization === "GRANTED") {
           return "GRANTED";
-        } else if (
-          consent.analytics_storage === "DENIED" &&
-          consent.ad_storage === "DENIED"
-        ) {
+        } else if (consent.ad_user_data === "DENIED" && consent.ad_personalization === "DENIED") {
           return "DENIED";
         } else {
-          return "PARTIAL";
+          return "DENIED";
         }
       },
 
@@ -1678,28 +1672,16 @@
 
         if (!consent) {
           return {
-            analytics_storage: "DENIED", // Default to DENIED for GDPR compliance
-            ad_storage: "DENIED",
             ad_user_data: "DENIED",
             ad_personalization: "DENIED",
-            functionality_storage: "DENIED",
-            personalization_storage: "DENIED",
-            security_storage: "GRANTED",
-            consent_mode: "DENIED",
-            consent_timestamp: null,
+            consent_reason: "no_consent"
           };
         }
 
         return {
-          analytics_storage: consent.analytics_storage || "DENIED",
-          ad_storage: consent.ad_storage || "DENIED",
           ad_user_data: consent.ad_user_data || "DENIED",
           ad_personalization: consent.ad_personalization || "DENIED",
-          functionality_storage: consent.functionality_storage || "DENIED",
-          personalization_storage: consent.personalization_storage || "DENIED",
-          security_storage: consent.security_storage || "GRANTED",
-          consent_mode: this.getMode(),
-          consent_timestamp: consent.timestamp,
+          consent_reason: consent.consent_reason || "unknown"
         };
       },
 

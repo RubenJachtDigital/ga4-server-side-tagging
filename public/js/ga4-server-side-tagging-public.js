@@ -61,7 +61,7 @@
 
       // Log initialization
       this.log(
-        "%c GA4 Server-Side Tagging initialized v4",
+        "%c GA4 Server-Side Tagging initialized v1",
         "background: #4CAF50; color: white; font-size: 16px; font-weight: bold; padding: 8px 12px; border-radius: 4px;"
       );
     },
@@ -999,7 +999,7 @@
             consentData = GA4Utils.consent.getForServerSide();
           }
 
-          if (consentData && consentData.analytics_storage === "GRANTED") {
+          if (consentData && consentData.ad_user_data === "GRANTED") {
             // Check if IP geolocation is disabled by admin
             if (this.config.consentSettings && this.config.consentSettings.disableAllIP) {
               this.log("IP geolocation disabled by admin - using timezone fallback only");
@@ -2618,7 +2618,7 @@
       
       // If consent is now granted, refresh location data for better accuracy
       // Use ad_user_data as the basis for location data collection
-      if (currentConsent && currentConsent.analytics_storage === "GRANTED") {
+      if (currentConsent && currentConsent.ad_user_data === "GRANTED") {
         // Check if IP geolocation is disabled by admin
         if (this.config.consentSettings && this.config.consentSettings.disableAllIP) {
           this.log("IP geolocation disabled by admin - keeping timezone fallback for queued event");
@@ -2682,7 +2682,7 @@
 
       // Add user ID if available and consent allows
       if (!params.hasOwnProperty("user_id") && this.config.user_id) {
-        if (consentData.analytics_storage === "GRANTED") {
+        if (consentData.ad_user_data === "GRANTED") {
           params.user_id = this.config.user_id;
         }
       }
@@ -2776,7 +2776,7 @@
       
       this.log("Sending via send-event endpoint", {
         consent: this.getMinimalConsent(consentData),
-        anonymized: consentData.analytics_storage !== "GRANTED",
+        anonymized: consentData.ad_user_data !== "GRANTED",
         eventName: eventName
       });
       
@@ -2850,7 +2850,7 @@
 
         // Add user ID if available and consent allows
         if (!params.hasOwnProperty("user_id") && this.config.user_id) {
-          if (consentData.analytics_storage === "GRANTED") {
+          if (consentData.ad_user_data === "GRANTED") {
             params.user_id = this.config.user_id;
           }
         }
@@ -3256,7 +3256,7 @@
     }
     
     // Fallback implementation
-    if (consentData.analytics_storage === "GRANTED") {
+    if (consentData.ad_user_data === "GRANTED") {
       return GA4Utils.clientId.get();
     } else {
       var sessionId = GA4Utils.session.get().id;
@@ -3271,13 +3271,15 @@
     if (!consentData) {
       return {
         ad_personalization: "DENIED",
-        ad_user_data: "DENIED"
+        ad_user_data: "DENIED",
+        consent_reason: "no_consent"
       };
     }
     
     return {
       ad_personalization: consentData.ad_personalization || "DENIED",
-      ad_user_data: consentData.ad_user_data || "DENIED"
+      ad_user_data: consentData.ad_user_data || "DENIED",
+      consent_reason: consentData.consent_reason || "unknown"
     };
   },
 
@@ -3297,7 +3299,7 @@
       if (timezoneLocation.city) params.geo_city_tz = timezoneLocation.city;
     }
     
-    if (consentData.analytics_storage === "GRANTED") {
+    if (consentData.ad_user_data === "GRANTED") {
         try {
           const locationData = await this.getUserLocation();
           if (locationData && locationData.latitude && locationData.longitude) {
@@ -3354,7 +3356,7 @@
   applyGDPRAnonymization: function(params, consentData) {
     var anonymizedParams = JSON.parse(JSON.stringify(params));
 
-    if (consentData.analytics_storage === "DENIED") {
+    if (consentData.ad_user_data === "DENIED") {
       // Remove/anonymize personal data
       delete anonymizedParams.user_id;
       
@@ -3375,7 +3377,7 @@
       anonymizedParams.medium = "(denied consent)";
     }
 
-    if (consentData.ad_storage === "DENIED") {
+    if (consentData.ad_user_data === "DENIED" && consentData.ad_personalization === "DENIED") {
       // Remove advertising/attribution data
       delete anonymizedParams.gclid;
       delete anonymizedParams.content;
@@ -3667,7 +3669,7 @@
         consentData = GA4Utils.consent.getForServerSide();
       }
       
-      if (consentData && consentData.analytics_storage === "GRANTED") {
+      if (consentData && consentData.ad_user_data === "GRANTED") {
         fetchReason = "consent_granted";
       }
       
@@ -3682,7 +3684,7 @@
         try {
           this.log("🎯 Fetching precise location data for queue", {
             reason: fetchReason,
-            consentStatus: consentData?.analytics_storage || "unknown"
+            consentStatus: consentData?.ad_user_data || "unknown"
           });
           
           const locationData = await this.getUserLocation();
