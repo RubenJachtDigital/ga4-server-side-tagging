@@ -2310,7 +2310,12 @@
             let beaconPayload = payload;
             
             // Check if encryption is enabled for send-events endpoint
-            if (endpoint.includes('/send-events') && config.encryptionEnabled) {
+            // For secure transmission method, always encrypt
+            const transmissionMethod = config.transmissionMethod || 'secure_wp_to_cf';
+            const shouldEncrypt = endpoint.includes('/send-events') && 
+                                (transmissionMethod === 'secure_wp_to_cf' || config.encryptionEnabled);
+            
+            if (shouldEncrypt) {
               try {
                 // Generate time-based JWT token for sendBeacon
                 const timeBasedJWT = await GA4Utils.encryption.createSelfGeneratedTimeBasedJWT(payload);
@@ -2335,7 +2340,7 @@
             GA4Utils.helpers.log("🚨 Critical event detected - attempting sendBeacon", {
               endpoint: endpoint,
               payloadSize: JSON.stringify(beaconPayload).length,
-              encrypted: endpoint.includes('/send-events') && config.encryptionEnabled,
+              encrypted: shouldEncrypt,
               timestamp: new Date().toISOString()
             }, config, logPrefix);
             
@@ -2346,7 +2351,7 @@
               GA4Utils.helpers.log("✅ Critical event sent successfully via sendBeacon", {
                 endpoint: endpoint,
                 payloadSize: JSON.stringify(beaconPayload).length,
-                encrypted: endpoint.includes('/send-events') && config.encryptionEnabled,
+                encrypted: shouldEncrypt,
                 timestamp: new Date().toISOString()
               }, config, logPrefix);
               
@@ -2457,6 +2462,12 @@
           "Accept-Language": navigator.language || "en-US"
         };
 
+        // Add X-simple-request header for direct Cloudflare transmission
+        if (config && config.transmissionMethod === 'direct_to_cf' && 
+            config.cloudflareWorkerUrl && endpoint === config.cloudflareWorkerUrl) {
+          headers["X-Simple-request"] = "true";
+        }
+
         var requestBody = JSON.stringify(payload);
 
         // Add nonce for WordPress REST API endpoints and handle encryption
@@ -2465,7 +2476,12 @@
           headers["X-WP-Nonce"] = window.ga4ServerSideTagging?.nonce || config.nonce || "";
           
           // Check if this is the send-event endpoint and encryption is enabled
-          if (endpoint.includes('/send-events') && config.encryptionEnabled) {
+          // For secure transmission method, always encrypt
+          const transmissionMethod = config.transmissionMethod || 'secure_wp_to_cf';
+          const shouldEncrypt = endpoint.includes('/send-events') && 
+                              (transmissionMethod === 'secure_wp_to_cf' || config.encryptionEnabled);
+          
+          if (shouldEncrypt) {
             try {
               // Generate time-based JWT token using site URL and current time
               const timeBasedJWT = await GA4Utils.encryption.createSelfGeneratedTimeBasedJWT(payload);

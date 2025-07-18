@@ -176,11 +176,27 @@ class GA4_Server_Side_Tagging_Public
             'conversionFormIds' => get_option('ga4_conversion_form_ids', ''),
             'currency' => function_exists('get_woocommerce_currency') ? get_woocommerce_currency() : 'EUR',
             'siteName' => get_bloginfo('name'),
-            'encryptionEnabled' => (bool) get_option('ga4_jwt_encryption_enabled', false),
             'transmissionMethod' => get_option('ga4_transmission_method', 'secure_wp_to_cf'),
-            'cloudflareWorkerUrl' => get_option('ga4_cloudflare_worker_url', ''),
-            
+        );
 
+        // Add transmission method specific settings
+        $transmission_method = get_option('ga4_transmission_method', 'secure_wp_to_cf');
+        
+        // Handle encryption based on transmission method
+        if ($transmission_method === 'secure_wp_to_cf') {
+            // Secure method always encrypts payloads
+            $script_data['encryptionEnabled'] = true;
+        } else if ($transmission_method === 'wp_endpoint_to_cf') {
+            // Balanced method uses security checks but no encryption
+            $script_data['encryptionEnabled'] = false;
+        } else if ($transmission_method === 'direct_to_cf') {
+            // Direct method no encryption and includes cloudflare URL
+            $script_data['encryptionEnabled'] = false;
+            $script_data['cloudflareWorkerUrl'] = get_option('ga4_cloudflare_worker_url', '');
+        }
+
+        // Continue with other settings
+        $script_data = array_merge($script_data, array(
             // GDPR Consent settings (enhanced)
             'consentSettings' => array(
                 'useIubenda' => (bool) get_option('ga4_use_iubenda', false),
@@ -200,7 +216,7 @@ class GA4_Server_Side_Tagging_Public
             // Click Tracking settings
             'clickTracksEnabled' => (bool) get_option('ga4_click_tracks_enabled', false),
             'clickTracksConfig' => get_option('ga4_click_tracks_config', '[]')
-        );
+        ));
 
         // Add product data if we're on a product page
         if (function_exists('is_product') && is_product()) {

@@ -2905,11 +2905,11 @@
         if (transmissionMethod === 'direct_to_cf' && this.config.cloudflareWorkerUrl) {
           this.log("⚡ Direct to Cloudflare reliable transmission");
           await this.sendEventToCloudflareReliable(data, isCritical);
-        } else if (transmissionMethod === 'wp_endpoint_to_cf' && this.config.cloudflareWorkerUrl) {
-          this.log("🛡️ WP Bot Check before sending to CF reliable transmission");
+        } else if (transmissionMethod === 'wp_endpoint_to_cf') {
+          this.log("🛡️ WP Bot Check before sending to CF reliable transmission (balanced)");
           await this.sendEventViaWordPressReliable(data, false, isCritical);
         } else {
-          this.log("🔒 Secure WordPress to Cloudflare reliable transmission");
+          this.log("🔒 Secure WordPress to Cloudflare reliable transmission (always encrypted)");
           await this.sendEventViaWordPressReliable(data, true, isCritical);
         }
       } catch (error) {
@@ -3074,11 +3074,11 @@
       if (transmissionMethod === 'direct_to_cf' && this.config.cloudflareWorkerUrl) {
         this.log("⚡ Direct to Cloudflare batch transmission");
         this.sendBatchToCloudflare(data, isCritical);
-      } else if (transmissionMethod === 'wp_endpoint_to_cf' && this.config.cloudflareWorkerUrl) {
+      } else if (transmissionMethod === 'wp_endpoint_to_cf') {
         this.log("🛡️ WP Bot Check before sending to CF batch transmission (balanced)");
         this.sendBatchViaWordPress(data, false, isCritical); // Use optimized WordPress endpoint (no encryption)
       } else {
-        this.log("🔒 Secure WordPress to Cloudflare batch transmission");
+        this.log("🔒 Secure WordPress to Cloudflare batch transmission (always encrypted)");
         this.sendBatchViaWordPress(data, true, isCritical); // true = with encryption
       }
     },
