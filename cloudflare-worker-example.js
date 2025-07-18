@@ -510,7 +510,13 @@ function applyAnalyticsConsentDenied(payload) {
  */
 function applyAdvertisingConsentDenied(payload) {
   if (DEBUG_MODE) {
-    console.log("Applying advertising consent denied rules");
+    console.log("Applying advertising consent denied rules to payload:", {
+      hasOriginalSource: !!payload.params?.originalSource,
+      hasOriginalMedium: !!payload.params?.originalMedium,
+      hasOriginalCampaign: !!payload.params?.originalCampaign,
+      originalMedium: payload.params?.originalMedium,
+      originalTrafficType: payload.params?.originalTrafficType
+    });
   }
 
   if (payload.params) {
@@ -518,11 +524,22 @@ function applyAdvertisingConsentDenied(payload) {
     delete payload.params.gclid;
     delete payload.params.content;
     delete payload.params.term;
+    
+    // Also remove original advertising attribution data
+    delete payload.params.originalGclid;
+    delete payload.params.originalContent;
+    delete payload.params.originalTerm;
 
     // Anonymize campaign data for paid traffic
     if (payload.params.campaign && 
         !["(organic)", "(direct)", "(not set)", "(referral)"].includes(payload.params.campaign)) {
       payload.params.campaign = "(denied consent)";
+    }
+
+    // Anonymize original campaign data for paid traffic
+    if (payload.params.originalCampaign && 
+        !["(organic)", "(direct)", "(not set)", "(referral)"].includes(payload.params.originalCampaign)) {
+      payload.params.originalCampaign = "(denied consent)";
     }
 
     // Anonymize source/medium for paid traffic
@@ -531,6 +548,34 @@ function applyAdvertisingConsentDenied(payload) {
       payload.params.source = "(denied consent)";
       payload.params.medium = "(denied consent)";
     }
+
+    // Anonymize original source/medium for paid traffic
+    if (payload.params.originalMedium && 
+        ["cpc", "ppc", "paidsearch", "display", "banner", "cpm"].includes(payload.params.originalMedium)) {
+      payload.params.originalSource = "(denied consent)";
+      payload.params.originalMedium = "(denied consent)";
+    }
+
+    // Anonymize traffic type if it reveals paid advertising
+    if (payload.params.traffic_type && 
+        ["paid_search", "paid_social", "display", "cpc"].includes(payload.params.traffic_type)) {
+      payload.params.traffic_type = "(denied consent)";
+    }
+
+    // Anonymize original traffic type if it reveals paid advertising
+    if (payload.params.originalTrafficType && 
+        ["paid_search", "paid_social", "display", "cpc"].includes(payload.params.originalTrafficType)) {
+      payload.params.originalTrafficType = "(denied consent)";
+    }
+  }
+
+  if (DEBUG_MODE) {
+    console.log("After applying advertising consent denied rules:", {
+      originalSource: payload.params?.originalSource,
+      originalMedium: payload.params?.originalMedium,
+      originalCampaign: payload.params?.originalCampaign,
+      originalTrafficType: payload.params?.originalTrafficType
+    });
   }
 
   return payload;
