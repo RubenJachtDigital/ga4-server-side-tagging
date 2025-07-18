@@ -448,15 +448,7 @@ function enhanceWithIPGeolocation(payload, request) {
       payload.params.geo_continent = cf.continent;
     }
     
-    
-    console.log(`🌍 Location enhancement applied (consent granted)`, {
-      client_continent: payload.params.geo_continent,
-      client_country_tz: payload.params.geo_country_tz,
-      client_city_tz: payload.params.geo_city_tz,
-      cloudflare_continent: cf.continent,
-      priority: "client-sent data preferred"
-    });
-    
+ 
   } catch (error) {
     console.error('❌ Failed to enhance with location data:', error);
   }
@@ -1472,10 +1464,7 @@ async function handleRequest(request, env) {
     // sendBeacon requests: Fastest processing, minimal security checks
     // Skip API key validation and origin validation for maximum performance
     
-    if (DEBUG_MODE) {
-      console.log("🚀 sendBeacon request - maximum performance mode (minimal security)");
-    }
-    
+
     // Still validate payload size for sendBeacon requests
     if (!validatePayloadSize(request)) {
       return new Response(
@@ -1808,14 +1797,6 @@ async function handleBatchEvents(batchPayload, request) {
         // In batch events, consent is at the batch level, not individual event level
         singleEventPayload.params.consent = batchPayload.consent;
         
-        if (DEBUG_MODE) {
-          console.log("📋 Added batch consent to individual event:", {
-            eventName: event.name,
-            consentApplied: !!batchPayload.consent,
-            analyticsConsent: batchPayload.consent?.ad_user_data || 'unknown',
-            adConsent: batchPayload.consent?.ad_user_data || 'unknown'
-          });
-        }
         
         // Use existing GDPR processing
         const consentProcessedPayload = processGDPRConsent(singleEventPayload, request);
@@ -2631,7 +2612,6 @@ function extractLocationData(params) {
   });
 
   if (DEBUG_MODE && Object.keys(userLocation).length > 0) {
-    console.log("Final user_location object:", JSON.stringify(userLocation));
     console.log("Location source:", locationSource);
   }
 
