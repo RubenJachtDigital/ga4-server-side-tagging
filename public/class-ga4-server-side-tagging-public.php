@@ -178,16 +178,9 @@ class GA4_Server_Side_Tagging_Public
             'siteName' => get_bloginfo('name'),
             'encryptionEnabled' => (bool) get_option('ga4_jwt_encryption_enabled', false),
             'transmissionMethod' => get_option('ga4_transmission_method', 'secure_wp_to_cf'),
-        );
+            'cloudflareWorkerUrl' => get_option('ga4_cloudflare_worker_url', ''),
+            
 
-        // Only include cloudflareWorkerUrl for transmission methods that need it client-side
-        // wp_endpoint_to_cf (balanced) should not expose the worker URL for security
-        $transmission_method = get_option('ga4_transmission_method', 'secure_wp_to_cf');
-        if ($transmission_method !== 'wp_endpoint_to_cf') {
-            $script_data['cloudflareWorkerUrl'] = get_option('ga4_cloudflare_worker_url', '');
-        }
-
-        $script_data = array_merge($script_data, array(
             // GDPR Consent settings (enhanced)
             'consentSettings' => array(
                 'useIubenda' => (bool) get_option('ga4_use_iubenda', false),
@@ -207,7 +200,7 @@ class GA4_Server_Side_Tagging_Public
             // Click Tracking settings
             'clickTracksEnabled' => (bool) get_option('ga4_click_tracks_enabled', false),
             'clickTracksConfig' => get_option('ga4_click_tracks_config', '[]')
-        ));
+        );
 
         // Add product data if we're on a product page
         if (function_exists('is_product') && is_product()) {

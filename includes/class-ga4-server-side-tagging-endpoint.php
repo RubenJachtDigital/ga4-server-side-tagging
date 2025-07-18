@@ -1053,8 +1053,7 @@ class GA4_Server_Side_Tagging_Endpoint
 
             $headers = array(
                 'Content-Type' => 'application/json',
-                'Authorization' => 'Bearer ' . $auth_header_value,
-                'X-Simple-Request' => 'true'
+                'Authorization' => 'Bearer ' . $auth_header_value
             );
 
             // Forward Origin, Referer, and User-Agent headers from the original request
@@ -1128,8 +1127,7 @@ class GA4_Server_Side_Tagging_Endpoint
 
             $headers = array(
                 'Content-Type' => 'application/json',
-                'Authorization' => 'Bearer ' . $auth_header_value,
-                'X-Simple-Request' => 'true'
+                'Authorization' => 'Bearer ' . $auth_header_value
             );
 
             // Forward Origin, Referer, and User-Agent headers from the original request to Cloudflare Worker
