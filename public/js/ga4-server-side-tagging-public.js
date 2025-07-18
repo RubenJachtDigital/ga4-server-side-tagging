@@ -845,31 +845,27 @@
     /**
      * Store attribution data in centralized storage
      */
-    2: function (
+    storeAttributionData: function (
       attribution,
       isNewSession,
       utmParams,
       gclid
     ) {
-      // Store attribution if:
-      // 1. It's a new session with any attribution, OR
-      // 2. We have UTM parameters or gclid (new campaign data)
-      // 
-      // REMOVED: Condition 3 that was overwriting stored attribution on return from external sites
-      // This prevents payment processors and other external sites from overwriting original attribution
-      var shouldStore =
-        isNewSession ||
-        utmParams.utm_source ||
-        utmParams.utm_medium ||
-        gclid;
+      // Store attribution ONLY on new sessions to preserve original source
+      // Once set, attribution should remain immutable for the entire session
+      var userData = GA4Utils.storage.getUserData();
+      var hasStoredAttribution = userData.lastSource && userData.lastMedium;
+      
+      // Only store if it's a new session AND we don't already have stored attribution
+      var shouldStore = isNewSession && !hasStoredAttribution && attribution.source && attribution.medium;
 
-      if (shouldStore && attribution.source && attribution.medium) {
-        var userData = GA4Utils.storage.getUserData();
+      if (shouldStore) {
         
         // Debug log for attribution storage
         if (this.config && this.config.debugMode) {
-          this.log('DEBUG: Storing new attribution data:', {
+          this.log('DEBUG: Storing new attribution data (first time this session):', {
             isNewSession: isNewSession,
+            hasStoredAttribution: hasStoredAttribution,
             attribution: attribution,
             previousStored: {
               source: userData.lastSource,
@@ -902,11 +898,12 @@
       } else {
         // Debug log for attribution preservation
         if (this.config && this.config.debugMode) {
-          var userData = GA4Utils.storage.getUserData();
-          this.log('DEBUG: Preserving existing attribution (not storing):', {
+          this.log('DEBUG: NOT storing attribution - preserving existing:', {
             isNewSession: isNewSession,
+            hasStoredAttribution: hasStoredAttribution,
             currentAttribution: attribution,
             shouldStore: shouldStore,
+            reason: !isNewSession ? 'not new session' : hasStoredAttribution ? 'already has stored attribution' : 'missing attribution data',
             preservedStored: {
               source: userData.lastSource,
               medium: userData.lastMedium,
@@ -2159,6 +2156,136 @@
     },
 
     /**
+     * Get location based on IP address with fallback services
+     */
+    getIPBasedLocation: function () {
+      return new Promise((resolve) => {
+        // Try ipapi.co first
+        fetch("https://ipapi.co/json/")
+          .then((response) => {
+            if (!response.ok) throw new Error("ipapi.co lookup failed");
+            return response.json();
+          })
+          .then((data) => {
+            const locationData = {
+              latitude: parseFloat(data.latitude),
+              longitude: parseFloat(data.longitude),
+              city: data.city || "",
+              region: data.region || "",
+              country: data.country_name || "",
+            };
+            this.log("Location obtained from ipapi.co", locationData);
+            resolve(locationData);
+          })
+          .catch((error) => {
+            this.log(
+              "First IP location service failed, trying fallback",
+              error
+            );
+
+            // Fallback to ipinfo.io
+            fetch("https://ipinfo.io/json")
+              .then((response) => {
+                if (!response.ok) throw new Error("ipinfo.io lookup failed");
+                return response.json();
+              })
+              .then((data) => {
+                let coords = [0, 0];
+                if (data.loc && data.loc.includes(",")) {
+                  coords = data.loc.split(",");
+                }
+
+                const locationData = {
+                  latitude: parseFloat(coords[0]),
+                  longitude: parseFloat(coords[1]),
+                  city: data.city || "",
+                  region: data.region || "",
+                  country: data.country || "",
+                };
+
+                this.log(
+                  "Location obtained from fallback service",
+                  locationData
+                );
+                resolve(locationData);
+              })
+              .catch((secondError) => {
+                this.log(
+                  "Second IP location service failed, trying final fallback",
+                  secondError
+                );
+
+                // Final fallback to geoiplookup.io
+                fetch("https://json.geoiplookup.io/")
+                  .then((response) => {
+                    if (!response.ok) throw new Error("geoiplookup.io failed");
+                    return response.json();
+                  })
+                  .then((data) => {
+                    const locationData = {
+                      latitude: parseFloat(data.latitude),
+                      longitude: parseFloat(data.longitude),
+                      city: data.city || "",
+                      region: data.region || "",
+                      country: data.country_name || "",
+                    };
+
+                    this.log(
+                      "Location obtained from final fallback service",
+                      locationData
+                    );
+                    resolve(locationData);
+                  })
+                  .catch((finalError) => {
+                    this.log("All IP location services failed", finalError);
+                    resolve({});
+                  });
+              });
+          });
+      });
+    },
+
+    /**
+     * Build complete event data with all session context, attribution, and page data
+     * This preserves the original page context when events are queued
+     */
+    getBotData: async function () {
+
+      // Get user agent and client behavior data (preserve original context)
+      var userAgentInfo = GA4Utils.device.parseUserAgent();
+      var clientBehavior = GA4Utils.botDetection.getClientBehaviorData();
+
+
+      // Add bot detection data for Cloudflare Worker analysis
+      var botData = {
+        user_agent_full: userAgentInfo.user_agent,
+        browser_name: userAgentInfo.browser_name,
+        device_type: userAgentInfo.device_type,
+        is_mobile: userAgentInfo.is_mobile,
+        has_javascript: clientBehavior.hasJavaScript,
+        screen_available_width: clientBehavior.screenAvailWidth,
+        screen_available_height: clientBehavior.screenAvailHeight,
+        color_depth: clientBehavior.colorDepth,
+        pixel_depth: clientBehavior.pixelDepth,
+        timezone: clientBehavior.timezone,
+        platform: clientBehavior.platform,
+        cookie_enabled: clientBehavior.cookieEnabled,
+        hardware_concurrency: clientBehavior.hardwareConcurrency,
+        max_touch_points: clientBehavior.maxTouchPoints,
+        webdriver_detected: clientBehavior.webdriver,
+        has_automation_indicators: clientBehavior.hasAutomationIndicators,
+        page_load_time: clientBehavior.pageLoadTime,
+        user_interaction_detected: clientBehavior.hasInteracted,
+        bot_score: GA4Utils.botDetection.calculateBotScore(
+          userAgentInfo,
+          clientBehavior
+        ),
+      };
+
+      return botData;
+    },
+
+    /**
      * Calculate attribution for the original page (similar to calculateAttribution but for preservation)
      */
     calculateAttributionForOriginalPage: function(utmParams, gclid, referrer) {
@@ -2206,14 +2333,9 @@
       if (conversionEvents.includes(eventName)) {
         var storedAttribution = this.getStoredAttribution();
         
-        this.log('🎯 Applying stored attribution for conversion event:', {
+        this.log('DEBUG: Stored attribution for conversion event:', {
             eventName: eventName,
-            storedAttribution: storedAttribution,
-            beforeAttribution: {
-              source: eventParams.source,
-              medium: eventParams.medium,
-              campaign: eventParams.campaign
-            }
+            storedAttribution: storedAttribution
         });
         
         
@@ -2285,7 +2407,7 @@
 
       // Add stored attribution data for non-foundational events only
       this.addStoredAttributionData(eventParams, eventName);
-
+      eventParams.botData = await this.getBotData();
       // Check consent status via consent manager
       if (window.GA4ConsentManager && typeof window.GA4ConsentManager.shouldSendEvent === 'function') {
         // Check if eventParams already contains complete session data
@@ -2485,30 +2607,7 @@
 
 
       // Add bot detection data for Cloudflare Worker analysis
-      params.botData = {
-        user_agent_full: userAgentInfo.user_agent,
-        browser_name: userAgentInfo.browser_name,
-        device_type: userAgentInfo.device_type,
-        is_mobile: userAgentInfo.is_mobile,
-        has_javascript: clientBehavior.hasJavaScript,
-        screen_available_width: clientBehavior.screenAvailWidth,
-        screen_available_height: clientBehavior.screenAvailHeight,
-        color_depth: clientBehavior.colorDepth,
-        pixel_depth: clientBehavior.pixelDepth,
-        timezone: clientBehavior.timezone,
-        platform: clientBehavior.platform,
-        cookie_enabled: clientBehavior.cookieEnabled,
-        hardware_concurrency: clientBehavior.hardwareConcurrency,
-        max_touch_points: clientBehavior.maxTouchPoints,
-        webdriver_detected: clientBehavior.webdriver,
-        has_automation_indicators: clientBehavior.hasAutomationIndicators,
-        page_load_time: clientBehavior.pageLoadTime,
-        user_interaction_detected: clientBehavior.hasInteracted,
-        bot_score: GA4Utils.botDetection.calculateBotScore(
-          userAgentInfo,
-          clientBehavior
-        ),
-      };
+      params.botData = await this.getBotData();
 
       // Apply GDPR anonymization based on consent
       if (window.GA4ConsentManager && typeof window.GA4ConsentManager.applyGDPRAnonymization === 'function') {
@@ -3982,9 +4081,6 @@
       // Foundational events (page_view, session_start, first_visit) should keep their current attribution
       var foundationalEvents = ['custom_session_start', 'custom_first_visit', 'page_view', 'view_item', 'view_item_list'];
       
-      // Conversion events are handled separately in trackEvent function to avoid duplication
-      var conversionEvents = ['purchase', 'quote_request', 'form_conversion'];
-      
       if (foundationalEvents.includes(eventName)) {
         this.log("Foundational event - keeping current attribution", {
           eventName: eventName,
@@ -3994,17 +4090,52 @@
         return;
       }
       
+      // Get stored attribution data (original traffic source)
+      var storedAttribution = this.getStoredAttribution();
+      
+      // Special handling for conversion events - they get both source and originalSource with stored values
+      var conversionEvents = ['purchase', 'quote_request', 'form_conversion'];
+      
       if (conversionEvents.includes(eventName)) {
-        this.log("Conversion event - attribution already handled in trackEvent", {
+        // For conversion events, set both source and originalSource to stored attribution
+        if (storedAttribution.source) {
+          params.source = storedAttribution.source;
+        }
+        if (storedAttribution.medium) {
+          params.medium = storedAttribution.medium;
+        }
+        if (storedAttribution.campaign) {
+          params.campaign = storedAttribution.campaign;
+        }
+        if (storedAttribution.content) {
+          params.content = storedAttribution.content;
+        }
+        if (storedAttribution.term) {
+          params.term = storedAttribution.term;
+        }
+        if (storedAttribution.gclid) {
+          params.gclid = storedAttribution.gclid;
+        }
+        
+        // Calculate and add traffic type for both current and original
+        if (storedAttribution.source && storedAttribution.medium) {
+          var trafficType = GA4Utils.traffic.getType(
+            storedAttribution.source,
+            storedAttribution.medium,
+            null // No referrer domain for stored attribution
+          );
+          params.traffic_type = trafficType;
+        }
+        
+        this.log("Added stored attribution as both current and original attribution for conversion event", {
           eventName: eventName,
           source: params.source,
-          medium: params.medium
+          originalSource: params.originalSource,
+          medium: params.medium,
+          originalMedium: params.originalMedium
         });
         return;
       }
-      
-      // Get stored attribution data (original traffic source)
-      var storedAttribution = this.getStoredAttribution();
       
       // For other non-foundational events, add stored attribution as original attribution fields
       // Remove current attribution fields and only keep original attribution
