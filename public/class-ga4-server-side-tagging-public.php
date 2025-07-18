@@ -81,7 +81,6 @@ class GA4_Server_Side_Tagging_Public
         
         if (!in_array($order_id, $_SESSION['ga4_tracked_orders'])) {
             $_SESSION['ga4_tracked_orders'][] = $order_id;
-            $this->logger->info('Order marked as tracked in session: ' . $order_id);
         }
     }
 
@@ -252,7 +251,6 @@ class GA4_Server_Side_Tagging_Public
                             $script_data['orderData'] = $this->get_order_data_for_tracking($order);
                             $this->mark_order_as_tracked($order_id);
                             $this->cleanup_tracked_orders();
-                            $this->logger->info('Added order data for purchase event tracking. Order ID: ' . $order_id);
                         }
                     }
                 }
