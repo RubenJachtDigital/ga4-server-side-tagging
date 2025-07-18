@@ -52,13 +52,9 @@ const GA4_ENDPOINT = "https://www.google-analytics.com/mp/collect";
 const BOT_DETECTION_ENABLED = true; // Set to false to disable bot filtering
 const BOT_LOG_ENABLED = true; // Set to false to disable bot logging
 
-// Enhanced Cloudflare Bot Detection Features:
-// - verifiedBotCategory: Cloudflare's native bot categorization
-// - Bot Management score: Advanced bot scoring (requires Cloudflare Bot Management)
-// - JA3 TLS fingerprinting: Detect automation tools via TLS signatures
-// - HTTP protocol analysis: Check for HTTP/1.1 vs HTTP/2 patterns
-// - TCP RTT analysis: Detect datacenter and proxy patterns
-// - Header consistency checks: Validate browser header patterns
+// Cloudflare Bot Detection (Less Strict):
+// - verifiedBotCategory: Only Cloudflare's native verified bot categorization
+// - Other Cloudflare signals (threat score, ASN, etc.) are ignored for less strict detection
 
 // Security Configuration
 // These are loaded from Cloudflare Variables and Secrets - DO NOT HARDCODE
@@ -583,7 +579,6 @@ function detectBot(request, payload) {
     checkUserAgentPatterns(userAgent),
     checkSuspiciousGeography(country, city, region),
     checkCloudflareData(cfData),
-    checkCloudflareAdvancedFeatures(cfData, request),
     checkRequestHeaders(request),
     checkEventData(payload),
     checkIPReputation(cfData)
@@ -924,188 +919,19 @@ function checkRequestPatterns(request) {
  * Check Cloudflare data for bot indicators
  */
 function checkCloudflareData(cfData) {
-  // Priority 1: Check Cloudflare's native bot detection
+  // Only check Cloudflare's native verified bot detection (less strict)
   if (cfData.verifiedBotCategory) {
     // verifiedBotCategory indicates Cloudflare has identified this as a verified bot
     // Common categories: "search engine", "social media", "monitoring", "security", etc.
     return { 
       isBot: true, 
       reason: 'cf_verified_bot_category: ' + cfData.verifiedBotCategory,
-      score: 90 // High confidence since it's verified by Cloudflare
+      score: 95 // High confidence since it's verified by Cloudflare
     };
   }
 
-  // Priority 2: Check Bot Management score (if available)
-  if (cfData.botManagement && cfData.botManagement.score !== undefined) {
-    // Bot Management score: 1-99 (higher = more likely bot)
-    if (cfData.botManagement.score > 30) {
-      return { 
-        isBot: true, 
-        reason: 'cf_bot_management_score: ' + cfData.botManagement.score,
-        score: cfData.botManagement.score
-      };
-    }
-  }
-
-  // Priority 3: Check threat score (0-100, higher = more suspicious)
-  if (cfData.threatScore && cfData.threatScore > 50) {
-    return { 
-      isBot: true, 
-      reason: 'cf_high_threat_score: ' + cfData.threatScore,
-      score: cfData.threatScore
-    };
-  }
-
-  // Priority 4: Check for known bot ASNs
-  const botASNs = [
-    13335, // Cloudflare (sometimes used by bots)
-    15169, // Google (Googlebot, etc.)
-    16509, // Amazon AWS
-    8075,  // Microsoft Azure
-    32934, // Facebook
-    14061, // DigitalOcean
-    24940, // Hetzner
-    // Add more as needed
-  ];
-
-  if (cfData.asn && botASNs.indexOf(cfData.asn) !== -1) {
-    return { 
-      isBot: true, 
-      reason: 'cf_bot_asn: ' + cfData.asn,
-      score: 60
-    };
-  }
-
-  // Priority 5: Check for suspicious combinations
-  const suspiciousPatterns = [];
-  
-  // Datacenter + unusual country combinations
-  if (cfData.asOrganization && 
-      (cfData.asOrganization.toLowerCase().includes('datacenter') || 
-       cfData.asOrganization.toLowerCase().includes('hosting') ||
-       cfData.asOrganization.toLowerCase().includes('server'))) {
-    suspiciousPatterns.push('datacenter_hosting');
-  }
-
-  // Multiple requests from same edge location with different IPs
-  if (cfData.colo && cfData.edgeRequestKeepAliveStatus === 0) {
-    suspiciousPatterns.push('no_keepalive');
-  }
-
-  if (suspiciousPatterns.length >= 2) {
-    return { 
-      isBot: true, 
-      reason: 'cf_suspicious_patterns: ' + suspiciousPatterns.join(', '),
-      score: 70
-    };
-  }
-
+  // All other Cloudflare signals are ignored for less strict detection
   return { isBot: false, reason: "cf_data_ok", score: 0 };
-}
-
-/**
- * Check advanced Cloudflare features for bot detection
- */
-function checkCloudflareAdvancedFeatures(cfData, request) {
-  const suspiciousPatterns = [];
-  let score = 0;
-
-  // Check JA3 fingerprint (if available) - unique TLS fingerprint
-  if (cfData.tlsClientExtensionsSha1 && cfData.tlsClientExtensionsSha1Le) {
-    // Bot patterns often have consistent TLS fingerprints
-    const commonBotJA3 = [
-      'UC7jjzScLOBzdXDePYDtOwn+hzo=', // Common automation tools
-      'ZOkykUrHqhy0OO0GnZ1HqhOK8Jw=', // Selenium patterns
-    ];
-    
-    if (commonBotJA3.includes(cfData.tlsClientExtensionsSha1) || 
-        commonBotJA3.includes(cfData.tlsClientExtensionsSha1Le)) {
-      return {
-        isBot: true,
-        reason: 'cf_known_bot_ja3_fingerprint',
-        score: 95
-      };
-    }
-  }
-
-  // Check HTTP/2 usage patterns
-  if (cfData.httpProtocol) {
-    // Most modern browsers use HTTP/2, but some bots use HTTP/1.1
-    if (cfData.httpProtocol === 'HTTP/1.1') {
-      suspiciousPatterns.push('http1_usage');
-      score += 10;
-    }
-  }
-
-  // Check TLS version patterns
-  if (cfData.tlsVersion) {
-    // Very old TLS versions are suspicious
-    if (cfData.tlsVersion === 'TLSv1.0' || cfData.tlsVersion === 'TLSv1.1') {
-      suspiciousPatterns.push('old_tls_version');
-      score += 15;
-    }
-  }
-
-  // Check client TCP RTT patterns
-  if (cfData.clientTcpRtt !== undefined) {
-    // Suspiciously low RTT might indicate same-datacenter requests
-    if (cfData.clientTcpRtt < 5) {
-      suspiciousPatterns.push('very_low_rtt');
-      score += 20;
-    }
-    // Suspiciously high RTT might indicate proxies
-    if (cfData.clientTcpRtt > 500) {
-      suspiciousPatterns.push('very_high_rtt');
-      score += 15;
-    }
-  }
-
-  // Check for missing or suspicious accept-encoding
-  const acceptEncoding = request.headers.get('accept-encoding');
-  if (!acceptEncoding) {
-    suspiciousPatterns.push('missing_accept_encoding');
-    score += 10;
-  } else if (!acceptEncoding.includes('gzip')) {
-    suspiciousPatterns.push('no_gzip_support');
-    score += 5;
-  }
-
-  // Check for inconsistent browser signals
-  const userAgent = request.headers.get('user-agent');
-  const secChUa = request.headers.get('sec-ch-ua');
-  
-  if (userAgent && userAgent.includes('Chrome') && !secChUa) {
-    // Chrome browsers should have sec-ch-ua headers
-    suspiciousPatterns.push('missing_chrome_headers');
-    score += 15;
-  }
-
-  // Check for automation indicators in headers
-  if (request.headers.get('webdriver') || 
-      request.headers.get('x-requested-with') === 'XMLHttpRequest') {
-    suspiciousPatterns.push('automation_headers');
-    score += 25;
-  }
-
-  // Check CF-Connecting-IP vs X-Forwarded-For consistency
-  const cfConnectingIp = request.headers.get('cf-connecting-ip');
-  const xForwardedFor = request.headers.get('x-forwarded-for');
-  
-  if (cfConnectingIp && xForwardedFor && cfConnectingIp !== xForwardedFor.split(',')[0].trim()) {
-    suspiciousPatterns.push('ip_header_mismatch');
-    score += 20;
-  }
-
-  // Evaluate overall score
-  if (score >= 40) {
-    return {
-      isBot: true,
-      reason: 'cf_advanced_bot_patterns: ' + suspiciousPatterns.join(', '),
-      score: score
-    };
-  }
-
-  return { isBot: false, reason: "cf_advanced_ok", score: score };
 }
 
 /**
