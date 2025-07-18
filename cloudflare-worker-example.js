@@ -492,11 +492,6 @@ function applyAnalyticsConsentDenied(payload) {
     // (geo_continent should already be set by client if available)
   }
 
-  // Anonymize user agent in bot data
-  if (payload.params?.botData?.user_agent_full) {
-    payload.params.botData.user_agent_full = anonymizeUserAgent(payload.params.botData.user_agent_full);
-  }
-
   if (payload.params?.user_agent) {
     payload.params.user_agent = anonymizeUserAgent(payload.params.user_agent);
   }

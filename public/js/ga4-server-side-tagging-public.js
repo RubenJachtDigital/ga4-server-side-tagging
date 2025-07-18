@@ -851,24 +851,21 @@
       utmParams,
       gclid
     ) {
-      // Store attribution if:
-      // 1. It's a new session with any attribution, OR
-      // 2. We have UTM parameters or gclid (new campaign data), OR
-      // 3. The attribution is not direct or internal traffic (preserve only real external sources)
-      var shouldStore =
-        isNewSession ||
-        utmParams.utm_source ||
-        utmParams.utm_medium ||
-        gclid ||
-        (attribution.source && attribution.source !== "(direct)" && attribution.source !== "(internal)");
+      // Store attribution ONLY on new sessions to preserve original source
+      // Once set, attribution should remain immutable for the entire session
+      var userData = GA4Utils.storage.getUserData();
+      var hasStoredAttribution = userData.lastSource && userData.lastMedium;
+      
+      // Only store if it's a new session AND we don't already have stored attribution
+      var shouldStore = isNewSession && !hasStoredAttribution && attribution.source && attribution.medium;
 
-      if (shouldStore && attribution.source && attribution.medium) {
-        var userData = GA4Utils.storage.getUserData();
+      if (shouldStore) {
         
         // Debug log for attribution storage
         if (this.config && this.config.debugMode) {
-          this.log('DEBUG: Storing new attribution data:', {
+          this.log('DEBUG: Storing new attribution data (first time this session):', {
             isNewSession: isNewSession,
+            hasStoredAttribution: hasStoredAttribution,
             attribution: attribution,
             previousStored: {
               source: userData.lastSource,
@@ -901,11 +898,12 @@
       } else {
         // Debug log for attribution preservation
         if (this.config && this.config.debugMode) {
-          var userData = GA4Utils.storage.getUserData();
-          this.log('DEBUG: Preserving existing attribution (not storing):', {
+          this.log('DEBUG: NOT storing attribution - preserving existing:', {
             isNewSession: isNewSession,
+            hasStoredAttribution: hasStoredAttribution,
             currentAttribution: attribution,
             shouldStore: shouldStore,
+            reason: !isNewSession ? 'not new session' : hasStoredAttribution ? 'already has stored attribution' : 'missing attribution data',
             preservedStored: {
               source: userData.lastSource,
               medium: userData.lastMedium,
@@ -2251,108 +2249,7 @@
      * Build complete event data with all session context, attribution, and page data
      * This preserves the original page context when events are queued
      */
-    buildCompleteEventData: async function (eventName, eventParams) {
-      // Create a copy of the event params
-      var params = JSON.parse(JSON.stringify(eventParams));
-      var session = GA4Utils.session.get();
-
-      // Add debug_mode and timestamp if not present
-      if (!params.hasOwnProperty("debug_mode")) {
-        if (Boolean(this.config.debugMode) === true) {
-          params.debug_mode = Boolean(this.config.debugMode);
-        }
-      }
-
-      if (!params.hasOwnProperty("event_timestamp")) {
-        params.event_timestamp = Math.floor(Date.now() / 1000);
-      }
-
-      // Get consent data from consent manager (will be DENIED at queueing time)
-      var consentData = null;
-      if (window.GA4ConsentManager && typeof window.GA4ConsentManager.getConsentForServerSide === 'function') {
-        consentData = window.GA4ConsentManager.getConsentForServerSide();
-      } else {
-        // Fallback to GA4Utils
-        consentData = GA4Utils.consent.getForServerSide();
-      }
-
-      // Add session information (preserve original session context)
-      if (!params.hasOwnProperty("session_id")) {
-        params.session_id = session.id;
-      }
-      if (!params.hasOwnProperty("session_count")) {
-        params.session_count = session.sessionCount;
-      }
-      if (!params.hasOwnProperty("engagement_time_msec")) {
-        params.engagement_time_msec = GA4Utils.time.calculateEngagementTime(
-          session.start
-        );
-      }
-
-      // Capture and preserve COMPLETE original page context and attribution
-      // Force override ALL page and attribution data to preserve original context
-      var originalPageLocation = window.location.href;
-      var originalPageTitle = document.title;
-      var originalPageReferrer = document.referrer || "";
-      
-      // Get original attribution data from current page (this is what we want to preserve!)
-      var originalUtmParams = GA4Utils.utm.getAll();
-      var originalGclid = GA4Utils.gclid.get();
-      var originalAttribution = this.calculateAttributionForOriginalPage(
-        originalUtmParams,
-        originalGclid,
-        originalPageReferrer
-      );
-      
-      // Override ALL page and attribution context in params
-      params.page_location = originalPageLocation;
-      params.page_title = originalPageTitle;
-      params.page_referrer = originalPageReferrer;
-      
-      // Override attribution data
-      if (originalAttribution.source) params.source = originalAttribution.source;
-      if (originalAttribution.medium) params.medium = originalAttribution.medium;
-      if (originalAttribution.campaign) params.campaign = originalAttribution.campaign;
-      if (originalAttribution.content) params.content = originalAttribution.content;
-      if (originalAttribution.term) params.term = originalAttribution.term;
-      if (originalAttribution.gclid) params.gclid = originalAttribution.gclid;
-      
-      // Always add timezone (preserve original page timezone)
-      if (!params.timezone) {
-        params.timezone = this.getTimezone();
-      }
-      
-      // Add location data from timezone as fallback
-      if (params.timezone) {
-        var timezoneLocation = GA4Utils.helpers.getLocationFromTimezone(params.timezone);
-        if (!params.geo_continent && timezoneLocation.continent) {
-          params.geo_continent = timezoneLocation.continent;
-        }
-        if (!params.geo_country_tz && timezoneLocation.country) {
-          params.geo_country_tz = timezoneLocation.country;
-        }
-        if (!params.geo_city_tz && timezoneLocation.city) {
-          params.geo_city_tz = timezoneLocation.city;
-        }
-      }
-      
-      this.log("🔒 Captured COMPLETE original context for preservation", {
-        originalPageLocation: originalPageLocation,
-        originalPageTitle: originalPageTitle,
-        originalPageReferrer: originalPageReferrer,
-        originalSource: originalAttribution.source,
-        originalMedium: originalAttribution.medium,
-        originalCampaign: originalAttribution.campaign
-      });
-
-      // Add location data based on current consent (will be DENIED initially)
-      await this.addLocationDataWithConsent(params, consentData);
-
-      // Get client ID
-      var clientId = this.getConsentAwareClientId(consentData);
-      if (clientId) {
-        params.client_id = clientId;
-      }
+    getBotData: async function () {
 
       // Get user agent and client behavior data (preserve original context)
       var userAgentInfo = GA4Utils.device.parseUserAgent();
@@ -2360,7 +2257,7 @@
 
 
       // Add bot detection data for Cloudflare Worker analysis
-      params.botData = {
+      var botData = {
         user_agent_full: userAgentInfo.user_agent,
         browser_name: userAgentInfo.browser_name,
         device_type: userAgentInfo.device_type,
@@ -2385,16 +2282,7 @@
         ),
       };
 
-      // Store original consent status for later processing
-      params._originalConsentStatus = consentData;
-
-      this.log("Built complete event data preserving original context", {
-        eventName: eventName,
-        pageLocation: params.page_location,
-        sessionId: params.session_id
-      });
-
-      return params;
+      return botData;
     },
 
     /**
@@ -2519,7 +2407,7 @@
 
       // Add stored attribution data for non-foundational events only
       this.addStoredAttributionData(eventParams, eventName);
-
+      eventParams.botData = await this.getBotData();
       // Check consent status via consent manager
       if (window.GA4ConsentManager && typeof window.GA4ConsentManager.shouldSendEvent === 'function') {
         // Check if eventParams already contains complete session data
@@ -2719,30 +2607,7 @@
 
 
       // Add bot detection data for Cloudflare Worker analysis
-      params.botData = {
-        user_agent_full: userAgentInfo.user_agent,
-        browser_name: userAgentInfo.browser_name,
-        device_type: userAgentInfo.device_type,
-        is_mobile: userAgentInfo.is_mobile,
-        has_javascript: clientBehavior.hasJavaScript,
-        screen_available_width: clientBehavior.screenAvailWidth,
-        screen_available_height: clientBehavior.screenAvailHeight,
-        color_depth: clientBehavior.colorDepth,
-        pixel_depth: clientBehavior.pixelDepth,
-        timezone: clientBehavior.timezone,
-        platform: clientBehavior.platform,
-        cookie_enabled: clientBehavior.cookieEnabled,
-        hardware_concurrency: clientBehavior.hardwareConcurrency,
-        max_touch_points: clientBehavior.maxTouchPoints,
-        webdriver_detected: clientBehavior.webdriver,
-        has_automation_indicators: clientBehavior.hasAutomationIndicators,
-        page_load_time: clientBehavior.pageLoadTime,
-        user_interaction_detected: clientBehavior.hasInteracted,
-        bot_score: GA4Utils.botDetection.calculateBotScore(
-          userAgentInfo,
-          clientBehavior
-        ),
-      };
+      params.botData = await this.getBotData();
 
       // Apply GDPR anonymization based on consent
       if (window.GA4ConsentManager && typeof window.GA4ConsentManager.applyGDPRAnonymization === 'function') {
