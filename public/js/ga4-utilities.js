@@ -2420,7 +2420,8 @@
             headers: headers,
             body: requestBody,
             keepalive: true,
-            type: "ping"
+            type: "ping",
+            credentials: endpoint.includes('wp-json') ? 'same-origin' : 'omit'
           });
 
           if (!response.ok) {
@@ -2452,7 +2453,8 @@
                     headers: headers,
                     body: requestBody,
                     keepalive: true,
-                    type: "ping"
+                    type: "ping",
+                    credentials: endpoint.includes('wp-json') ? 'same-origin' : 'omit'
                   });
                   
                   if (!retryResponse.ok) {
@@ -2515,7 +2517,8 @@
                       headers: headers,
                       body: requestBody,
                       keepalive: true,
-                      type: "ping"
+                      type: "ping",
+                      credentials: endpoint.includes('wp-json') ? 'same-origin' : 'omit'
                     });
                     
                     if (!retryResponse.ok) {

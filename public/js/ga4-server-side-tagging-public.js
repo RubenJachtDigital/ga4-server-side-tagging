@@ -2934,18 +2934,71 @@
           timestamp: eventData.timestamp || Date.now()
         };
         
-        await GA4Utils.ajax.sendPayloadReliable(
-          this.config.cloudflareWorkerUrl,
-          payloadData,
-          this.config,
-          "[GA4 Reliable Event CF]",
-          isCritical
-        );
-        this.log("✅ Single event sent reliably to Cloudflare Worker (batch structure)", {
+        // Use sendBeacon for direct_to_cf transmission method (fastest option)
+        const requestBody = JSON.stringify(payloadData);
+        
+        if (navigator.sendBeacon) {
+          // Create a Blob with the correct content type
+          const blob = new Blob([requestBody], { type: 'application/json' });
+          
+          this.log("🚀 Attempting sendBeacon to cross-origin worker", {
+            workerUrl: this.config.cloudflareWorkerUrl,
+            currentOrigin: window.location.origin,
+            payloadSize: requestBody.length
+          });
+          
+          // Note: sendBeacon cannot set custom headers
+          // The Cloudflare Worker will detect this as a sendBeacon request automatically
+          const success = navigator.sendBeacon(this.config.cloudflareWorkerUrl, blob);
+          
+          if (success) {
+            this.log("✅ Event sent successfully via sendBeacon (reliable)", {
+              eventName: eventData.name,
+              isCritical: isCritical,
+              hasConsent: !!(eventData.consent),
+              method: 'sendBeacon'
+            });
+            return;
+          } else {
+            this.log("⚠️ sendBeacon failed (likely cross-origin), falling back to fetch", {
+              eventName: eventData.name,
+              isCritical: isCritical,
+              reason: "Cross-origin sendBeacon restrictions"
+            });
+          }
+        } else {
+          this.log("⚠️ sendBeacon not available, using fetch", {
+            eventName: eventData.name
+          });
+        }
+        
+        // Fallback to fetch with X-Simple-request header
+        const headers = {
+          'Content-Type': 'application/json',
+          'X-Simple-request': 'true'
+        };
+        
+        const response = await fetch(this.config.cloudflareWorkerUrl, {
+          method: 'POST',
+          headers: headers,
+          body: requestBody,
+          keepalive: true,
+          type: "ping",
+          credentials: 'omit'  // Don't send credentials to avoid CORS preflight
+        });
+        
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
+        this.log("✅ Event sent successfully via fetch fallback (reliable)", {
           eventName: eventData.name,
           isCritical: isCritical,
-          hasConsent: !!(eventData.consent)
+          hasConsent: !!(eventData.consent),
+          method: 'fetch',
+          status: response.status
         });
+        
       } catch (error) {
         this.log("❌ Reliable event sending failed", error);
       }
@@ -3440,28 +3493,6 @@
           apiKeyValidationDisabled: true,
           botDetectionEnabled: botDetectionEnabled
         });
-
-        // Perform bot validation via WordPress endpoint if enabled
-        if (botDetectionEnabled) {
-          const botValidationResult = await this.validateBotForSimpleRequest();
-          if (!botValidationResult.success) {
-            this.log("🤖 Bot validation failed for Simple request", {
-              eventName: payload.name,
-              error: botValidationResult.message,
-              isBot: botValidationResult.is_bot
-            });
-            return Promise.resolve({ 
-              error: "Bot validation failed", 
-              is_bot: botValidationResult.is_bot 
-            });
-          }
-          
-          this.log("✅ Bot validation passed for Simple request", {
-            eventName: payload.name,
-            validationCached: botValidationResult.session_cached
-          });
-        }
-
         // Prepare headers for the request
         const headers = {
           'Content-Type': 'application/json',
@@ -3474,15 +3505,41 @@
           headers['X-WP-Nonce'] = currentNonce;
         }
 
+        // Use sendBeacon for direct_to_cf as it's the fastest option
+        const requestBody = JSON.stringify({
+          event_name: payload.name,
+          params: payload.params || {}
+        });
+        
+        if (navigator.sendBeacon) {
+          // Create a Blob with the correct content type
+          const blob = new Blob([requestBody], { type: 'application/json' });
+          
+          // Note: sendBeacon cannot set custom headers like X-Simple-request
+          // The Cloudflare Worker will need to detect this as a direct request by other means
+          const success = navigator.sendBeacon(this.config.cloudflareWorkerUrl, blob);
+          
+          if (success) {
+            this.log("✅ Event sent successfully via sendBeacon", {
+              eventName: payload.name,
+              workerUrl: this.config.cloudflareWorkerUrl
+            });
+            return { success: true, method: 'sendBeacon' };
+          } else {
+            this.log("⚠️ sendBeacon failed, falling back to fetch", {
+              eventName: payload.name
+            });
+          }
+        }
+        
+        // Fallback to fetch if sendBeacon not available or failed
         const response = await fetch(this.config.cloudflareWorkerUrl, {
           method: 'POST',
           headers: headers,
-          body: JSON.stringify({
-            event_name: payload.name,
-            params: payload.params || {}
-          }),
+          body: requestBody,
           keepalive: true, // Important for page unload
-          type: "ping"
+          type: "ping",
+          credentials: 'omit'  // Don't send credentials to avoid CORS preflight
         });
 
         if (!response.ok) {

@@ -1360,14 +1360,26 @@ async function handleRequest(request, env) {
 
   // Detect request type for proper security handling
   const isSimpleRequest = request.headers.get("X-Simple-request") === "true";
-  const isWordPressRequest = request.headers.get("X-WP-Nonce") !== null;
-  const isEncryptedRequest = request.headers.get("X-Encrypted") === "true";
+  
+  // Detect sendBeacon requests (they can't send custom headers)
+  // sendBeacon requests have specific characteristics:
+  // 1. Content-Type: application/json or text/plain
+  // 2. No Authorization header
+  // 3. No X-Simple-request header
+  // 4. No X-WP-Nonce header
+  const hasAuthHeader = request.headers.get("Authorization");
+  const hasNonceHeader = request.headers.get("X-WP-Nonce");
+  const hasSimpleHeader = request.headers.get("X-Simple-request");
+  const contentType = request.headers.get("Content-Type") || "";
+  
+  const isSendBeaconRequest = !hasAuthHeader && !hasNonceHeader && !hasSimpleHeader && 
+                             (contentType.includes("application/json") || contentType.includes("text/plain"));
   
   let requestType = "regular";
-  if (isWordPressRequest) {
-    requestType = isEncryptedRequest ? "wp_encrypted" : "wp_standard";
-  } else if (isSimpleRequest) {
+  if (isSimpleRequest) {
     requestType = "simple";
+  } else if (isSendBeaconRequest) {
+    requestType = "sendbeacon";
   }
   
   if (DEBUG_MODE) {
@@ -1414,8 +1426,15 @@ async function handleRequest(request, env) {
     if (DEBUG_MODE) {
       console.log("⚡ Simple request - bypassing API key and origin validation");
     }
+  } else if (requestType === "sendbeacon") {
+    // sendBeacon requests: Fastest processing, minimal security checks
+    // Skip API key validation and origin validation for maximum performance
     
-    // Still validate payload size for Simple requests
+    if (DEBUG_MODE) {
+      console.log("🚀 sendBeacon request - maximum performance mode (minimal security)");
+    }
+    
+    // Still validate payload size for sendBeacon requests
     if (!validatePayloadSize(request)) {
       return new Response(
         JSON.stringify({
@@ -1433,7 +1452,7 @@ async function handleRequest(request, env) {
       );
     }
     
-    // Basic rate limiting for Simple requests (more lenient than regular requests)
+    // Basic rate limiting for sendBeacon requests (more lenient than regular requests)
     const rateLimitCheck = await checkRateLimit(request);
     if (!rateLimitCheck.allowed) {
       return new Response(
@@ -2800,6 +2819,7 @@ function getCORSHeaders(request) {
     "Access-Control-Allow-Origin": origin,
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type, Authorization, X-API-Key, X-Encrypted, X-Simple-request, X-WP-Nonce",
+    "Access-Control-Allow-Credentials": "true",
     "Access-Control-Max-Age": "86400",
   };
 }
