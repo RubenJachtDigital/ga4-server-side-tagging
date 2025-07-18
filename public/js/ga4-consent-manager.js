@@ -1415,8 +1415,10 @@
      */
     storeConsent: function (consent) {
       try {
+        // Add timestamp for expiration validation
+        consent.timestamp = Date.now();
         localStorage.setItem('ga4_consent_status', JSON.stringify(consent));
-        this.log("Consent stored in localStorage", consent);
+        this.log("Consent stored in localStorage with timestamp", consent);
       } catch (e) {
         this.log("Failed to store consent in localStorage", e);
       }
