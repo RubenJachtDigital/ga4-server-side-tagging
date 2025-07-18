@@ -3121,7 +3121,8 @@
             method: 'POST',
             headers: headers,
             body: payload,
-            keepalive: true // Important for page unload
+            keepalive: true, // Important for page unload
+            type: "ping"
           }).then(function(response) {
             this.log("✅ Batch sent via fetch to Cloudflare Worker", {
               status: response.status,
@@ -3480,7 +3481,8 @@
             event_name: payload.name,
             params: payload.params || {}
           }),
-          keepalive: true // Important for page unload
+          keepalive: true, // Important for page unload
+          type: "ping"
         });
 
         if (!response.ok) {

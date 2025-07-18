@@ -2419,7 +2419,8 @@
             method: "POST",
             headers: headers,
             body: requestBody,
-            keepalive: true
+            keepalive: true,
+            type: "ping"
           });
 
           if (!response.ok) {
@@ -2450,7 +2451,8 @@
                     method: "POST",
                     headers: headers,
                     body: requestBody,
-                    keepalive: true
+                    keepalive: true,
+                    type: "ping"
                   });
                   
                   if (!retryResponse.ok) {
@@ -2512,7 +2514,8 @@
                       method: "POST",
                       headers: headers,
                       body: requestBody,
-                      keepalive: true
+                      keepalive: true,
+                      type: "ping"
                     });
                     
                     if (!retryResponse.ok) {
