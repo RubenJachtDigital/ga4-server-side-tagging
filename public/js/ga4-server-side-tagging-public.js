@@ -845,7 +845,7 @@
     /**
      * Store attribution data in centralized storage
      */
-    storeAttributionData: function (
+    2: function (
       attribution,
       isNewSession,
       utmParams,
@@ -853,14 +853,15 @@
     ) {
       // Store attribution if:
       // 1. It's a new session with any attribution, OR
-      // 2. We have UTM parameters or gclid (new campaign data), OR
-      // 3. The attribution is not direct or internal traffic (preserve only real external sources)
+      // 2. We have UTM parameters or gclid (new campaign data)
+      // 
+      // REMOVED: Condition 3 that was overwriting stored attribution on return from external sites
+      // This prevents payment processors and other external sites from overwriting original attribution
       var shouldStore =
         isNewSession ||
         utmParams.utm_source ||
         utmParams.utm_medium ||
-        gclid ||
-        (attribution.source && attribution.source !== "(direct)" && attribution.source !== "(internal)");
+        gclid;
 
       if (shouldStore && attribution.source && attribution.medium) {
         var userData = GA4Utils.storage.getUserData();
@@ -2158,246 +2159,6 @@
     },
 
     /**
-     * Get location based on IP address with fallback services
-     */
-    getIPBasedLocation: function () {
-      return new Promise((resolve) => {
-        // Try ipapi.co first
-        fetch("https://ipapi.co/json/")
-          .then((response) => {
-            if (!response.ok) throw new Error("ipapi.co lookup failed");
-            return response.json();
-          })
-          .then((data) => {
-            const locationData = {
-              latitude: parseFloat(data.latitude),
-              longitude: parseFloat(data.longitude),
-              city: data.city || "",
-              region: data.region || "",
-              country: data.country_name || "",
-            };
-            this.log("Location obtained from ipapi.co", locationData);
-            resolve(locationData);
-          })
-          .catch((error) => {
-            this.log(
-              "First IP location service failed, trying fallback",
-              error
-            );
-
-            // Fallback to ipinfo.io
-            fetch("https://ipinfo.io/json")
-              .then((response) => {
-                if (!response.ok) throw new Error("ipinfo.io lookup failed");
-                return response.json();
-              })
-              .then((data) => {
-                let coords = [0, 0];
-                if (data.loc && data.loc.includes(",")) {
-                  coords = data.loc.split(",");
-                }
-
-                const locationData = {
-                  latitude: parseFloat(coords[0]),
-                  longitude: parseFloat(coords[1]),
-                  city: data.city || "",
-                  region: data.region || "",
-                  country: data.country || "",
-                };
-
-                this.log(
-                  "Location obtained from fallback service",
-                  locationData
-                );
-                resolve(locationData);
-              })
-              .catch((secondError) => {
-                this.log(
-                  "Second IP location service failed, trying final fallback",
-                  secondError
-                );
-
-                // Final fallback to geoiplookup.io
-                fetch("https://json.geoiplookup.io/")
-                  .then((response) => {
-                    if (!response.ok) throw new Error("geoiplookup.io failed");
-                    return response.json();
-                  })
-                  .then((data) => {
-                    const locationData = {
-                      latitude: parseFloat(data.latitude),
-                      longitude: parseFloat(data.longitude),
-                      city: data.city || "",
-                      region: data.region || "",
-                      country: data.country_name || "",
-                    };
-
-                    this.log(
-                      "Location obtained from final fallback service",
-                      locationData
-                    );
-                    resolve(locationData);
-                  })
-                  .catch((finalError) => {
-                    this.log("All IP location services failed", finalError);
-                    resolve({});
-                  });
-              });
-          });
-      });
-    },
-
-    /**
-     * Build complete event data with all session context, attribution, and page data
-     * This preserves the original page context when events are queued
-     */
-    buildCompleteEventData: async function (eventName, eventParams) {
-      // Create a copy of the event params
-      var params = JSON.parse(JSON.stringify(eventParams));
-      var session = GA4Utils.session.get();
-
-      // Add debug_mode and timestamp if not present
-      if (!params.hasOwnProperty("debug_mode")) {
-        if (Boolean(this.config.debugMode) === true) {
-          params.debug_mode = Boolean(this.config.debugMode);
-        }
-      }
-
-      if (!params.hasOwnProperty("event_timestamp")) {
-        params.event_timestamp = Math.floor(Date.now() / 1000);
-      }
-
-      // Get consent data from consent manager (will be DENIED at queueing time)
-      var consentData = null;
-      if (window.GA4ConsentManager && typeof window.GA4ConsentManager.getConsentForServerSide === 'function') {
-        consentData = window.GA4ConsentManager.getConsentForServerSide();
-      } else {
-        // Fallback to GA4Utils
-        consentData = GA4Utils.consent.getForServerSide();
-      }
-
-      // Add session information (preserve original session context)
-      if (!params.hasOwnProperty("session_id")) {
-        params.session_id = session.id;
-      }
-      if (!params.hasOwnProperty("session_count")) {
-        params.session_count = session.sessionCount;
-      }
-      if (!params.hasOwnProperty("engagement_time_msec")) {
-        params.engagement_time_msec = GA4Utils.time.calculateEngagementTime(
-          session.start
-        );
-      }
-
-      // Capture and preserve COMPLETE original page context and attribution
-      // Force override ALL page and attribution data to preserve original context
-      var originalPageLocation = window.location.href;
-      var originalPageTitle = document.title;
-      var originalPageReferrer = document.referrer || "";
-      
-      // Get original attribution data from current page (this is what we want to preserve!)
-      var originalUtmParams = GA4Utils.utm.getAll();
-      var originalGclid = GA4Utils.gclid.get();
-      var originalAttribution = this.calculateAttributionForOriginalPage(
-        originalUtmParams,
-        originalGclid,
-        originalPageReferrer
-      );
-      
-      // Override ALL page and attribution context in params
-      params.page_location = originalPageLocation;
-      params.page_title = originalPageTitle;
-      params.page_referrer = originalPageReferrer;
-      
-      // Override attribution data
-      if (originalAttribution.source) params.source = originalAttribution.source;
-      if (originalAttribution.medium) params.medium = originalAttribution.medium;
-      if (originalAttribution.campaign) params.campaign = originalAttribution.campaign;
-      if (originalAttribution.content) params.content = originalAttribution.content;
-      if (originalAttribution.term) params.term = originalAttribution.term;
-      if (originalAttribution.gclid) params.gclid = originalAttribution.gclid;
-      
-      // Always add timezone (preserve original page timezone)
-      if (!params.timezone) {
-        params.timezone = this.getTimezone();
-      }
-      
-      // Add location data from timezone as fallback
-      if (params.timezone) {
-        var timezoneLocation = GA4Utils.helpers.getLocationFromTimezone(params.timezone);
-        if (!params.geo_continent && timezoneLocation.continent) {
-          params.geo_continent = timezoneLocation.continent;
-        }
-        if (!params.geo_country_tz && timezoneLocation.country) {
-          params.geo_country_tz = timezoneLocation.country;
-        }
-        if (!params.geo_city_tz && timezoneLocation.city) {
-          params.geo_city_tz = timezoneLocation.city;
-        }
-      }
-      
-      this.log("🔒 Captured COMPLETE original context for preservation", {
-        originalPageLocation: originalPageLocation,
-        originalPageTitle: originalPageTitle,
-        originalPageReferrer: originalPageReferrer,
-        originalSource: originalAttribution.source,
-        originalMedium: originalAttribution.medium,
-        originalCampaign: originalAttribution.campaign
-      });
-
-      // Add location data based on current consent (will be DENIED initially)
-      await this.addLocationDataWithConsent(params, consentData);
-
-      // Get client ID
-      var clientId = this.getConsentAwareClientId(consentData);
-      if (clientId) {
-        params.client_id = clientId;
-      }
-
-      // Get user agent and client behavior data (preserve original context)
-      var userAgentInfo = GA4Utils.device.parseUserAgent();
-      var clientBehavior = GA4Utils.botDetection.getClientBehaviorData();
-
-
-      // Add bot detection data for Cloudflare Worker analysis
-      params.botData = {
-        user_agent_full: userAgentInfo.user_agent,
-        browser_name: userAgentInfo.browser_name,
-        device_type: userAgentInfo.device_type,
-        is_mobile: userAgentInfo.is_mobile,
-        has_javascript: clientBehavior.hasJavaScript,
-        screen_available_width: clientBehavior.screenAvailWidth,
-        screen_available_height: clientBehavior.screenAvailHeight,
-        color_depth: clientBehavior.colorDepth,
-        pixel_depth: clientBehavior.pixelDepth,
-        timezone: clientBehavior.timezone,
-        platform: clientBehavior.platform,
-        cookie_enabled: clientBehavior.cookieEnabled,
-        hardware_concurrency: clientBehavior.hardwareConcurrency,
-        max_touch_points: clientBehavior.maxTouchPoints,
-        webdriver_detected: clientBehavior.webdriver,
-        has_automation_indicators: clientBehavior.hasAutomationIndicators,
-        page_load_time: clientBehavior.pageLoadTime,
-        user_interaction_detected: clientBehavior.hasInteracted,
-        bot_score: GA4Utils.botDetection.calculateBotScore(
-          userAgentInfo,
-          clientBehavior
-        ),
-      };
-
-      // Store original consent status for later processing
-      params._originalConsentStatus = consentData;
-
-      this.log("Built complete event data preserving original context", {
-        eventName: eventName,
-        pageLocation: params.page_location,
-        sessionId: params.session_id
-      });
-
-      return params;
-    },
-
-    /**
      * Calculate attribution for the original page (similar to calculateAttribution but for preservation)
      */
     calculateAttributionForOriginalPage: function(utmParams, gclid, referrer) {
@@ -2445,9 +2206,14 @@
       if (conversionEvents.includes(eventName)) {
         var storedAttribution = this.getStoredAttribution();
         
-        this.log('DEBUG: Stored attribution for conversion event:', {
+        this.log('🎯 Applying stored attribution for conversion event:', {
             eventName: eventName,
-            storedAttribution: storedAttribution
+            storedAttribution: storedAttribution,
+            beforeAttribution: {
+              source: eventParams.source,
+              medium: eventParams.medium,
+              campaign: eventParams.campaign
+            }
         });
         
         
@@ -4216,6 +3982,9 @@
       // Foundational events (page_view, session_start, first_visit) should keep their current attribution
       var foundationalEvents = ['custom_session_start', 'custom_first_visit', 'page_view', 'view_item', 'view_item_list'];
       
+      // Conversion events are handled separately in trackEvent function to avoid duplication
+      var conversionEvents = ['purchase', 'quote_request', 'form_conversion'];
+      
       if (foundationalEvents.includes(eventName)) {
         this.log("Foundational event - keeping current attribution", {
           eventName: eventName,
@@ -4225,52 +3994,17 @@
         return;
       }
       
-      // Get stored attribution data (original traffic source)
-      var storedAttribution = this.getStoredAttribution();
-      
-      // Special handling for conversion events - they get both source and originalSource with stored values
-      var conversionEvents = ['purchase', 'quote_request', 'form_conversion'];
-      
       if (conversionEvents.includes(eventName)) {
-        // For conversion events, set both source and originalSource to stored attribution
-        if (storedAttribution.source) {
-          params.source = storedAttribution.source;
-        }
-        if (storedAttribution.medium) {
-          params.medium = storedAttribution.medium;
-        }
-        if (storedAttribution.campaign) {
-          params.campaign = storedAttribution.campaign;
-        }
-        if (storedAttribution.content) {
-          params.content = storedAttribution.content;
-        }
-        if (storedAttribution.term) {
-          params.term = storedAttribution.term;
-        }
-        if (storedAttribution.gclid) {
-          params.gclid = storedAttribution.gclid;
-        }
-        
-        // Calculate and add traffic type for both current and original
-        if (storedAttribution.source && storedAttribution.medium) {
-          var trafficType = GA4Utils.traffic.getType(
-            storedAttribution.source,
-            storedAttribution.medium,
-            null // No referrer domain for stored attribution
-          );
-          params.traffic_type = trafficType;
-        }
-        
-        this.log("Added stored attribution as both current and original attribution for conversion event", {
+        this.log("Conversion event - attribution already handled in trackEvent", {
           eventName: eventName,
           source: params.source,
-          originalSource: params.originalSource,
-          medium: params.medium,
-          originalMedium: params.originalMedium
+          medium: params.medium
         });
         return;
       }
+      
+      // Get stored attribution data (original traffic source)
+      var storedAttribution = this.getStoredAttribution();
       
       // For other non-foundational events, add stored attribution as original attribution fields
       // Remove current attribution fields and only keep original attribution
