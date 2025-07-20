@@ -61,7 +61,7 @@
 
       // Log initialization
       this.log(
-        "%c GA4 Server-Side Tagging initialized v1",
+        "%c GA4 Server-Side Tagging initialized v2",
         "background: #4CAF50; color: white; font-size: 16px; font-weight: bold; padding: 8px 12px; border-radius: 4px;"
       );
     },
@@ -674,6 +674,18 @@
       ignore_referrer,
       isNewSession
     ) {
+      // For internal navigation, ignore UTM parameters and gclid - mark as internal
+      if (ignore_referrer && !isNewSession) {
+        return {
+          source: "(internal)",
+          medium: "internal", 
+          campaign: "(not set)",
+          content: "",
+          term: "",
+          gclid: ""
+        };
+      }
+
       var source = utmParams.utm_source || "";
       var medium = utmParams.utm_medium || "";
       var campaign = utmParams.utm_campaign || "(not set)";
@@ -692,8 +704,9 @@
         campaign = referrerAttribution.campaign;
       }
 
-      // If we have a gclid, always override with Google Ads attribution (gclid is definitive proof of paid traffic)
-      if (gclid) {
+      // If we have a gclid, override with Google Ads attribution ONLY if not internal navigation
+      // Internal navigation should preserve the (internal) attribution even with gclid parameters
+      if (gclid && !ignore_referrer) {
         source = "google";
         medium = "cpc";
         campaign = utmParams.utm_campaign || "(not set)";
@@ -2285,38 +2298,6 @@
       return botData;
     },
 
-    /**
-     * Calculate attribution for the original page (similar to calculateAttribution but for preservation)
-     */
-    calculateAttributionForOriginalPage: function(utmParams, gclid, referrer) {
-      var referrerDomain = "";
-      var ignore_referrer = false;
-      
-      // Parse referrer if it exists
-      if (referrer) {
-        try {
-          var referrerURL = new URL(referrer);
-          referrerDomain = referrerURL.hostname;
-          
-          // Check if the referrer is from the same domain (internal link)
-          if (referrerDomain === window.location.hostname) {
-            ignore_referrer = true;
-          }
-        } catch (e) {
-          this.log("Invalid referrer URL:", referrer);
-        }
-      }
-      
-      // Use the existing calculateAttribution logic but for current page context
-      return this.calculateAttribution(
-        utmParams,
-        gclid, 
-        referrerDomain,
-        referrer,
-        ignore_referrer,
-        true // Assume new session for original page calculation
-      );
-    },
 
     trackEvent: async function (eventName, eventParams = {}) {
       this.log("Tracking event: " + eventName, {
