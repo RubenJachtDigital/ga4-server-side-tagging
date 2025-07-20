@@ -1367,6 +1367,148 @@ class GA4_Server_Side_Tagging_Admin
     }
 
     /**
+     * AJAX handler for processing event queue manually (testing)
+     */
+    public function ajax_process_event_queue()
+    {
+        // Check nonce for security
+        if (!check_ajax_referer('ga4_generate_api_key', 'nonce', false)) {
+            wp_send_json_error(array('message' => 'Security check failed'));
+            return;
+        }
+
+        // Check user permissions
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error(array('message' => 'Insufficient permissions'));
+            return;
+        }
+
+        try {
+            // Include necessary files
+            require_once GA4_SERVER_SIDE_TAGGING_PLUGIN_DIR . 'includes/class-ga4-server-side-tagging-endpoint.php';
+            require_once GA4_SERVER_SIDE_TAGGING_PLUGIN_DIR . 'includes/class-ga4-encryption-util.php';
+            
+            // Initialize the endpoint
+            $endpoint = new \GA4ServerSideTagging\API\GA4_Server_Side_Tagging_Endpoint($this->logger);
+            
+            // Get queue status first
+            $queue_status = $this->get_queue_status();
+            
+            if ($queue_status['pending_events'] === 0) {
+                wp_send_json_success(array(
+                    'message' => 'No events in queue to process',
+                    'events_processed' => 0,
+                    'queue_status' => $queue_status
+                ));
+                return;
+            }
+            
+            // Process the queue (max 100 events per batch)
+            $result = $endpoint->process_event_queue(100);
+            
+            // Get updated queue status
+            $updated_queue_status = $this->get_queue_status();
+            
+            if ($result['success']) {
+                wp_send_json_success(array(
+                    'message' => 'Successfully processed ' . $result['events_processed'] . ' events',
+                    'events_processed' => $result['events_processed'],
+                    'batch_id' => $result['batch_id'],
+                    'processing_time_ms' => $result['processing_time_ms'],
+                    'queue_status' => $updated_queue_status
+                ));
+            } else {
+                wp_send_json_error(array(
+                    'message' => 'Failed to process events: ' . $result['error'],
+                    'error' => $result['error'],
+                    'queue_status' => $updated_queue_status
+                ));
+            }
+            
+        } catch (\Exception $e) {
+            wp_send_json_error(array('message' => 'Error processing queue: ' . $e->getMessage()));
+        }
+    }
+
+    /**
+     * AJAX handler for getting queue status
+     */
+    public function ajax_get_queue_status()
+    {
+        // Check nonce for security
+        if (!check_ajax_referer('ga4_generate_api_key', 'nonce', false)) {
+            wp_send_json_error(array('message' => 'Security check failed'));
+            return;
+        }
+
+        // Check user permissions
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error(array('message' => 'Insufficient permissions'));
+            return;
+        }
+
+        try {
+            $queue_status = $this->get_queue_status();
+            wp_send_json_success($queue_status);
+        } catch (\Exception $e) {
+            wp_send_json_error(array('message' => 'Error getting queue status: ' . $e->getMessage()));
+        }
+    }
+
+    /**
+     * Get event queue status
+     */
+    private function get_queue_status()
+    {
+        global $wpdb;
+        
+        $table_name = $wpdb->prefix . 'ga4_event_queue';
+        
+        // Get counts by status
+        $status_counts = $wpdb->get_results(
+            "SELECT status, COUNT(*) as count FROM {$table_name} GROUP BY status",
+            ARRAY_A
+        );
+        
+        $counts = array(
+            'pending' => 0,
+            'processing' => 0,
+            'completed' => 0,
+            'failed' => 0
+        );
+        
+        foreach ($status_counts as $status) {
+            $counts[$status['status']] = (int) $status['count'];
+        }
+        
+        // Get oldest pending event
+        $oldest_pending = $wpdb->get_var(
+            "SELECT created_at FROM {$table_name} WHERE status = 'pending' ORDER BY created_at ASC LIMIT 1"
+        );
+        
+        // Get recent completed batches
+        $recent_batches = $wpdb->get_results(
+            "SELECT batch_id, COUNT(*) as event_count, MAX(processed_at) as processed_at 
+             FROM {$table_name} 
+             WHERE status = 'completed' AND batch_id IS NOT NULL 
+             GROUP BY batch_id 
+             ORDER BY processed_at DESC 
+             LIMIT 5",
+            ARRAY_A
+        );
+        
+        return array(
+            'pending_events' => $counts['pending'],
+            'processing_events' => $counts['processing'],
+            'completed_events' => $counts['completed'],
+            'failed_events' => $counts['failed'],
+            'total_events' => array_sum($counts),
+            'oldest_pending' => $oldest_pending,
+            'recent_batches' => $recent_batches
+        );
+    }
+
+    /**
      * Ensure any existing plain text encryption key gets encrypted
      * This runs automatically on settings save to upgrade plain text keys
      */

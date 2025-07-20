@@ -712,6 +712,28 @@ if (!defined('WPINC')) {
                 
                 <p><a href="https://developers.cloudflare.com/workers/runtime-apis/handlers/fetch/" target="_blank">📖 Learn more about Cloudflare Worker environment variables</a></p>
             </div>
+
+            <!-- Event Queue Testing Section -->
+            <div class="ga4-server-side-tagging-admin-box">
+                <h3>Event Queue Testing & Monitoring</h3>
+                <p>Monitor and manually process queued events for testing purposes.</p>
+                
+                <div id="queue-status" style="margin-bottom: 20px;">
+                    <p><strong>Loading queue status...</strong></p>
+                </div>
+                
+                <div style="margin-bottom: 20px;">
+                    <button type="button" id="refresh-queue-status" class="button">🔄 Refresh Status</button>
+                    <button type="button" id="process-queue-now" class="button button-primary">⚡ Process Queue Now</button>
+                </div>
+                
+                <div id="queue-test-result" style="display: none; padding: 10px; margin-top: 10px; border-radius: 4px;">
+                </div>
+                
+                <div style="margin-top: 20px; font-size: 12px; color: #666;">
+                    <p><strong>Note:</strong> Events are automatically processed every 5 minutes via cron job. Manual processing is for testing purposes only.</p>
+                </div>
+            </div>
         </div>
     </div>
 </div>
@@ -937,5 +959,103 @@ jQuery(document).ready(function($) {
         updateTransmissionExplanation();
         toggleTransmissionFields();
     });
+
+    // Event Queue Testing Functions
+    function loadQueueStatus() {
+        $.ajax({
+            url: ajaxurl,
+            type: 'POST',
+            data: {
+                action: 'ga4_get_queue_status',
+                nonce: '<?php echo wp_create_nonce('ga4_generate_api_key'); ?>'
+            },
+            success: function(response) {
+                if (response.success) {
+                    var data = response.data;
+                    var html = '<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px; margin-bottom: 15px;">';
+                    html += '<div style="background: #f0f8ff; padding: 10px; border-radius: 4px; text-align: center;"><strong>' + data.pending_events + '</strong><br><small>Pending</small></div>';
+                    html += '<div style="background: #fff3cd; padding: 10px; border-radius: 4px; text-align: center;"><strong>' + data.processing_events + '</strong><br><small>Processing</small></div>';
+                    html += '<div style="background: #d4edda; padding: 10px; border-radius: 4px; text-align: center;"><strong>' + data.completed_events + '</strong><br><small>Completed</small></div>';
+                    html += '<div style="background: #f8d7da; padding: 10px; border-radius: 4px; text-align: center;"><strong>' + data.failed_events + '</strong><br><small>Failed</small></div>';
+                    html += '</div>';
+                    
+                    if (data.oldest_pending) {
+                        html += '<p><strong>Oldest pending event:</strong> ' + data.oldest_pending + '</p>';
+                    }
+                    
+                    if (data.recent_batches && data.recent_batches.length > 0) {
+                        html += '<details style="margin-top: 10px;"><summary><strong>Recent Batches</strong></summary><ul>';
+                        data.recent_batches.forEach(function(batch) {
+                            html += '<li>' + batch.batch_id + ' (' + batch.event_count + ' events) - ' + batch.processed_at + '</li>';
+                        });
+                        html += '</ul></details>';
+                    }
+                    
+                    $('#queue-status').html(html);
+                } else {
+                    $('#queue-status').html('<p style="color: red;">Error loading queue status: ' + response.data.message + '</p>');
+                }
+            },
+            error: function() {
+                $('#queue-status').html('<p style="color: red;">Failed to load queue status</p>');
+            }
+        });
+    }
+
+    function processQueueNow() {
+        $('#process-queue-now').prop('disabled', true).text('⏳ Processing...');
+        $('#queue-test-result').hide();
+        
+        $.ajax({
+            url: ajaxurl,
+            type: 'POST',
+            data: {
+                action: 'ga4_process_event_queue',
+                nonce: '<?php echo wp_create_nonce('ga4_generate_api_key'); ?>'
+            },
+            success: function(response) {
+                var resultDiv = $('#queue-test-result');
+                if (response.success) {
+                    resultDiv.removeClass('error').addClass('success')
+                        .css('background-color', '#d4edda')
+                        .css('color', '#155724')
+                        .css('border', '1px solid #c3e6cb')
+                        .html('<strong>✅ Success:</strong> ' + response.data.message);
+                    
+                    if (response.data.processing_time_ms) {
+                        resultDiv.append('<br><small>Processing time: ' + response.data.processing_time_ms + 'ms</small>');
+                    }
+                } else {
+                    resultDiv.removeClass('success').addClass('error')
+                        .css('background-color', '#f8d7da')
+                        .css('color', '#721c24')
+                        .css('border', '1px solid #f5c6cb')
+                        .html('<strong>❌ Error:</strong> ' + response.data.message);
+                }
+                resultDiv.show();
+                
+                // Refresh status after processing
+                setTimeout(loadQueueStatus, 1000);
+            },
+            error: function() {
+                $('#queue-test-result').removeClass('success').addClass('error')
+                    .css('background-color', '#f8d7da')
+                    .css('color', '#721c24')
+                    .css('border', '1px solid #f5c6cb')
+                    .html('<strong>❌ Error:</strong> Failed to process queue')
+                    .show();
+            },
+            complete: function() {
+                $('#process-queue-now').prop('disabled', false).text('⚡ Process Queue Now');
+            }
+        });
+    }
+
+    // Event handlers for queue testing
+    $('#refresh-queue-status').on('click', loadQueueStatus);
+    $('#process-queue-now').on('click', processQueueNow);
+    
+    // Load initial queue status
+    loadQueueStatus();
 });
 </script>

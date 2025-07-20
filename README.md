@@ -31,9 +31,14 @@ A comprehensive WordPress plugin that provides advanced server-side tagging for 
 - **Comprehensive debugging** and logging system
 
 ### Performance & Reliability
+- **🚀 Event Queue System** with 5-minute batch processing for optimized server performance
+- **📊 Batch Processing** - Multiple events sent as single request to reduce server load
+- **⏱️ Automated Cron Jobs** with concurrent processing protection and performance metrics
+- **🗄️ Database Queue Management** with automatic cleanup and optimization
+- **📈 Real-time Queue Monitoring** with admin panel status display and manual processing
+- **🔄 Smart Event Batching** - Combines up to 100 events per batch for efficient transmission
 - **Centralized storage management** with automatic expiration
 - **Multiple location API fallbacks** for reliable geolocation
-- **Event queuing system** for consent-pending events
 - **Rate limiting** and payload size validation
 - **Graceful degradation** when services are unavailable
 
@@ -47,6 +52,47 @@ A comprehensive WordPress plugin that provides advanced server-side tagging for 
 - **🤖 Bot detection and filtering** with multiple detection layers
 - **🔒 CORS protection** with explicit header allowlisting
 - **🔗 Cross-platform encryption** compatible across PHP, JavaScript, and Cloudflare Worker
+
+## 🚀 Event Queue System
+
+### **High-Performance Batch Processing**
+
+The plugin features a sophisticated event queue system that significantly improves server performance by batching multiple events into single requests:
+
+#### **Queue Architecture**
+- **📥 Immediate Queuing**: Events are instantly queued in database for immediate response to client
+- **⏱️ 5-Minute Processing**: Automated cron job processes queue every 5 minutes
+- **📊 Batch Consolidation**: Up to 100 events combined into single Cloudflare request
+- **🔄 Single Request Transmission**: All batched events sent as one payload to reduce server load
+
+#### **Database Management**
+- **🗄️ Dedicated Queue Table**: `wp_ga4_event_queue` with status tracking and retry logic
+- **🧹 Automatic Cleanup**: Old completed events removed daily (configurable retention)
+- **📈 Performance Metrics**: Processing time and throughput monitoring
+- **🔒 Concurrent Protection**: Prevents multiple cron jobs from running simultaneously
+
+#### **Admin Panel Features**
+- **📊 Real-time Status Display**: Live queue statistics with pending/processing/completed counts
+- **⚡ Manual Processing**: "Process Queue Now" button for testing purposes
+- **📈 Batch History**: Recent batch processing history with event counts and timestamps
+- **🔄 Auto-refresh**: Queue status updates automatically after processing
+
+#### **Performance Benefits**
+- **🚀 Reduced Server Load**: 90%+ fewer HTTP requests to Cloudflare
+- **⏱️ Faster Response Times**: Immediate client response while events process in background
+- **📊 Better Resource Utilization**: Batch processing more efficient than individual requests
+- **🔧 Configurable Batch Size**: Adjustable batch size for different traffic volumes
+
+#### **Technical Implementation**
+```php
+// Events are queued immediately
+wp_ga4_event_queue:
+├── event_data (JSON)     // Complete event payload
+├── status               // pending → processing → completed/failed
+├── created_at          // Queue timestamp
+├── batch_id           // Processing batch identifier
+└── retry_count        // Failed processing attempts
+```
 
 ## 🔄 Data Flow & Transmission Methods
 

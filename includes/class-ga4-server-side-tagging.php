@@ -107,6 +107,12 @@ class GA4_Server_Side_Tagging
         
         // Add AJAX handler for generating encryption key
         $this->loader->add_action('wp_ajax_ga4_generate_encryption_key', $plugin_admin, 'ajax_generate_encryption_key');
+        
+        // Add AJAX handler for processing event queue
+        $this->loader->add_action('wp_ajax_ga4_process_event_queue', $plugin_admin, 'ajax_process_event_queue');
+        
+        // Add AJAX handler for getting queue status
+        $this->loader->add_action('wp_ajax_ga4_get_queue_status', $plugin_admin, 'ajax_get_queue_status');
     }
 
     /**
