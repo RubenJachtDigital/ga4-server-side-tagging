@@ -245,7 +245,6 @@ class GA4_Server_Side_Tagging_Public
                         if ($this->is_order_already_tracked($order_id)) {
                             // Order already tracked - send orderSent flag instead
                             $script_data['orderSent'] = true;
-                            $this->logger->warning('Duplicate order tracking prevented - Order ID: ' . $order_id . ' already tracked in this session');
                         } else {
                             // First time tracking this order - send order data and mark as tracked
                             $script_data['orderData'] = $this->get_order_data_for_tracking($order);
