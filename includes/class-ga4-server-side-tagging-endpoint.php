@@ -214,11 +214,16 @@ class GA4_Server_Side_Tagging_Endpoint
                 'positive_checks_count' => count($positive_checks)
             );
 
-            $this->logger->bot_detected('Bot detected attempting to access secure config', array(
+            // Log the bot detection with context from the calling method
+            $context = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 2)[1]['function'] ?? 'unknown';
+            $message = ($context === 'send_events') ? 'Bot detected attempting to send events' : 'Bot detected attempting to access secure config';
+            
+            $this->logger->bot_detected($message, array(
                 'ip' => $client_ip,
                 'user_agent' => $user_agent,
                 'referer' => $referer,
-                'detection_details' => $detection_details
+                'detection_details' => $detection_details,
+                'context' => $context
             ));
         }
 
@@ -599,6 +604,22 @@ class GA4_Server_Side_Tagging_Endpoint
         $client_ip = $this->get_client_ip($request);
         
         try {
+            // Bot detection check - prevent bots from storing events in database
+            if ($this->is_bot_request($request)) {
+                $this->logger->warning("Bot detected attempting to send events - blocked from database storage", array(
+                    'ip' => $client_ip,
+                    'user_agent' => $request->get_header('user-agent'),
+                    'referer' => $request->get_header('referer')
+                ));
+                return new \WP_REST_Response(
+                    array(
+                        'error' => 'Request blocked',
+                        'details' => 'Automated requests are not allowed'
+                    ),
+                    403
+                );
+            }
+
             // Rate limiting check - 100 requests per minute per IP
             $rate_limit_check = $this->check_rate_limit($request);
             if (!$rate_limit_check['allowed']) {
