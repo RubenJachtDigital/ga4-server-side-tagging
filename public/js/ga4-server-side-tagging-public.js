@@ -2263,8 +2263,10 @@
       // Add stored attribution data for non-foundational events only
       this.addStoredAttributionData(eventParams, eventName);
       eventParams.botData = await this.getBotData();
-      // Check consent status via consent manager
-      if (window.GA4ConsentManager && typeof window.GA4ConsentManager.shouldSendEvent === 'function') {
+
+      // Check consent status via consent manager (only if consent mode is enabled)
+      if (this.config.consentSettings && this.config.consentSettings.consentModeEnabled && 
+          window.GA4ConsentManager && typeof window.GA4ConsentManager.shouldSendEvent === 'function') {
         // Check if eventParams already contains complete session data
         var hasCompleteData = eventParams.hasOwnProperty('page_location') && 
                              eventParams.hasOwnProperty('source') && 
@@ -2314,7 +2316,7 @@
         return;
       }
 
-      // Fallback: Send the event normally if no consent manager
+      // Fallback: Send the event normally if consent mode disabled or no consent manager
       this.trackEventInternal(eventName, eventParams);
     },
 
@@ -2776,6 +2778,7 @@
         ...batchPayload,
         isCritical: isCritical
       });
+
 
       // Determine transmission method based on configuration
       const transmissionMethod = this.config.transmissionMethod || 'direct_to_cf';

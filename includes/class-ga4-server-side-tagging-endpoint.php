@@ -679,7 +679,6 @@ class GA4_Server_Side_Tagging_Endpoint
                     $request_data['consent'] = $consent_data;
                 }
                 
-                $this->logger->info("Legacy single event converted to unified batch format: {$event_name} - Params: " . count($event_params) . " - Has consent: " . ($consent_data ? 'yes' : 'no') . " - IP: {$client_ip}");
                 
             } else {
                 return new \WP_REST_Response(array('error' => 'Missing events array or single event data'), 400);
@@ -709,8 +708,13 @@ class GA4_Server_Side_Tagging_Endpoint
             $queued_events = 0;
             $failed_events = 0;
             
-            // Check if secured transmission is enabled for re-encryption when storing
-            $secured_transmission = (bool) get_option('ga4_jwt_encryption_enabled', false);
+            // Check if encryption is enabled for storing in database
+            $encryption_enabled = (bool) get_option('ga4_jwt_encryption_enabled', false);
+            
+            // Determine if the original request was encrypted (time-based JWT or regular JWT)
+            $original_request_body = $request->get_json_params();
+            $was_originally_encrypted = (isset($original_request_body['time_jwt']) && !empty($original_request_body['time_jwt'])) ||
+                                       (isset($original_request_body['encrypted']) && $original_request_body['encrypted'] === true);
             
             // Process each event for queuing
             foreach ($request_data['events'] as $event) {
@@ -724,19 +728,24 @@ class GA4_Server_Side_Tagging_Endpoint
                     'client_ip' => $client_ip
                 );
                 
-                // Determine if we should encrypt when storing
+                // Re-encrypt with permanent key if:
+                // 1. The original request was encrypted (time-based JWT or regular JWT) AND
+                // 2. Permanent encryption is enabled in settings
                 $should_encrypt = false;
-                if ($secured_transmission) {
+                if ($was_originally_encrypted && $encryption_enabled) {
                     $encryption_key = GA4_Encryption_Util::retrieve_encrypted_key('ga4_jwt_encryption_key');
                     if (!empty($encryption_key)) {
                         try {
                             $encrypted_data = GA4_Encryption_Util::encrypt(wp_json_encode($event_data), $encryption_key);
                             $should_encrypt = true;
                             $event_data = $encrypted_data;
+                            
                         } catch (\Exception $e) {
-                            $this->logger->warning("Failed to encrypt event for queuing: " . $e->getMessage());
+                            $this->logger->warning("Failed to re-encrypt event for queuing: " . $e->getMessage());
                             // Continue with unencrypted data
                         }
+                    } else {
+                        $this->logger->warning("Permanent encryption key not available - storing event unencrypted");
                     }
                 }
                 
@@ -756,7 +765,6 @@ class GA4_Server_Side_Tagging_Endpoint
                 $this->logger->warning("Some events failed to queue - Queued: $queued_events, Failed: $failed_events");
             }
             
-            $this->logger->info("Events queued for batch processing - Queued: $queued_events, Failed: $failed_events, Session: $session_id");
             
             return new \WP_REST_Response(array(
                 'success' => true,

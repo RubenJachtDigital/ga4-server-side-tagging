@@ -104,12 +104,6 @@
      * @returns {boolean} - True if event should be sent immediately, false if queued
      */
     shouldSendEvent: function(eventName, eventParams, completeEventData) {
-      this.log("🔍 shouldSendEvent called", {
-        eventName: eventName,
-        hasCompleteData: !!completeEventData,
-        consentGiven: this.consentGiven,
-        currentQueueLength: this.eventQueue.length
-      });
       
       // If consent is already given, send immediately
       if (this.consentGiven) {
@@ -406,6 +400,7 @@
 
       // Send batch to the tracking instance
       let batchSent = false;
+      
       if (this.trackingInstance && typeof this.trackingInstance.sendBatchEvents === 'function') {
         this.trackingInstance.sendBatchEvents(batchPayload, isCritical);
         batchSent = true;

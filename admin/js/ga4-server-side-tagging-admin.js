@@ -8,10 +8,14 @@
     'use strict';
 
     $(document).ready(function() {
+        // Debug: Check if localized script is loaded
+        console.log('GA4 Admin JS loaded');
+        console.log('ga4AdminAjax object:', typeof ga4AdminAjax !== 'undefined' ? ga4AdminAjax : 'NOT DEFINED');
+        
         // Server-side tagging is always enabled - Cloudflare Worker URL is always visible
 
         // Toggle debug mode options
-        $('#ga4_server_side_tagging_debug_mode').on('change', function() {
+        $('#ga4_server_side_tagging_debug_mode').off('change').on('change', function() {
             if ($(this).is(':checked')) {
                 // Show a warning about debug mode
                 if (!$('#debug-mode-warning').length) {
@@ -27,24 +31,26 @@
         }).trigger('change');
 
         // Toggle e-commerce tracking options
-        $('#ga4_ecommerce_tracking').on('change', function() {
+        $('#ga4_ecommerce_tracking').off('change').on('change', function() {
             // Future e-commerce specific options can be toggled here
         }).trigger('change');
 
         // Password visibility toggle
-        $('<button type="button" class="button button-secondary" id="toggle-api-secret">Show</button>')
-            .insertAfter('#ga4_api_secret')
-            .css('margin-left', '10px')
-            .on('click', function(e) {
-                e.preventDefault();
-                var $input = $('#ga4_api_secret');
-                var type = $input.attr('type') === 'password' ? 'text' : 'password';
-                $input.attr('type', type);
-                $(this).text(type === 'password' ? 'Show' : 'Hide');
-            });
+        if ($('#toggle-api-secret').length === 0) {
+            $('<button type="button" class="button button-secondary" id="toggle-api-secret">Show</button>')
+                .insertAfter('#ga4_api_secret')
+                .css('margin-left', '10px')
+                .on('click', function(e) {
+                    e.preventDefault();
+                    var $input = $('#ga4_api_secret');
+                    var type = $input.attr('type') === 'password' ? 'text' : 'password';
+                    $input.attr('type', type);
+                    $(this).text(type === 'password' ? 'Show' : 'Hide');
+                });
+        }
 
         // Test connection button
-        $('#ga4_test_connection').on('click', function() {
+        $('#ga4_test_connection').off('click').on('click', function() {
             // Validation before test
             var measurementId = $('#ga4_measurement_id').val();
             var apiSecret = $('#ga4_api_secret').val();
@@ -62,12 +68,34 @@
         
         // Click Tracking functionality
         initializeClickTracking();
+        
+        // Global form submission handler - update all configs before submit
+        $('form').off('submit.ga4_configs').on('submit.ga4_configs', function(e) {
+            console.log('Form submission - updating A/B and Click tracking configs');
+            
+            // Update A/B tests config
+            if (typeof updateABTestsConfig === 'function') {
+                updateABTestsConfig();
+            }
+            
+            // Update click tracks config  
+            if (typeof updateClickTracksConfig === 'function') {
+                updateClickTracksConfig();
+            }
+            
+            // Debug: Log the values being submitted
+            console.log('Final A/B Tests Config:', $('#ga4_ab_tests_config').val());
+            console.log('Final Click Tracks Config:', $('#ga4_click_tracks_config').val());
+            console.log('Form data being submitted:', new FormData(this));
+            
+            return true;
+        });
     });
 
     // A/B Testing Functions
     function initializeABTesting() {
         // Toggle A/B testing configuration
-        $('#ga4_ab_tests_enabled').on('change', function() {
+        $('#ga4_ab_tests_enabled').off('change').on('change', function() {
             if ($(this).is(':checked')) {
                 $('#ab_testing_config').show();
             } else {
@@ -76,7 +104,7 @@
         }).trigger('change');
 
         // Add new A/B test
-        $('#add_ab_test').on('click', function() {
+        $('#add_ab_test').off('click').on('click', function() {
             addABTest();
         });
 
@@ -94,13 +122,7 @@
         // Initialize with existing tests
         updateABTestsConfig();
 
-        // Handle form submission - make sure we update config before submit
-        $('form').on('submit', function(e) {
-            updateABTestsConfig();
-            updateClickTracksConfig();
-            // Small delay to ensure the field is updated
-            return true;
-        });
+        // This form handler is moved to global scope - see end of file
     }
 
     function addABTest() {
@@ -176,13 +198,13 @@
         
         var configJson = JSON.stringify(tests);
         $('#ga4_ab_tests_config').val(configJson);
-        
+        console.log('Updated AB tests config:', configJson);
     }
 
     // Click Tracking Functions
     function initializeClickTracking() {
         // Toggle Click tracking configuration
-        $('#ga4_click_tracks_enabled').on('change', function() {
+        $('#ga4_click_tracks_enabled').off('change').on('change', function() {
             if ($(this).is(':checked')) {
                 $('#click_tracking_config').show();
             } else {
@@ -191,7 +213,7 @@
         }).trigger('change');
 
         // Add new Click track
-        $('#add_click_track').on('click', function() {
+        $('#add_click_track').off('click').on('click', function() {
             addClickTrack();
         });
 
@@ -209,6 +231,10 @@
         // Initialize with existing tracks
         updateClickTracksConfig();
     }
+
+    // Make functions global for form submission handler
+    window.updateABTestsConfig = updateABTestsConfig;
+    window.updateClickTracksConfig = updateClickTracksConfig;
 
     function addClickTrack() {
         var index = $('.click-track-item').length;
@@ -318,6 +344,10 @@
                     if (response.success) {
                         $input.val(response.data.encryption_key);
                         showEncryptionSuccessNotice($button, 'New encryption key generated and saved! Update your Cloudflare Worker with this key.');
+                        // Update copy button state if the function exists (settings page)
+                        if (typeof updateCopyButtonState === 'function') {
+                            updateCopyButtonState();
+                        }
                     } else {
                         console.error('AJAX error:', response.data.message);
                         // Fallback to client-side generation
@@ -356,6 +386,11 @@
             
             $input.val(encryptionKey);
             showEncryptionSuccessNotice($button, 'New encryption key generated! Remember to save settings and update your Cloudflare Worker.');
+            
+            // Update copy button state if the function exists (settings page)
+            if (typeof updateCopyButtonState === 'function') {
+                updateCopyButtonState();
+            }
             
         } catch (error) {
             console.error('Error generating encryption key:', error);

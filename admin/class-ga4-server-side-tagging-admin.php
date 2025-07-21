@@ -61,6 +61,9 @@ class GA4_Server_Side_Tagging_Admin
         
         // Migrate old transmission method values to new ones
         $this->migrate_transmission_methods();
+        
+        // Register AJAX handlers
+        add_action('wp_ajax_ga4_generate_encryption_key', array($this, 'ajax_generate_encryption_key'));
     }
 
     /**
@@ -86,6 +89,12 @@ class GA4_Server_Side_Tagging_Admin
      */
     public function enqueue_scripts()
     {
+        // Only enqueue on our admin pages to avoid conflicts
+        $screen = get_current_screen();
+        if (!$screen || strpos($screen->id, 'ga4-server-side-tagging') === false) {
+            return;
+        }
+
         wp_enqueue_script(
             'ga4-server-side-tagging-admin',
             GA4_SERVER_SIDE_TAGGING_PLUGIN_URL . 'admin/js/ga4-server-side-tagging-admin.js',
@@ -501,6 +510,30 @@ class GA4_Server_Side_Tagging_Admin
             )
         );
 
+        register_setting(
+            'ga4_server_side_tagging_settings',
+            'ga4_yith_raq_form_id',
+            array(
+                'type' => 'integer',
+                'description' => 'YITH Request a Quote Form ID',
+                'sanitize_callback' => 'absint',
+                'show_in_rest' => false,
+                'default' => 0,
+            )
+        );
+
+        register_setting(
+            'ga4_server_side_tagging_settings',
+            'ga4_conversion_form_ids',
+            array(
+                'type' => 'string',
+                'description' => 'Conversion Form IDs (comma-separated)',
+                'sanitize_callback' => array($this, 'sanitize_form_ids'),
+                'show_in_rest' => false,
+                'default' => '',
+            )
+        );
+
     }
 
     /**
@@ -685,6 +718,32 @@ class GA4_Server_Side_Tagging_Admin
     }
 
     /**
+     * Sanitize form IDs (comma-separated string of integers).
+     *
+     * @since    1.0.0
+     * @param    string    $input    The input value.
+     * @return   string             The sanitized form IDs.
+     */
+    public function sanitize_form_ids($input)
+    {
+        if (empty($input)) {
+            return '';
+        }
+        
+        // Split by comma, trim whitespace, and filter numeric values
+        $ids = array_map('trim', explode(',', $input));
+        $valid_ids = array();
+        
+        foreach ($ids as $id) {
+            if (is_numeric($id) && intval($id) > 0) {
+                $valid_ids[] = intval($id);
+            }
+        }
+        
+        return empty($valid_ids) ? '' : implode(', ', $valid_ids);
+    }
+
+    /**
      * Display the plugin admin page.
      *
      * @since    1.0.0
@@ -697,7 +756,7 @@ class GA4_Server_Side_Tagging_Admin
         }
 
         // Save settings if form is submitted
-        if (isset($_POST['ga4_server_side_tagging_settings_submit']) && isset($_POST['_wpnonce']) && wp_verify_nonce(sanitize_text_field(wp_unslash($_POST['_wpnonce'])), 'ga4_server_side_tagging_settings')) {
+        if ((isset($_POST['ga4_server_side_tagging_settings_submit']) || isset($_POST['submit'])) && isset($_POST['_wpnonce']) && wp_verify_nonce(sanitize_text_field(wp_unslash($_POST['_wpnonce'])), 'ga4_server_side_tagging_settings')) {
             $this->save_settings();
         }
 
@@ -807,6 +866,7 @@ class GA4_Server_Side_Tagging_Admin
      */
     private function save_settings()
     {
+        
         // Sanitize and save each GA4 setting
         if (isset($_POST['ga4_measurement_id'])) {
             update_option('ga4_measurement_id', sanitize_text_field(wp_unslash($_POST['ga4_measurement_id'])));
@@ -848,11 +908,11 @@ class GA4_Server_Side_Tagging_Admin
         }
 
         if (isset($_POST['ga4_yith_raq_form_id'])) {
-            update_option('ga4_yith_raq_form_id', sanitize_text_field(wp_unslash($_POST['ga4_yith_raq_form_id'])));
+            update_option('ga4_yith_raq_form_id', absint($_POST['ga4_yith_raq_form_id']));
         }
 
         if (isset($_POST['ga4_conversion_form_ids'])) {
-            update_option('ga4_conversion_form_ids', sanitize_text_field(wp_unslash($_POST['ga4_conversion_form_ids'])));
+            update_option('ga4_conversion_form_ids', $this->sanitize_form_ids(wp_unslash($_POST['ga4_conversion_form_ids'])));
         }
 
         // GA4 Checkbox options
@@ -906,25 +966,31 @@ class GA4_Server_Side_Tagging_Admin
         }
 
         // A/B Testing settings
+        error_log('A/B Testing enabled: ' . (isset($_POST['ga4_ab_tests_enabled']) ? 'yes' : 'no'));
         update_option('ga4_ab_tests_enabled', isset($_POST['ga4_ab_tests_enabled']));
         
         // Process A/B tests configuration from the hidden field
         if (isset($_POST['ga4_ab_tests_config'])) {
             $ab_tests_config = wp_unslash($_POST['ga4_ab_tests_config']);
+            error_log('A/B Tests config received: ' . $ab_tests_config);
             update_option('ga4_ab_tests_config', $this->sanitize_ab_tests_config($ab_tests_config));
         } else {
+            error_log('No A/B Tests config found in POST data');
             // If no config provided, save empty array
             update_option('ga4_ab_tests_config', '[]');
         }
 
         // Click Tracking settings
+        error_log('Click Tracking enabled: ' . (isset($_POST['ga4_click_tracks_enabled']) ? 'yes' : 'no'));
         update_option('ga4_click_tracks_enabled', isset($_POST['ga4_click_tracks_enabled']));
         
         // Process Click tracks configuration from the hidden field
         if (isset($_POST['ga4_click_tracks_config'])) {
             $click_tracks_config = wp_unslash($_POST['ga4_click_tracks_config']);
+            error_log('Click Tracks config received: ' . $click_tracks_config);
             update_option('ga4_click_tracks_config', $this->sanitize_click_tracks_config($click_tracks_config));
         } else {
+            error_log('No Click Tracks config found in POST data');
             // If no config provided, save empty array
             update_option('ga4_click_tracks_config', '[]');
         }
@@ -1438,6 +1504,25 @@ class GA4_Server_Side_Tagging_Admin
      */
     public function display_settings_page()
     {
+        // Check user capabilities
+        if (!current_user_can('manage_options')) {
+            return;
+        }
+
+        // Save settings if form is submitted
+        if (isset($_POST['submit']) && isset($_POST['_wpnonce']) && wp_verify_nonce(sanitize_text_field(wp_unslash($_POST['_wpnonce'])), 'ga4_server_side_tagging_settings')) {
+            $this->save_settings();
+        }
+
+        // Test connection if requested
+        $test_result = null;
+        if (isset($_POST['test_ga4_connection']) && isset($_POST['_wpnonce']) && wp_verify_nonce(sanitize_text_field(wp_unslash($_POST['_wpnonce'])), 'ga4_server_side_tagging_settings')) {
+            $test_result = $this->test_ga4_connection();
+        }
+
+        // Ensure existing plain text keys are encrypted when loading admin page
+        $this->ensure_encryption_key_is_encrypted();
+
         include_once 'partials/ga4-server-side-tagging-settings-display.php';
     }
 

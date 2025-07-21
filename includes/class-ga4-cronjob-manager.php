@@ -48,8 +48,8 @@ class GA4_Cronjob_Manager
         global $wpdb;
         $this->table_name = $wpdb->prefix . 'ga4_events_queue';
         
-        // Create table on activation
-        add_action('wp_loaded', array($this, 'maybe_create_table'));
+        // Only create table if it doesn't exist (avoid running on every page load)
+        $this->ensure_table_exists();
         
         // Schedule cronjob if not already scheduled
         if (!wp_next_scheduled('ga4_process_event_queue')) {
@@ -58,6 +58,35 @@ class GA4_Cronjob_Manager
         
         // Hook the cronjob processor
         add_action('ga4_process_event_queue', array($this, 'process_event_queue'));
+    }
+
+    /**
+     * Ensure the events queue table exists (only check once per request)
+     *
+     * @since    2.0.0
+     */
+    private function ensure_table_exists()
+    {
+        static $table_checked = false;
+        
+        // Only check once per request
+        if ($table_checked) {
+            return;
+        }
+        
+        global $wpdb;
+        
+        // Check if table exists
+        $table_exists = $wpdb->get_var($wpdb->prepare(
+            "SHOW TABLES LIKE %s",
+            $this->table_name
+        ));
+        
+        if (!$table_exists) {
+            $this->maybe_create_table();
+        }
+        
+        $table_checked = true;
     }
 
     /**
@@ -138,9 +167,6 @@ class GA4_Cronjob_Manager
             return false;
         }
 
-        if ($this->logger) {
-            $this->logger->debug("Event queued successfully with ID: " . $wpdb->insert_id);
-        }
 
         return true;
     }
