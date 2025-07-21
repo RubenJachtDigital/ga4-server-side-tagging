@@ -31,14 +31,15 @@ A comprehensive WordPress plugin that provides advanced server-side tagging for 
 - **Comprehensive debugging** and logging system
 
 ### Performance & Reliability
-- **🚀 Event Queue System** with 5-minute batch processing for optimized server performance
-- **📊 Batch Processing** - Multiple events sent as single request to reduce server load
-- **⏱️ Automated Cron Jobs** with concurrent processing protection and performance metrics
-- **🗄️ Database Queue Management** with automatic cleanup and optimization
-- **📈 Real-time Queue Monitoring** with admin panel status display and manual processing
-- **🔄 Smart Event Batching** - Combines up to 100 events per batch for efficient transmission
+- **🚀 Event Batching System** - Queue events and send as optimized batches every 5 minutes
+- **📊 Cronjob Management** - WordPress cron-based processing with admin monitoring interface
+- **⚡ Batch Processing** - Up to 1000 events per batch for improved Cloudflare Worker performance
+- **🔄 Retry Logic** - Failed events automatically retried with comprehensive error logging
+- **📈 Queue Analytics** - Real-time statistics on event processing, success/failure rates
+- **🧹 Automatic Cleanup** - Configurable retention of processed events (1-365 days)
 - **Centralized storage management** with automatic expiration
 - **Multiple location API fallbacks** for reliable geolocation
+- **Event queuing system** for consent-pending events
 - **Rate limiting** and payload size validation
 - **Graceful degradation** when services are unavailable
 
@@ -52,47 +53,6 @@ A comprehensive WordPress plugin that provides advanced server-side tagging for 
 - **🤖 Bot detection and filtering** with multiple detection layers
 - **🔒 CORS protection** with explicit header allowlisting
 - **🔗 Cross-platform encryption** compatible across PHP, JavaScript, and Cloudflare Worker
-
-## 🚀 Event Queue System
-
-### **High-Performance Batch Processing**
-
-The plugin features a sophisticated event queue system that significantly improves server performance by batching multiple events into single requests:
-
-#### **Queue Architecture**
-- **📥 Immediate Queuing**: Events are instantly queued in database for immediate response to client
-- **⏱️ 5-Minute Processing**: Automated cron job processes queue every 5 minutes
-- **📊 Batch Consolidation**: Up to 100 events combined into single Cloudflare request
-- **🔄 Single Request Transmission**: All batched events sent as one payload to reduce server load
-
-#### **Database Management**
-- **🗄️ Dedicated Queue Table**: `wp_ga4_event_queue` with status tracking and retry logic
-- **🧹 Automatic Cleanup**: Old completed events removed daily (configurable retention)
-- **📈 Performance Metrics**: Processing time and throughput monitoring
-- **🔒 Concurrent Protection**: Prevents multiple cron jobs from running simultaneously
-
-#### **Admin Panel Features**
-- **📊 Real-time Status Display**: Live queue statistics with pending/processing/completed counts
-- **⚡ Manual Processing**: "Process Queue Now" button for testing purposes
-- **📈 Batch History**: Recent batch processing history with event counts and timestamps
-- **🔄 Auto-refresh**: Queue status updates automatically after processing
-
-#### **Performance Benefits**
-- **🚀 Reduced Server Load**: 90%+ fewer HTTP requests to Cloudflare
-- **⏱️ Faster Response Times**: Immediate client response while events process in background
-- **📊 Better Resource Utilization**: Batch processing more efficient than individual requests
-- **🔧 Configurable Batch Size**: Adjustable batch size for different traffic volumes
-
-#### **Technical Implementation**
-```php
-// Events are queued immediately
-wp_ga4_event_queue:
-├── event_data (JSON)     // Complete event payload
-├── status               // pending → processing → completed/failed
-├── created_at          // Queue timestamp
-├── batch_id           // Processing batch identifier
-└── retry_count        // Failed processing attempts
-```
 
 ## 🔄 Data Flow & Transmission Methods
 
@@ -237,14 +197,126 @@ fetch('https://your-worker.workers.dev/', {
 ### Complete Data Flow Pipeline
 
 ```
-Client Browser → WordPress API → Cloudflare Worker → Google Analytics 4
-     ↓              ↓               ↓                ↓
-1. Event Generated → 2. Security Validation → 3. Server Processing → 4. GA4 Delivery
-   • Attribution     • Rate Limiting (100/min)  • Bot Detection      • Clean Events
-   • Consent Check   • Bot Detection           • GDPR Processing    • Proper Consent
-   • Encryption      • Origin Validation       • Event Enhancement  • Attribution Data
-   • Client Data     • API Key Encryption      • Response Decryption
+Client Browser → WordPress API → Event Queue → Batch Processor → Cloudflare Worker → Google Analytics 4
+     ↓              ↓               ↓             ↓                ↓                ↓
+1. Event Generated → 2. Security Validation → 3. Database Storage → 4. Batch Processing → 5. Server Processing → 6. GA4 Delivery
+   • Attribution     • Rate Limiting (100/min)  • Event Queuing      • Every 5 minutes    • Bot Detection      • Clean Events
+   • Consent Check   • Bot Detection           • Encryption         • Up to 1000 events  • GDPR Processing    • Proper Consent
+   • Encryption      • Origin Validation       • Database Storage   • Single HTTP Request • Event Enhancement  • Attribution Data
+   • Client Data     • API Key Encryption      • Status Tracking    • Error Handling     • Response Processing
 ```
+
+## 🚀 **Event Batching System (NEW)**
+
+### **Optimized Performance Architecture**
+
+The plugin now features an advanced **event batching system** that queues events locally and processes them in optimized batches every 5 minutes, dramatically improving performance and reliability:
+
+**Key Benefits:**
+- **⚡ 95% Fewer HTTP Requests** - One batch request instead of hundreds of individual requests
+- **🚀 Improved CF Worker Performance** - Single batch processing vs multiple individual events
+- **🔄 Enhanced Reliability** - Failed events automatically queued for retry
+- **📊 Complete Monitoring** - Real-time queue statistics and processing analytics
+- **🧹 Smart Cleanup** - Automatic cleanup of old processed events
+
+### **Batch Processing Flow**
+
+```
+Individual Events → Database Queue → WordPress Cron → Batch Request → Cloudflare Worker
+     ↓                   ↓               ↓              ↓                ↓
+1. Event Captured → 2. Queue Storage → 3. Scheduled Processing → 4. Single HTTP Request → 5. Parallel GA4 Forwarding
+   • page_view        • Encrypted        • Every 5 minutes      • Up to 1000 events    • Individual event processing
+   • purchase         • Status tracking  • WordPress cron       • JWT encrypted        • GDPR compliance per event
+   • add_to_cart      • Error logging    • Batch processor      • Single response      • Bot detection per batch
+   • form_submit      • Retry counting   • Automatic cleanup    • Success/failure      • Attribution preserved
+```
+
+### **Queue Management Interface**
+
+**Admin Dashboard:** `WordPress Admin → GA4 Tagging → Cronjobs`
+
+**Real-time Analytics:**
+- **📊 Queue Statistics** - Total, pending, completed, and failed events
+- **⏰ Next Processing Time** - Countdown to next batch processing
+- **📈 Processing History** - Recent events with status and error details
+- **🔄 Manual Triggers** - Test cronjob processing with one-click
+
+**Management Controls:**
+- **▶️ Manual Processing** - Trigger immediate batch processing for testing
+- **🧹 Cleanup Controls** - Remove old processed events (1-365 days retention)
+- **⚙️ Configuration Options** - Batch size (100-10,000 events), cleanup intervals
+- **📋 Event Inspection** - View individual event details and processing status
+
+### **Configuration Options**
+
+**Batch Processing Settings:**
+```php
+// Enable/disable cronjob batching (WordPress Admin → GA4 Settings)
+'ga4_cronjob_enabled' => true,          // Enable batch processing
+'ga4_cronjob_batch_size' => 1000,       // Events per batch (100-10,000)
+'ga4_cronjob_cleanup_days' => 7,        // Days to keep processed events
+
+// Cronjob runs every 5 minutes via WordPress cron
+wp_schedule_event(time(), 'ga4_five_minutes', 'ga4_process_event_queue');
+```
+
+**Legacy Direct Sending:**
+- **Fallback Mode** - Disable cronjob to use original direct sending behavior  
+- **Debug Compatibility** - Full backward compatibility for existing implementations
+- **Performance Trade-off** - Direct sending for immediate processing vs batching for efficiency
+
+### **Database Storage**
+
+**Events Queue Table:** `wp_ga4_events_queue`
+```sql
+CREATE TABLE wp_ga4_events_queue (
+    id mediumint(9) NOT NULL AUTO_INCREMENT,
+    event_data longtext NOT NULL,           -- JSON event data
+    is_encrypted tinyint(1) DEFAULT 0,      -- Encryption flag
+    created_at datetime DEFAULT CURRENT_TIMESTAMP,
+    processed_at datetime NULL,
+    status varchar(20) DEFAULT 'pending',   -- pending/completed/failed
+    retry_count int(11) DEFAULT 0,
+    error_message text NULL,
+    PRIMARY KEY (id),
+    KEY status (status),
+    KEY created_at (created_at)
+);
+```
+
+**Storage Benefits:**
+- **🔒 Encrypted Storage** - Events encrypted in database when secured transmission enabled
+- **📊 Status Tracking** - Complete processing history with error logging
+- **🔄 Retry Management** - Failed events automatically queued for retry attempts
+- **📈 Analytics Ready** - Rich metadata for processing analytics and reporting
+
+### **Batch Request Structure**
+
+**Cloudflare Worker Payload:**
+```javascript
+// Single batch request containing multiple events
+{
+  "events": [
+    { "name": "page_view", "params": { "client_id": "...", "session_id": "..." } },
+    { "name": "purchase", "params": { "transaction_id": "123", "value": 99.99 } },
+    { "name": "add_to_cart", "params": { "item_id": "product_456" } }
+    // ... up to 1000 events per batch
+  ],
+  "batch": true,                    // Indicates batch processing
+  "consent": {                      // Batch-level consent (from first event)
+    "consent_mode": "GRANTED",
+    "analytics_consent": true,
+    "advertising_consent": true
+  },
+  "timestamp": 1642534567           // Batch processing timestamp
+}
+```
+
+**Worker Processing:**
+- **🔄 Individual Processing** - Each event processed individually with full GDPR/bot detection
+- **📊 Batch Response** - Single response with success/failure counts for entire batch
+- **⚡ Optimized Performance** - Worker processes batch more efficiently than individual requests
+- **🛡️ Security Preserved** - All existing security and compliance features maintained
 
 ### 🔐 End-to-End Encryption Flow
 
@@ -434,6 +506,19 @@ if (DEBUG_MODE) {
 4. Enter your GA4 Measurement ID and API Secret
 5. Configure additional settings as needed
 
+### 🚀 **Automatic Setup (NEW)**
+Upon activation, the plugin automatically:
+- **📊 Creates Event Queue Table** - Database table for batched event processing
+- **⏰ Schedules WordPress Cron** - 5-minute recurring event processing
+- **⚙️ Enables Batch Processing** - Default setting for optimized performance
+- **🔧 Configures Default Settings** - 1000 events per batch, 7-day cleanup retention
+
+**Post-Installation Steps:**
+1. **Monitor Queue**: Visit `GA4 Tagging → Cronjobs` to view real-time queue statistics
+2. **Test Processing**: Use "Trigger Cronjob Now" button to test batch processing
+3. **Adjust Settings**: Configure batch size and cleanup intervals as needed
+4. **Verify Cloudflare**: Ensure CF Worker handles batch requests (automatic compatibility)
+
 ## ⚙️ Configuration
 
 ### Basic Setup
@@ -471,8 +556,7 @@ Instead of hardcoding values in your worker script, use Cloudflare's Variables a
 | Variable Name | Type | Value | Description | Required For |
 |---------------|------|-------|-------------|--------------|
 | `GA4_MEASUREMENT_ID` | Secret | `G-XXXXXXXXXX` | Your GA4 Measurement ID | All methods |
-| `GA4_API_SECRET` | Secret | `your-api-secret-here` | Your GA4 API Secret | All methods |
-| `API_KEY` | Secret | `api-key-from-wordpress` | API key from WordPress admin | Legacy API method only |
+| `GA4_API_SECRET` | Secret | `your-api-secret-here` | Your GA4 API Secret | All methods 
 | `ENCRYPTION_KEY` | Secret | `64-char-hex-key` | Encryption key from WordPress admin | Encrypted WordPress method |
 | `ALLOWED_DOMAINS` | Secret | `yourdomain.com,www.yourdomain.com` | Comma-separated list of allowed domains | All methods (recommended) |
 
@@ -484,9 +568,6 @@ G-XXXXXXXXXX
 
 # GA4_API_SECRET  
 your-ga4-api-secret-from-google-analytics
-
-# API_KEY (copy from WordPress admin)
-abcd1234-efgh-5678-ijkl-9012mnop3456
 
 # ENCRYPTION_KEY (copy from WordPress admin)
 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
@@ -501,31 +582,6 @@ The worker script will automatically load these values from the environment at r
 **Step 4: Configure Transmission Method**
 Choose the appropriate transmission method for your security requirements:
 
-```javascript
-// WordPress Plugin Configuration
-// Set transmission method in plugin settings:
-
-// Method 1: Direct to CF (Development)
-transmission_method: 'direct_to_cf'
-// Required: GA4_MEASUREMENT_ID, GA4_API_SECRET
-// Optional: ALLOWED_DOMAINS
-
-// Method 2: WordPress Endpoint (Production)
-transmission_method: 'wp_endpoint_to_cf'
-// Required: GA4_MEASUREMENT_ID, GA4_API_SECRET
-// Optional: ALLOWED_DOMAINS
-
-// Method 3: Encrypted WordPress (High Security)
-transmission_method: 'secure_wp_to_cf'
-// Required: GA4_MEASUREMENT_ID, GA4_API_SECRET, ENCRYPTION_KEY
-// Optional: ALLOWED_DOMAINS
-
-// Method 4: Legacy API Key (Existing Sites)
-transmission_method: 'regular'
-// Required: GA4_MEASUREMENT_ID, GA4_API_SECRET, API_KEY
-// Optional: ENCRYPTION_KEY, ALLOWED_DOMAINS
-```
-
 **Benefits of Using Variables and Secrets:**
 - ✅ **Secure Storage**: Sensitive data encrypted by Cloudflare
 - ✅ **No Hardcoding**: Values not visible in your worker script
@@ -539,10 +595,64 @@ If you prefer to hardcode values in the worker script, update these constants:
 // In Cloudflare Worker - Update these values (NOT RECOMMENDED)
 let GA4_MEASUREMENT_ID = 'G-XXXXXXXXXX'; // Your GA4 Measurement ID
 let GA4_API_SECRET = 'your-api-secret-here'; // Your GA4 API Secret
-let API_KEY = "api-key-from-wordpress-admin"; // Copy from WordPress admin
 let ALLOWED_DOMAINS = ["yourdomain.com", "www.yourdomain.com"]; // Your domains
 let ENCRYPTION_KEY = "your-256-bit-encryption-key-here"; // 64-character hex key from WordPress admin
 ```
+
+### 🚀 **Cronjob Batch Processing Setup (NEW)**
+
+Configure the advanced event batching system for optimal performance:
+
+**1. Basic Configuration:**
+1. Go to WordPress admin → GA4 Tagging settings
+2. **Event Batching**: Enable/disable cronjob batch processing
+3. **Batch Size**: Configure events per batch (100-10,000, default: 1000)
+4. **Cleanup Days**: Set retention period for processed events (1-365 days, default: 7)
+
+**2. Monitor Queue:**
+1. Navigate to **GA4 Tagging → Cronjobs** 
+2. View real-time statistics: pending, completed, failed events
+3. Check next scheduled processing time
+4. Review recent processing history and error details
+
+**3. Manual Testing:**
+1. Click **"Trigger Cronjob Now"** to process events immediately
+2. Monitor processing results in real-time
+3. Use **"Cleanup Old Events"** to remove processed events manually
+4. Verify batch requests in Cloudflare Worker logs
+
+**Performance Recommendations:**
+```php
+// High-traffic sites (>10,000 events/day)
+'ga4_cronjob_batch_size' => 2000        // Process larger batches
+'ga4_cronjob_cleanup_days' => 3         // Cleanup more frequently
+
+// Standard sites (<10,000 events/day)  
+'ga4_cronjob_batch_size' => 1000        // Default batch size
+'ga4_cronjob_cleanup_days' => 7         // Standard cleanup
+
+// Low-traffic sites (<1,000 events/day)
+'ga4_cronjob_batch_size' => 500         // Smaller batches
+'ga4_cronjob_cleanup_days' => 14        // Keep events longer
+```
+
+**WordPress Cron Configuration:**
+```php
+// Custom cron schedule (automatically added)
+wp_schedule_event(time(), 'ga4_five_minutes', 'ga4_process_event_queue');
+
+// Verify cron is working
+wp_next_scheduled('ga4_process_event_queue');  // Returns timestamp if scheduled
+
+// Manual cron trigger (for testing)
+do_action('ga4_process_event_queue');
+```
+
+**Fallback to Direct Sending:**
+- **Disable Batching**: Set `ga4_cronjob_enabled` to `false` for immediate processing
+- **Legacy Mode**: Maintains full backward compatibility with existing setup
+- **Debug Mode**: Direct sending recommended for development/debugging
+- **Performance Trade-off**: Immediate vs optimized batch processing
 
 ### 🔐 JWT Encryption Setup (Enhanced)
 
@@ -1165,21 +1275,6 @@ fetch('/wp-json/ga4-server-side-tagging/v1/send-event', {
 .then(data => console.log('Response:', data));
 ```
 
-**API Key Encryption Issues:**
-```php
-// Test API key encryption in WordPress admin
-$worker_api_key = get_option('ga4_worker_api_key');
-$encryption_key = GA4_Encryption_Util::retrieve_encrypted_key('ga4_jwt_encryption_key');
-
-// Test encryption
-$encrypted = GA4_Encryption_Util::encrypt($worker_api_key, $encryption_key);
-echo "Encrypted API Key: " . $encrypted . "\n";
-
-// Test decryption
-$decrypted = GA4_Encryption_Util::decrypt($encrypted, $encryption_key);
-echo "Decrypted matches: " . ($decrypted === $worker_api_key ? 'Yes' : 'No') . "\n";
-```
-
 **🔐 Encryption Issues:**
 ```javascript
 // Test encryption functionality
@@ -1211,6 +1306,126 @@ console.log('Encryption key format:', /^[0-9a-fA-F]+$/.test(testKey) ? 'Valid he
 - Verify `ENCRYPTION_KEY` matches WordPress generated key exactly
 - Check worker logs for encryption/decryption errors
 - Ensure `X-Encrypted: true` header is being sent by client
+
+### 🚀 **Cronjob Batching Issues (NEW)**
+
+**Events Not Processing:**
+```php
+// Check if cronjob is scheduled (WordPress admin or debug)
+$next_run = wp_next_scheduled('ga4_process_event_queue');
+echo "Next processing: " . ($next_run ? date('Y-m-d H:i:s', $next_run) : 'Not scheduled');
+
+// Check queue statistics
+global $wpdb;
+$table_name = $wpdb->prefix . 'ga4_events_queue';
+$stats = $wpdb->get_row("SELECT 
+    COUNT(*) as total,
+    SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending,
+    SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed,
+    SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed
+FROM $table_name", ARRAY_A);
+print_r($stats);
+```
+
+**Manual Cronjob Testing:**
+```php
+// Trigger cronjob manually (WordPress admin → Cronjobs → Trigger Cronjob Now)
+// OR via PHP:
+do_action('ga4_process_event_queue');
+
+// Check for recent events
+$recent = $wpdb->get_results("SELECT * FROM {$table_name} ORDER BY created_at DESC LIMIT 10");
+foreach ($recent as $event) {
+    echo "Event {$event->id}: {$event->status} - {$event->created_at}\n";
+    if ($event->error_message) {
+        echo "Error: {$event->error_message}\n";
+    }
+}
+```
+
+**WordPress Cron Issues:**
+```php
+// Check if WordPress cron is working
+$crons = _get_cron_array();
+$ga4_crons = array_filter($crons, function($time_crons) {
+    return isset($time_crons['ga4_process_event_queue']);
+});
+
+echo "GA4 cron jobs scheduled: " . count($ga4_crons) . "\n";
+
+// Check if cron is disabled
+if (defined('DISABLE_WP_CRON') && DISABLE_WP_CRON) {
+    echo "WARNING: WP_CRON is disabled. Set up system cron job.\n";
+    echo "Add to system crontab: */5 * * * * curl -s https://yoursite.com/wp-cron.php\n";
+}
+```
+
+**Batch Processing Errors:**
+```javascript
+// Check Cloudflare Worker logs for batch processing errors
+// Look for these error patterns:
+
+// 1. Batch size issues
+"Error: Batch too large" // Reduce ga4_cronjob_batch_size
+
+// 2. Timeout issues  
+"Error: Request timeout" // Reduce batch size or check CF Worker limits
+
+// 3. Malformed batch data
+"Error: Invalid batch structure" // Check event data structure in queue
+
+```
+
+**Database Table Issues:**
+```sql
+-- Check if queue table exists
+SHOW TABLES LIKE 'wp_ga4_events_queue';
+
+-- Check table structure
+DESCRIBE wp_ga4_events_queue;
+
+-- Check for corrupt events
+SELECT id, status, error_message, created_at 
+FROM wp_ga4_events_queue 
+WHERE status = 'failed' 
+ORDER BY created_at DESC 
+LIMIT 10;
+
+-- Clean up stuck events (if needed)
+UPDATE wp_ga4_events_queue 
+SET status = 'pending', retry_count = 0 
+WHERE status = 'failed' AND retry_count < 3;
+```
+
+**Performance Optimization:**
+```php
+// For high-traffic sites, optimize batch processing:
+
+// 1. Increase batch size
+update_option('ga4_cronjob_batch_size', 2000);
+
+// 2. Decrease cleanup retention  
+update_option('ga4_cronjob_cleanup_days', 3);
+
+// 3. Monitor database size
+$table_size = $wpdb->get_var("
+    SELECT ROUND(((data_length + index_length) / 1024 / 1024), 2) AS 'MB' 
+    FROM information_schema.TABLES 
+    WHERE table_schema = DATABASE() 
+    AND table_name = '{$wpdb->prefix}ga4_events_queue'
+");
+echo "Queue table size: {$table_size} MB\n";
+```
+
+**Fallback to Direct Sending:**
+```php
+// If cronjob issues persist, disable batching temporarily
+update_option('ga4_cronjob_enabled', false);
+
+// This will revert to direct sending behavior (legacy mode)
+// Events will be sent immediately instead of queued
+// Useful for debugging and emergency situations
+```
 
 ## 📊 Data Categories & Retention
 
@@ -1272,7 +1487,6 @@ console.log('Encryption key format:', /^[0-9a-fA-F]+$/.test(testKey) ? 'Valid he
 
 ### Troubleshooting Tools
 - **Debug Console**: Built-in debug mode with comprehensive logging
-- **Data Inspector**: `GA4Utils.helpers.getStoredDataSummary()`
 - **Performance Monitor**: Built-in timing and performance metrics
 - **Test Validation**: Automatic event name sanitization and validation
 

@@ -236,4 +236,16 @@ class GA4_Server_Side_Tagging_Logger {
         $this->debug_mode = (bool) $enabled;
         update_option( 'ga4_server_side_tagging_debug_mode', $this->debug_mode );
     }
+
+    /**
+     * Log a debug message (only in debug mode).
+     *
+     * @since    1.0.0
+     * @param    string    $message    The message to log.
+     */
+    public function debug( $message ) {
+        if ( $this->debug_mode ) {
+            $this->log( $message, 'debug' );
+        }
+    }
 } 

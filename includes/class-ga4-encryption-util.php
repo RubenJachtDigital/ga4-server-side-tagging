@@ -208,7 +208,7 @@ class GA4_Encryption_Util
      * @param string $plaintext Data to encrypt
      * @param string $key 32-byte encryption key
      * @return array Array containing encrypted data and IV
-     * @throws Exception If encryption fails
+     * @throws \Exception If encryption fails
      */
     private static function encrypt_aes_gcm($plaintext, $key)
     {
@@ -244,7 +244,7 @@ class GA4_Encryption_Util
      * @param string $tag Authentication tag
      * @param string $key 32-byte encryption key
      * @return string Decrypted plaintext
-     * @throws Exception If decryption fails
+     * @throws \Exception If decryption fails
      */
     private static function decrypt_aes_gcm($encrypted_data, $iv, $tag, $key)
     {
@@ -516,7 +516,7 @@ class GA4_Encryption_Util
     }
 
     /**
-     * Encrypt general key (like API key) for database storage using WordPress salts
+     * Encrypt general key for database storage using WordPress salts
      * This method works with any string format, unlike encrypt_key_for_storage which only works with 64-char hex
      * 
      * @param string $key_value Raw key value (any format)
@@ -565,7 +565,7 @@ class GA4_Encryption_Util
                 // This is a JWT encryption key - use the strict validation
                 $encrypted_key = self::encrypt_key_for_storage($key_hex);
             } else {
-                // This is another type of key (like API key) - use general encryption
+                // This is another type of key - use general encryption
                 $encrypted_key = self::encrypt_general_key_for_storage($key_hex);
             }
             return update_option($option_name, $encrypted_key);

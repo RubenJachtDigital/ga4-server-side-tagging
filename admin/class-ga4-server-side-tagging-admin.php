@@ -3,6 +3,7 @@
 namespace GA4ServerSideTagging\Admin;
 
 use GA4ServerSideTagging\Core\GA4_Server_Side_Tagging_Logger;
+use GA4ServerSideTagging\Core\GA4_Cronjob_Manager;
 
 /**
  * The admin-specific functionality of the plugin.
@@ -36,6 +37,15 @@ class GA4_Server_Side_Tagging_Admin
     private $logger;
 
     /**
+     * The cronjob manager instance.
+     *
+     * @since    2.0.0
+     * @access   private
+     * @var      GA4_Cronjob_Manager    $cronjob_manager    Handles event queue and cronjob processing.
+     */
+    private $cronjob_manager;
+
+    /**
      * Initialize the class and set its properties.
      *
      * @since    1.0.0
@@ -44,9 +54,13 @@ class GA4_Server_Side_Tagging_Admin
     public function __construct(GA4_Server_Side_Tagging_Logger $logger)
     {
         $this->logger = $logger;
+        $this->cronjob_manager = new GA4_Cronjob_Manager($logger);
         
         // Initialize encryption salts if they don't exist
         $this->ensure_encryption_salts_exist();
+        
+        // Migrate old transmission method values to new ones
+        $this->migrate_transmission_methods();
     }
 
     /**
@@ -86,7 +100,7 @@ class GA4_Server_Side_Tagging_Admin
             'ga4AdminAjax',
             array(
                 'ajax_url' => admin_url('admin-ajax.php'),
-                'nonce' => wp_create_nonce('ga4_generate_api_key')
+                'nonce' => wp_create_nonce('ga4_generate_encryption_key')
             )
         );
     }
@@ -116,6 +130,25 @@ class GA4_Server_Side_Tagging_Admin
             'manage_options',
             'ga4-server-side-tagging-logs',
             array($this, 'display_logs_page')
+        );
+
+        // Add submenu for cronjobs
+        add_submenu_page(
+            'ga4-server-side-tagging',
+            'Settings',
+            'Settings',
+            'manage_options',
+            'ga4-server-side-tagging-settings',
+            array($this, 'display_settings_page')
+        );
+
+        add_submenu_page(
+            'ga4-server-side-tagging',
+            'Event Queue & Cronjobs',
+            'Cronjobs',
+            'manage_options',
+            'ga4-server-side-tagging-cronjobs',
+            array($this, 'display_cronjobs_page')
         );
     }
 
@@ -195,18 +228,6 @@ class GA4_Server_Side_Tagging_Admin
                 'type' => 'string',
                 'description' => 'Cloudflare Worker URL',
                 'sanitize_callback' => 'esc_url_raw',
-                'show_in_rest' => false,
-                'default' => '',
-            )
-        );
-
-        register_setting(
-            'ga4_server_side_tagging_settings',
-            'ga4_worker_api_key',
-            array(
-                'type' => 'string',
-                'description' => 'Worker API Key',
-                'sanitize_callback' => 'sanitize_text_field',
                 'show_in_rest' => false,
                 'default' => '',
             )
@@ -439,7 +460,44 @@ class GA4_Server_Side_Tagging_Admin
                 'description' => 'Event transmission method',
                 'sanitize_callback' => array($this, 'sanitize_transmission_method'),
                 'show_in_rest' => false,
-                'default' => 'secure_wp_to_cf',
+                'default' => 'direct_to_cf',
+            )
+        );
+
+        // Cronjob Settings
+        register_setting(
+            'ga4_server_side_tagging_settings',
+            'ga4_cronjob_enabled',
+            array(
+                'type' => 'boolean',
+                'description' => 'Enable cronjob batch processing (disable to use direct sending)',
+                'sanitize_callback' => array($this, 'sanitize_checkbox'),
+                'show_in_rest' => false,
+                'default' => true,
+            )
+        );
+
+        register_setting(
+            'ga4_server_side_tagging_settings',
+            'ga4_cronjob_batch_size',
+            array(
+                'type' => 'integer',
+                'description' => 'Maximum number of events to process per batch',
+                'sanitize_callback' => array($this, 'sanitize_batch_size'),
+                'show_in_rest' => false,
+                'default' => 1000,
+            )
+        );
+
+        register_setting(
+            'ga4_server_side_tagging_settings',
+            'ga4_cronjob_cleanup_days',
+            array(
+                'type' => 'integer',
+                'description' => 'Number of days to keep processed events before cleanup',
+                'sanitize_callback' => array($this, 'sanitize_cleanup_days'),
+                'show_in_rest' => false,
+                'default' => 7,
             )
         );
 
@@ -572,14 +630,58 @@ class GA4_Server_Side_Tagging_Admin
      */
     public function sanitize_transmission_method($input)
     {
-        $valid_methods = array('secure_wp_to_cf', 'wp_endpoint_to_cf', 'direct_to_cf');
+        $valid_methods = array('direct_to_cf', 'wp_rest_endpoint');
         $input = sanitize_text_field($input);
         
         if (in_array($input, $valid_methods)) {
             return $input;
         }
         
-        return 'secure_wp_to_cf'; // Default fallback
+        return 'direct_to_cf'; // Default fallback
+    }
+
+    /**
+     * Sanitize batch size value.
+     *
+     * @since    2.0.0
+     * @param    mixed    $input    The input value.
+     * @return   int                The sanitized value.
+     */
+    public function sanitize_batch_size($input)
+    {
+        $batch_size = intval($input);
+        
+        if ($batch_size < 1) {
+            return 100; // Minimum batch size
+        }
+        
+        if ($batch_size > 10000) {
+            return 10000; // Maximum batch size
+        }
+        
+        return $batch_size;
+    }
+
+    /**
+     * Sanitize cleanup days value.
+     *
+     * @since    2.0.0
+     * @param    mixed    $input    The input value.
+     * @return   int                The sanitized value.
+     */
+    public function sanitize_cleanup_days($input)
+    {
+        $days = intval($input);
+        
+        if ($days < 1) {
+            return 1; // Minimum 1 day
+        }
+        
+        if ($days > 365) {
+            return 365; // Maximum 1 year
+        }
+        
+        return $days;
     }
 
     /**
@@ -606,7 +708,6 @@ class GA4_Server_Side_Tagging_Admin
         }
 
         // Ensure existing plain text keys are encrypted when loading admin page
-        $this->ensure_api_key_is_encrypted();
         $this->ensure_encryption_key_is_encrypted();
 
         // Get current settings
@@ -617,16 +718,6 @@ class GA4_Server_Side_Tagging_Admin
         $ecommerce_tracking = get_option('ga4_ecommerce_tracking', true);
         $cloudflare_worker_url = get_option('ga4_cloudflare_worker_url', '');
         
-        // Retrieve API key with decryption
-        $worker_api_key = \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::retrieve_encrypted_key('ga4_worker_api_key');
-        
-        // Generate API key if not set
-        if (empty($worker_api_key)) {
-            $worker_api_key = $this->generate_api_key();
-            \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::store_encrypted_key($worker_api_key, 'ga4_worker_api_key');
-            $this->logger->info('New API key generated and stored');
-        }
-
         // JWT Encryption settings
         $jwt_encryption_enabled = get_option('ga4_jwt_encryption_enabled', false);
         $jwt_encryption_key = \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::retrieve_encrypted_key('ga4_jwt_encryption_key');
@@ -729,18 +820,6 @@ class GA4_Server_Side_Tagging_Admin
             update_option('ga4_cloudflare_worker_url', esc_url_raw(wp_unslash($_POST['ga4_cloudflare_worker_url'])));
         }
 
-        // Handle API key with encryption
-        if (isset($_POST['ga4_worker_api_key'])) {
-            $api_key = sanitize_text_field(wp_unslash($_POST['ga4_worker_api_key']));
-            if (!empty($api_key)) {
-                // Store API key using encryption utility
-                \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::store_encrypted_key($api_key, 'ga4_worker_api_key');
-            } else {
-                // Clear the key if empty
-                update_option('ga4_worker_api_key', '');
-            }
-        }
-
         if (isset($_POST['ga4_jwt_encryption_enabled'])) {
             update_option('ga4_jwt_encryption_enabled', (bool) $_POST['ga4_jwt_encryption_enabled']);
         } else {
@@ -787,24 +866,6 @@ class GA4_Server_Side_Tagging_Admin
         if (isset($_POST['ga4_transmission_method'])) {
             $transmission_method = $this->sanitize_transmission_method($_POST['ga4_transmission_method']);
             update_option('ga4_transmission_method', $transmission_method);
-            
-            // Configure settings based on transmission method
-            if ($transmission_method === 'secure_wp_to_cf') {
-                // Most secure: Enable encryption, disable simple requests
-                update_option('ga4_jwt_encryption_enabled', true);
-                update_option('ga4_simple_requests_enabled', false);
-                update_option('ga4_simple_requests_bot_detection', false);
-            } elseif ($transmission_method === 'wp_endpoint_to_cf') {
-                // Balanced: Enable simple requests with bot detection, no API key or encryption
-                update_option('ga4_simple_requests_enabled', true);
-                update_option('ga4_simple_requests_bot_detection', true);
-                // No API key validation or encryption for balanced method
-            } elseif ($transmission_method === 'direct_to_cf') {
-                // Fastest: Enable simple requests without bot detection, disable encryption
-                update_option('ga4_simple_requests_enabled', true);
-                update_option('ga4_simple_requests_bot_detection', false);
-                update_option('ga4_jwt_encryption_enabled', false);
-            }
         }
 
         // GDPR Consent settings
@@ -872,7 +933,6 @@ class GA4_Server_Side_Tagging_Admin
         $this->logger->set_debug_mode(isset($_POST['ga4_server_side_tagging_debug_mode']));
 
         // Ensure existing plain text keys are encrypted after settings save
-        $this->ensure_api_key_is_encrypted();
         $this->ensure_encryption_key_is_encrypted();
 
         // Log settings update
@@ -979,18 +1039,12 @@ class GA4_Server_Side_Tagging_Admin
                 )
             );
 
-            // Get API key for worker authentication (with decryption)
-            $worker_api_key = \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::retrieve_encrypted_key('ga4_worker_api_key');
             $headers = array(
                 'Content-Type' => 'application/json',
                 'Origin' => site_url(),
                 'Referer' => site_url(),
                 'User-Agent' => 'WordPress/' . get_bloginfo('version') . ' GA4-Server-Side-Tagging Connection Test'
             );
-            
-            if (!empty($worker_api_key)) {
-                $headers['Authorization'] = 'Bearer ' . $worker_api_key;
-            }
 
             // Handle JWT encryption if enabled
             $jwt_encryption_enabled = get_option('ga4_jwt_encryption_enabled', false);
@@ -1261,24 +1315,6 @@ class GA4_Server_Side_Tagging_Admin
     }
 
     /**
-     * Generate a secure random API key
-     *
-     * @return string Generated API key
-     */
-    private function generate_api_key()
-    {
-        // Generate a secure 32-character API key
-        if (function_exists('random_bytes')) {
-            return bin2hex(random_bytes(16));
-        } elseif (function_exists('openssl_random_pseudo_bytes')) {
-            return bin2hex(openssl_random_pseudo_bytes(16));
-        } else {
-            // Fallback for older PHP versions
-            return substr(str_shuffle('abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'), 0, 32);
-        }
-    }
-
-    /**
      * Generate a secure random encryption key (256-bit)
      *
      * @return string Generated encryption key (64 hex characters)
@@ -1297,52 +1333,10 @@ class GA4_Server_Side_Tagging_Admin
     }
 
     /**
-     * AJAX handler for generating a new API key
-     */
-    public function ajax_generate_api_key()
-    {
-        // Check nonce for security
-        if (!check_ajax_referer('ga4_generate_api_key', 'nonce', false)) {
-            wp_send_json_error(array('message' => 'Security check failed'));
-            return;
-        }
-
-        // Check user permissions
-        if (!current_user_can('manage_options')) {
-            wp_send_json_error(array('message' => 'Insufficient permissions'));
-            return;
-        }
-
-        try {
-            // Generate new API key
-            $new_api_key = $this->generate_api_key();
-            
-            // Save it to options with encryption
-            \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::store_encrypted_key($new_api_key, 'ga4_worker_api_key');
-            $this->logger->info('New API key generated and stored successfully via AJAX');
-            
-            // Return success response
-            wp_send_json_success(array(
-                'api_key' => $new_api_key,
-                'message' => 'New API key generated successfully!'
-            ));
-        } catch (\Exception $e) {
-            $this->logger->error('Error generating API key via AJAX: ' . $e->getMessage());
-            wp_send_json_error(array('message' => 'Error generating API key: ' . $e->getMessage()));
-        }
-    }
-
-    /**
      * AJAX handler for generating a new encryption key
      */
     public function ajax_generate_encryption_key()
     {
-        // Check nonce for security
-        if (!check_ajax_referer('ga4_generate_api_key', 'nonce', false)) {
-            wp_send_json_error(array('message' => 'Security check failed'));
-            return;
-        }
-
         // Check user permissions
         if (!current_user_can('manage_options')) {
             wp_send_json_error(array('message' => 'Insufficient permissions'));
@@ -1364,148 +1358,6 @@ class GA4_Server_Side_Tagging_Admin
         } catch (\Exception $e) {
             wp_send_json_error(array('message' => 'Error generating encryption key: ' . $e->getMessage()));
         }
-    }
-
-    /**
-     * AJAX handler for processing event queue manually (testing)
-     */
-    public function ajax_process_event_queue()
-    {
-        // Check nonce for security
-        if (!check_ajax_referer('ga4_generate_api_key', 'nonce', false)) {
-            wp_send_json_error(array('message' => 'Security check failed'));
-            return;
-        }
-
-        // Check user permissions
-        if (!current_user_can('manage_options')) {
-            wp_send_json_error(array('message' => 'Insufficient permissions'));
-            return;
-        }
-
-        try {
-            // Include necessary files
-            require_once GA4_SERVER_SIDE_TAGGING_PLUGIN_DIR . 'includes/class-ga4-server-side-tagging-endpoint.php';
-            require_once GA4_SERVER_SIDE_TAGGING_PLUGIN_DIR . 'includes/class-ga4-encryption-util.php';
-            
-            // Initialize the endpoint
-            $endpoint = new \GA4ServerSideTagging\API\GA4_Server_Side_Tagging_Endpoint($this->logger);
-            
-            // Get queue status first
-            $queue_status = $this->get_queue_status();
-            
-            if ($queue_status['pending_events'] === 0) {
-                wp_send_json_success(array(
-                    'message' => 'No events in queue to process',
-                    'events_processed' => 0,
-                    'queue_status' => $queue_status
-                ));
-                return;
-            }
-            
-            // Process the queue (max 100 events per batch)
-            $result = $endpoint->process_event_queue(100);
-            
-            // Get updated queue status
-            $updated_queue_status = $this->get_queue_status();
-            
-            if ($result['success']) {
-                wp_send_json_success(array(
-                    'message' => 'Successfully processed ' . $result['events_processed'] . ' events',
-                    'events_processed' => $result['events_processed'],
-                    'batch_id' => $result['batch_id'],
-                    'processing_time_ms' => $result['processing_time_ms'],
-                    'queue_status' => $updated_queue_status
-                ));
-            } else {
-                wp_send_json_error(array(
-                    'message' => 'Failed to process events: ' . $result['error'],
-                    'error' => $result['error'],
-                    'queue_status' => $updated_queue_status
-                ));
-            }
-            
-        } catch (\Exception $e) {
-            wp_send_json_error(array('message' => 'Error processing queue: ' . $e->getMessage()));
-        }
-    }
-
-    /**
-     * AJAX handler for getting queue status
-     */
-    public function ajax_get_queue_status()
-    {
-        // Check nonce for security
-        if (!check_ajax_referer('ga4_generate_api_key', 'nonce', false)) {
-            wp_send_json_error(array('message' => 'Security check failed'));
-            return;
-        }
-
-        // Check user permissions
-        if (!current_user_can('manage_options')) {
-            wp_send_json_error(array('message' => 'Insufficient permissions'));
-            return;
-        }
-
-        try {
-            $queue_status = $this->get_queue_status();
-            wp_send_json_success($queue_status);
-        } catch (\Exception $e) {
-            wp_send_json_error(array('message' => 'Error getting queue status: ' . $e->getMessage()));
-        }
-    }
-
-    /**
-     * Get event queue status
-     */
-    private function get_queue_status()
-    {
-        global $wpdb;
-        
-        $table_name = $wpdb->prefix . 'ga4_event_queue';
-        
-        // Get counts by status
-        $status_counts = $wpdb->get_results(
-            "SELECT status, COUNT(*) as count FROM {$table_name} GROUP BY status",
-            ARRAY_A
-        );
-        
-        $counts = array(
-            'pending' => 0,
-            'processing' => 0,
-            'completed' => 0,
-            'failed' => 0
-        );
-        
-        foreach ($status_counts as $status) {
-            $counts[$status['status']] = (int) $status['count'];
-        }
-        
-        // Get oldest pending event
-        $oldest_pending = $wpdb->get_var(
-            "SELECT created_at FROM {$table_name} WHERE status = 'pending' ORDER BY created_at ASC LIMIT 1"
-        );
-        
-        // Get recent completed batches
-        $recent_batches = $wpdb->get_results(
-            "SELECT batch_id, COUNT(*) as event_count, MAX(processed_at) as processed_at 
-             FROM {$table_name} 
-             WHERE status = 'completed' AND batch_id IS NOT NULL 
-             GROUP BY batch_id 
-             ORDER BY processed_at DESC 
-             LIMIT 5",
-            ARRAY_A
-        );
-        
-        return array(
-            'pending_events' => $counts['pending'],
-            'processing_events' => $counts['processing'],
-            'completed_events' => $counts['completed'],
-            'failed_events' => $counts['failed'],
-            'total_events' => array_sum($counts),
-            'oldest_pending' => $oldest_pending,
-            'recent_batches' => $recent_batches
-        );
     }
 
     /**
@@ -1544,52 +1396,6 @@ class GA4_Server_Side_Tagging_Admin
     }
 
     /**
-     * Ensure API key is encrypted in storage
-     * 
-     * This runs automatically on settings save to upgrade plain text API keys
-     * to encrypted storage using WordPress salts for enhanced security.
-     * 
-     * @since 1.0.0
-     * @return void
-     */
-    private function ensure_api_key_is_encrypted()
-    {
-        try {
-            $raw_key = get_option('ga4_worker_api_key', '');
-            
-            // Check if key exists and needs encryption
-            if (!empty($raw_key)) {
-                // Try to decrypt - if this succeeds and returns a different value, it's already encrypted
-                $decrypted_test = \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::retrieve_encrypted_key('ga4_worker_api_key');
-                
-                // If decrypt fails (returns false), it's likely plain text
-                // If decrypt succeeds but returns the same value, it's also plain text
-                if ($decrypted_test === false) {
-                    // This is a plain text key, encrypt it
-                    $stored = \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::store_encrypted_key($raw_key, 'ga4_worker_api_key');
-                    
-                    if ($stored) {
-                        $this->logger->info('Worker API key automatically upgraded from plain text to encrypted storage');
-                    } else {
-                        $this->logger->warning('Failed to automatically encrypt existing plain text worker API key');
-                    }
-                } elseif ($decrypted_test === $raw_key) {
-                    // Key is stored as plain text, but we were able to "decrypt" it (meaning it's actually plain text)
-                    $stored = \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::store_encrypted_key($raw_key, 'ga4_worker_api_key');
-                    
-                    if ($stored) {
-                        $this->logger->info('Worker API key automatically upgraded from plain text to encrypted storage');
-                    } else {
-                        $this->logger->warning('Failed to automatically encrypt existing plain text worker API key');
-                    }
-                }
-            }
-        } catch (\Exception $e) {
-            $this->logger->error('Error during automatic API key upgrade: ' . $e->getMessage());
-        }
-    }
-
-    /**
      * Ensure WordPress encryption salts exist for key storage
      * 
      * Initializes the required WordPress options for encryption key storage
@@ -1612,6 +1418,60 @@ class GA4_Server_Side_Tagging_Admin
             $auth_key = bin2hex(random_bytes(32)); // 64-character hex string
             update_option('ga4_time_based_auth_key', $auth_key);
             $this->logger->info('Created WordPress encryption auth key for secure key storage');
+        }
+    }
+
+    /**
+     * Display the cronjobs admin page.
+     *
+     * @since    2.0.0
+     */
+    public function display_cronjobs_page()
+    {
+        include_once 'partials/ga4-server-side-tagging-cronjobs-display.php';
+    }
+
+    /**
+     * Display the settings page
+     *
+     * @since    2.0.0
+     */
+    public function display_settings_page()
+    {
+        include_once 'partials/ga4-server-side-tagging-settings-display.php';
+    }
+
+    /**
+     * Migrate old transmission method values to new simplified system
+     *
+     * @since    2.0.0
+     */
+    private function migrate_transmission_methods()
+    {
+        $current_method = get_option('ga4_transmission_method');
+        
+        // Map old values to new ones
+        $migration_map = array(
+            'secure_wp_to_cf' => 'wp_rest_endpoint',
+            'wp_endpoint_to_cf' => 'wp_rest_endpoint'
+            // 'direct_to_cf' stays the same
+        );
+        
+        if (isset($migration_map[$current_method])) {
+            update_option('ga4_transmission_method', $migration_map[$current_method]);
+            
+            if ($this->logger) {
+                $this->logger->info("Migrated transmission method from '$current_method' to '{$migration_map[$current_method]}'");
+            }
+            
+            // If migrating from secure_wp_to_cf, enable encryption by default
+            if ($current_method === 'secure_wp_to_cf') {
+                update_option('ga4_jwt_encryption_enabled', true);
+                
+                if ($this->logger) {
+                    $this->logger->info("Enabled JWT encryption due to migration from secure_wp_to_cf");
+                }
+            }
         }
     }
 }

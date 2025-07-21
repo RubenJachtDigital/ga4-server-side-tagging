@@ -7,6 +7,7 @@ use GA4ServerSideTagging\Core\GA4_Server_Side_Tagging_Logger;
 use GA4ServerSideTagging\Admin\GA4_Server_Side_Tagging_Admin;
 use GA4ServerSideTagging\Frontend\GA4_Server_Side_Tagging_Public;
 use GA4ServerSideTagging\API\GA4_Server_Side_Tagging_Endpoint;
+use GA4ServerSideTagging\Core\GA4_Cronjob_Manager;
 
 /**
  * The core plugin class.
@@ -50,6 +51,15 @@ class GA4_Server_Side_Tagging
     protected $logger;
 
     /**
+     * The cronjob manager instance.
+     *
+     * @since    2.0.0
+     * @access   protected
+     * @var      GA4_Cronjob_Manager    $cronjob_manager    Handles event queue and cronjob processing.
+     */
+    protected $cronjob_manager;
+
+    /**
      * Define the core functionality of the plugin.
      *
      * @since    1.0.0
@@ -59,6 +69,7 @@ class GA4_Server_Side_Tagging
         $this->load_dependencies();
         $this->define_admin_hooks();
         $this->define_public_hooks();
+        $this->define_cronjob_hooks();
     }
 
 
@@ -84,6 +95,9 @@ class GA4_Server_Side_Tagging
         
         // Encryption utilities
         require_once GA4_SERVER_SIDE_TAGGING_PLUGIN_DIR . 'includes/class-ga4-encryption-util.php';
+        
+        // Cronjob manager
+        require_once GA4_SERVER_SIDE_TAGGING_PLUGIN_DIR . 'includes/class-ga4-cronjob-manager.php';
     }
 
     /**
@@ -102,17 +116,8 @@ class GA4_Server_Side_Tagging
         $this->loader->add_action('admin_menu', $plugin_admin, 'add_admin_menu');
         $this->loader->add_action('admin_init', $plugin_admin, 'register_settings');
 
-        // Add AJAX handler for generating API key
-        $this->loader->add_action('wp_ajax_ga4_generate_api_key', $plugin_admin, 'ajax_generate_api_key');
-        
         // Add AJAX handler for generating encryption key
         $this->loader->add_action('wp_ajax_ga4_generate_encryption_key', $plugin_admin, 'ajax_generate_encryption_key');
-        
-        // Add AJAX handler for processing event queue
-        $this->loader->add_action('wp_ajax_ga4_process_event_queue', $plugin_admin, 'ajax_process_event_queue');
-        
-        // Add AJAX handler for getting queue status
-        $this->loader->add_action('wp_ajax_ga4_get_queue_status', $plugin_admin, 'ajax_get_queue_status');
     }
 
     /**
@@ -138,6 +143,20 @@ class GA4_Server_Side_Tagging
         $this->loader->add_action('wp_ajax_nopriv_ga4_refresh_nonce', $plugin_public, 'ajax_refresh_nonce');
     }
 
+    /**
+     * Register all of the hooks related to the cronjob functionality.
+     *
+     * @since    2.0.0
+     * @access   private
+     */
+    private function define_cronjob_hooks()
+    {
+        $this->cronjob_manager = new GA4_Cronjob_Manager($this->logger);
+
+        // Add custom cron schedule
+        $this->loader->add_filter('cron_schedules', $this->cronjob_manager, 'add_cron_schedule');
+    }
+
 
     /**
      * Run the loader to execute all of the hooks with WordPress.
@@ -147,5 +166,16 @@ class GA4_Server_Side_Tagging
     public function run()
     {
         $this->loader->run();
+    }
+
+    /**
+     * Get the cronjob manager instance.
+     *
+     * @since    2.0.0
+     * @return   GA4_Cronjob_Manager    The cronjob manager instance.
+     */
+    public function get_cronjob_manager()
+    {
+        return $this->cronjob_manager;
     }
 }

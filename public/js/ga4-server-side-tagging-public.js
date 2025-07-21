@@ -515,42 +515,6 @@
       return eventName;
     },
 
-    /**
-     * Test A/B testing functionality (for debugging)
-     */
-    testABTesting: function() {
-      this.log('🧪 [A/B Testing] Running test...');
-      
-      if (!this.config.abTestsEnabled) {
-        this.log('❌ [A/B Testing] A/B testing is not enabled in config');
-        return;
-      }
-      
-      if (!this.config.abTestsConfig) {
-        this.log('❌ [A/B Testing] No A/B tests configuration found');
-        return;
-      }
-      
-      try {
-        var tests = JSON.parse(this.config.abTestsConfig);
-        this.log('🧪 [A/B Testing] Found tests:', tests);
-        
-        tests.forEach(function(test, index) {
-          this.log(`Test ${index + 1}:`, test);
-          
-          // Check if elements exist
-          var elemA = document.querySelector(test.class_a);
-          var elemB = document.querySelector(test.class_b);
-          
-          this.log(`  - Variant A (${test.class_a}):`, elemA ? 'FOUND' : 'NOT FOUND');
-          this.log(`  - Variant B (${test.class_b}):`, elemB ? 'FOUND' : 'NOT FOUND');
-        });
-        
-      } catch (error) {
-        this.log('❌ [A/B Testing] Error parsing config:', error);
-      }
-    },
-
   
     /**
      * REPLACE the existing trackPageView function with this enhanced version
@@ -2169,96 +2133,6 @@
     },
 
     /**
-     * Get location based on IP address with fallback services
-     */
-    getIPBasedLocation: function () {
-      return new Promise((resolve) => {
-        // Try ipapi.co first
-        fetch("https://ipapi.co/json/")
-          .then((response) => {
-            if (!response.ok) throw new Error("ipapi.co lookup failed");
-            return response.json();
-          })
-          .then((data) => {
-            const locationData = {
-              latitude: parseFloat(data.latitude),
-              longitude: parseFloat(data.longitude),
-              city: data.city || "",
-              region: data.region || "",
-              country: data.country_name || "",
-            };
-            this.log("Location obtained from ipapi.co", locationData);
-            resolve(locationData);
-          })
-          .catch((error) => {
-            this.log(
-              "First IP location service failed, trying fallback",
-              error
-            );
-
-            // Fallback to ipinfo.io
-            fetch("https://ipinfo.io/json")
-              .then((response) => {
-                if (!response.ok) throw new Error("ipinfo.io lookup failed");
-                return response.json();
-              })
-              .then((data) => {
-                let coords = [0, 0];
-                if (data.loc && data.loc.includes(",")) {
-                  coords = data.loc.split(",");
-                }
-
-                const locationData = {
-                  latitude: parseFloat(coords[0]),
-                  longitude: parseFloat(coords[1]),
-                  city: data.city || "",
-                  region: data.region || "",
-                  country: data.country || "",
-                };
-
-                this.log(
-                  "Location obtained from fallback service",
-                  locationData
-                );
-                resolve(locationData);
-              })
-              .catch((secondError) => {
-                this.log(
-                  "Second IP location service failed, trying final fallback",
-                  secondError
-                );
-
-                // Final fallback to geoiplookup.io
-                fetch("https://json.geoiplookup.io/")
-                  .then((response) => {
-                    if (!response.ok) throw new Error("geoiplookup.io failed");
-                    return response.json();
-                  })
-                  .then((data) => {
-                    const locationData = {
-                      latitude: parseFloat(data.latitude),
-                      longitude: parseFloat(data.longitude),
-                      city: data.city || "",
-                      region: data.region || "",
-                      country: data.country_name || "",
-                    };
-
-                    this.log(
-                      "Location obtained from final fallback service",
-                      locationData
-                    );
-                    resolve(locationData);
-                  })
-                  .catch((finalError) => {
-                    this.log("All IP location services failed", finalError);
-                    resolve({});
-                  });
-              });
-          });
-      });
-    },
-
-    /**
      * Build complete event data with all session context, attribution, and page data
      * This preserves the original page context when events are queued
      */
@@ -2397,7 +2271,7 @@
                              eventParams.hasOwnProperty('medium') &&
                              eventParams.hasOwnProperty('session_id');
         
-        var criticalEvents = ['page_view', 'custom_session_start', 'custom_first_visit'];
+        var criticalEvents = ['page_view', 'custom_session_start', 'custom_first_visit', 'view_item', 'view_item_list'];
         
         if (criticalEvents.includes(eventName) && hasCompleteData) {
           // eventParams already contains complete session data - check if should send immediately
@@ -2510,7 +2384,7 @@
       
       // Use single send-event endpoint
       var data = this.formatEventData(eventName, completeEventData);
-      this.sendAjaxPayload(null, data);
+      this.sendAjaxPayload(data);
     },
 
   /**
@@ -2603,47 +2477,15 @@
       // Use single send-event endpoint
       var data = this.formatEventData(eventName, params);
       
-      this.log("Sending via send-event endpoint", {
-        consent: this.getMinimalConsent(consentData),
-        anonymized: consentData.ad_user_data !== "GRANTED",
-        eventName: eventName
-      });
-      
       // Determine transmission method based on configuration
-      const transmissionMethod = this.config.transmissionMethod || 'secure_wp_to_cf';
+      const transmissionMethod = this.config.transmissionMethod || 'direct_to_cf';
       
       if (transmissionMethod === 'direct_to_cf' && this.config.cloudflareWorkerUrl) {
-        this.log("⚡ Direct to Cloudflare transmission - sending directly to Worker", {
-          eventName: eventName,
-          workerUrl: this.config.cloudflareWorkerUrl,
-          method: 'direct_to_cf',
-          bypassWordPress: true,
-          botDetection: false
-        });
-        
-        this.sendSimpleRequest(data, false); // false = no bot detection
-      } else if (transmissionMethod === 'wp_endpoint_to_cf' && this.config.cloudflareWorkerUrl) {
-        this.log("🛡️ WP Bot Check before sending to CF transmission - optimized WordPress endpoint", {
-          eventName: eventName,
-          workerUrl: this.config.cloudflareWorkerUrl,
-          method: 'wp_endpoint_to_cf',
-          bypassWordPress: false,
-          botDetection: true,
-          apiKeyValidation: false,
-          encryption: false,
-          asyncForwarding: true
-        });
-        
-        this.sendAjaxPayload(null, data); // Use optimized WordPress endpoint
+        this.sendSimpleRequest(data); // false = no bot detection
+      } else if (transmissionMethod === 'wp_rest_endpoint') {
+        this.sendAjaxPayload(data);
       } else {
-        this.log("🔒 Secure WordPress to Cloudflare transmission - sending via WordPress endpoint", {
-          eventName: eventName,
-          method: 'secure_wp_to_cf',
-          encryption: true,
-          apiKeyValidation: true
-        });
-        
-        this.sendAjaxPayload(null, data);
+        this.sendAjaxPayload(data);
       }
     },
 
@@ -2722,7 +2564,7 @@
         };
 
         // Send with reliable method
-        const transmissionMethod = this.config.transmissionMethod || 'secure_wp_to_cf';
+        const transmissionMethod = this.config.transmissionMethod || 'direct_to_cf';
         
         this.log("🚀 Sending reliable event via " + transmissionMethod, {
           eventName: eventName,
@@ -2734,7 +2576,7 @@
         if (transmissionMethod === 'direct_to_cf' && this.config.cloudflareWorkerUrl) {
           this.log("⚡ Direct to Cloudflare reliable transmission");
           await this.sendEventToCloudflareReliable(data, isCritical);
-        } else if (transmissionMethod === 'wp_endpoint_to_cf') {
+        } else if (transmissionMethod === 'wp_rest_endpoint') {
           this.log("🛡️ WP Bot Check before sending to CF reliable transmission (balanced)");
           await this.sendEventViaWordPressReliable(data, false, isCritical);
         } else {
@@ -2936,7 +2778,7 @@
       });
 
       // Determine transmission method based on configuration
-      const transmissionMethod = this.config.transmissionMethod || 'secure_wp_to_cf';
+      const transmissionMethod = this.config.transmissionMethod || 'direct_to_cf';
       
       // Format batch data for transmission
       var data = {
@@ -2956,12 +2798,15 @@
       if (transmissionMethod === 'direct_to_cf' && this.config.cloudflareWorkerUrl) {
         this.log("⚡ Direct to Cloudflare batch transmission");
         this.sendBatchToCloudflare(data, isCritical);
-      } else if (transmissionMethod === 'wp_endpoint_to_cf') {
-        this.log("🛡️ WP Bot Check before sending to CF batch transmission (balanced)");
-        this.sendBatchViaWordPress(data, false, isCritical); // Use optimized WordPress endpoint (no encryption)
-      } else {
-        this.log("🔒 Secure WordPress to Cloudflare batch transmission (always encrypted)");
-        this.sendBatchViaWordPress(data, true, isCritical); // true = with encryption
+      } else if (transmissionMethod === 'wp_rest_endpoint') {
+        if(this.config.encryptionEnabled == true){
+          this.log("🔒 Secure WordPress to Cloudflare batch transmission (always encrypted)");
+          this.sendBatchViaWordPress(data, true, isCritical); // true = with encryption
+        }
+        else {
+          this.log("🔒 Secure WordPress to Cloudflare batch transmission (NO encryption)");
+          this.sendBatchViaWordPress(data, false, isCritical); // Use optimized WordPress endpoint (no encryption)
+        }
       }
     },
 
@@ -3009,7 +2854,7 @@
             'X-Simple-request': 'true'
           };
           
-          // Add X-WP-Nonce header if we have a nonce (for wp_endpoint_to_cf method)
+          // Add X-WP-Nonce header if we have a nonce (for wp_rest_endpoint method)
           const currentNonce = window.ga4ServerSideTagging?.nonce || this.config.nonce;
           if (currentNonce) {
             headers['X-WP-Nonce'] = currentNonce;
@@ -3327,17 +3172,14 @@
     /**
      * Send Simple request directly to Cloudflare Worker (bypasses WordPress)
      */
-    sendSimpleRequest: async function (payload, enableBotDetection = false) {
+    sendSimpleRequest: async function (payload) {
       try {
-        const botDetectionEnabled = enableBotDetection;
         
         this.log("🚀 Sending Simple request directly to Cloudflare Worker", {
           workerUrl: this.config.cloudflareWorkerUrl,
           eventName: payload.name,
           bypassWordPress: true,
           encryptionDisabled: true,
-          apiKeyValidationDisabled: true,
-          botDetectionEnabled: botDetectionEnabled
         });
         // Prepare headers for the request
         const headers = {
@@ -3345,7 +3187,7 @@
           'X-Simple-request': 'true'
         };
         
-        // Add X-WP-Nonce header if we have a nonce (for wp_endpoint_to_cf method)
+        // Add X-WP-Nonce header if we have a nonce (for wp_rest_endpoint method)
         const currentNonce = window.ga4ServerSideTagging?.nonce || this.config.nonce;
         if (currentNonce) {
           headers['X-WP-Nonce'] = currentNonce;
@@ -3398,7 +3240,6 @@
           eventName: payload.name,
           status: response.status,
           response: result,
-          botValidationPerformed: botDetectionEnabled
         });
 
         return result;
@@ -3417,7 +3258,7 @@
     /**
      * Send AJAX payload to endpoint
      */
-    sendAjaxPayload: async function (endpoint, payload) {
+    sendAjaxPayload: async function (payload) {
       try {
         // Check if consent is ready - if not, queue the event
         if (!this.consentReady && !this.hasConsentDecision()) {
@@ -3698,72 +3539,6 @@
       }
     },
 
-    /**
-     * Restore event queue from localStorage on page load
-     */
-    restoreEventQueue: function() {
-      try {
-        this.log("🔄 RESTORE QUEUE - Starting restoration process...", {
-          hasLocalStorage: typeof localStorage !== 'undefined',
-          currentQueueLength: this.eventQueue.length
-        });
-        
-        const storedData = localStorage.getItem('ga4_persistent_event_queue');
-        if (!storedData) {
-          this.log("📭 No persistent event queue found in localStorage");
-          return;
-        }
-        
-        this.log("📦 Found stored queue data", {
-          dataSize: storedData.length + ' bytes'
-        });
-        
-        const queueData = JSON.parse(storedData);
-        if (!queueData || !queueData.events || !Array.isArray(queueData.events)) {
-          this.log("⚠️ Invalid queue data format, clearing storage", {
-            hasQueueData: !!queueData,
-            hasEvents: !!(queueData && queueData.events),
-            isArray: !!(queueData && queueData.events && Array.isArray(queueData.events))
-          });
-          localStorage.removeItem('ga4_persistent_event_queue');
-          return;
-        }
-        
-        this.log("📊 Queue data analysis", {
-          totalEvents: queueData.events.length,
-          queueTimestamp: queueData.timestamp,
-          queueVersion: queueData.version,
-          queueAge: Date.now() - queueData.timestamp + 'ms'
-        });
-        
-        // Clean up expired events
-        const validEvents = this.cleanupExpiredQueuedEvents(queueData.events);
-        
-        // Restore events to in-memory queue
-        this.eventQueue = validEvents;
-        
-        this.log("✅ Event queue restored from localStorage", {
-          restoredEvents: validEvents.length,
-          totalFound: queueData.events.length,
-          expiredEvents: queueData.events.length - validEvents.length,
-          queueAge: Date.now() - queueData.timestamp + 'ms'
-        });
-        
-        // Update localStorage with cleaned events if any were expired
-        if (validEvents.length !== queueData.events.length) {
-          this.log("🧹 Updating localStorage with cleaned events");
-          this.persistEventQueue();
-        }
-        
-      } catch (error) {
-        this.log("❌ Failed to restore event queue", {
-          error: error.message,
-          stack: error.stack
-        });
-        // Clear corrupted data
-        localStorage.removeItem('ga4_persistent_event_queue');
-      }
-    },
 
     /**
      * Clean up expired queued events
@@ -3893,94 +3668,7 @@
       return 50 * 1024; // 50KB - reasonable limit for localStorage
     },
 
-    /**
-     * Get storage usage statistics
-     */
-    getQueueStorageStats: function() {
-      try {
-        const storedData = localStorage.getItem('ga4_persistent_event_queue');
-        if (!storedData) {
-          return {
-            exists: false,
-            size: 0,
-            eventCount: 0
-          };
-        }
-
-        const queueData = JSON.parse(storedData);
-        return {
-          exists: true,
-          size: storedData.length,
-          eventCount: queueData.events ? queueData.events.length : 0,
-          timestamp: queueData.timestamp,
-          version: queueData.version
-        };
-      } catch (error) {
-        return {
-          exists: false,
-          size: 0,
-          eventCount: 0,
-          error: error.message
-        };
-      }
-    },
-
-    /**
-     * Test function for debugging persistent queue functionality
-     * Use this in browser console: GA4ServerSideTagging.testPersistentQueue()
-     */
-    testPersistentQueue: async function() {
-      this.log("🧪 TESTING PERSISTENT QUEUE FUNCTIONALITY");
-      
-      // Test 1: Check current state
-      const stats = this.getQueueStorageStats();
-      this.log("📊 Current Queue Stats", stats);
-      
-      // Test 2: Queue a test event
-      const testPayload = {
-        name: 'test_event',
-        params: {
-          event_category: 'test',
-          event_label: 'persistent_queue_test',
-          test_timestamp: Date.now()
-        }
-      };
-      
-      this.log("📦 Queuing test event...");
-      await this.queueEventForConsent(testPayload);
-      
-      // Test 3: Check state after queuing
-      const newStats = this.getQueueStorageStats();
-      this.log("📊 Queue Stats After Adding Event", newStats);
-      
-      // Test 4: Manually check localStorage
-      const rawData = localStorage.getItem('ga4_persistent_event_queue');
-      this.log("🔍 Raw localStorage Data", {
-        exists: !!rawData,
-        size: rawData ? rawData.length : 0,
-        preview: rawData ? rawData.substring(0, 100) + '...' : 'none'
-      });
-      
-      // Test 5: Test restoration
-      this.log("🔄 Testing queue restoration...");
-      const originalQueue = [...this.eventQueue];
-      this.eventQueue = []; // Clear in-memory queue
-      this.restoreEventQueue();
-      
-      this.log("✅ Test completed", {
-        originalQueueLength: originalQueue.length,
-        restoredQueueLength: this.eventQueue.length,
-        testPassed: this.eventQueue.length === originalQueue.length
-      });
-      
-      return {
-        success: this.eventQueue.length === originalQueue.length,
-        originalLength: originalQueue.length,
-        restoredLength: this.eventQueue.length,
-        storageStats: newStats
-      };
-    },
-
+  
     /**
      * Process queued events when consent is granted or denied
      */
@@ -4010,7 +3698,7 @@
             queueTime: Date.now() - queuedEvent.timestamp + 'ms'
           });
           
-          await this.sendAjaxPayload(null, queuedEvent.payload);
+          await this.sendAjaxPayload(queuedEvent.payload);
         } catch (error) {
           this.log("❌ Failed to process queued event", {
             eventName: queuedEvent.payload.name,
@@ -4180,11 +3868,6 @@
 
   // Expose GA4ServerSideTagging globally for A/B testing and other modules
   window.GA4ServerSideTagging = GA4ServerSideTagging;
-  
-  // Expose test function globally for debugging
-  window.testGA4ABTesting = function() {
-    return GA4ServerSideTagging.testABTesting();
-  };
 
   // Initialize when document is ready
   $(document).ready(async function () {

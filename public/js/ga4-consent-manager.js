@@ -295,32 +295,6 @@
     },
 
     /**
-     * Check if batch size limit (35+ events) is reached and send automatically
-     */
-    checkBatchSizeLimit: function() {
-      var userData = GA4Utils.storage.getUserData();
-      var batchEvents = userData.batchEvents || [];
-      var batchSizeLimit = this.config?.batchSizeLimit || 35;
-      
-      if (batchEvents.length >= batchSizeLimit) {
-        this.log("🚨 Batch size limit reached - automatically sending batch", {
-          currentBatchSize: batchEvents.length,
-          batchSizeLimit: batchSizeLimit,
-          triggerReason: "batch_size_limit"
-        });
-        
-        // Send batch events immediately when limit is reached
-        this.sendBatchEvents(false); // false = not critical (not during page unload)
-      } else {
-        this.log("📊 Batch size check", {
-          currentBatchSize: batchEvents.length,
-          batchSizeLimit: batchSizeLimit,
-          remaining: batchSizeLimit - batchEvents.length
-        });
-      }
-    },
-
-    /**
      * Process all queued events immediately when consent is granted
      * NEW: Send all queued events as a single batch using sendBeacon for reliability
      */

@@ -2116,73 +2116,7 @@
         }
       },
 
-      /**
-       * Get all tracked purchases (for debugging)
-       * @returns {Array}
-       */
-      getTrackedPurchases: function () {
-        var trackedPurchases = [];
-
-        if (!window.localStorage) {
-          return trackedPurchases;
-        }
-
-        for (var i = 0; i < localStorage.length; i++) {
-          var key = localStorage.key(i);
-
-          if (key && key.startsWith("purchase_tracked_")) {
-            try {
-              var data = JSON.parse(localStorage.getItem(key));
-              trackedPurchases.push({
-                key: key,
-                data: data,
-              });
-            } catch (e) {
-              // Invalid data, skip it
-            }
-          }
-        }
-
-        return trackedPurchases;
-      },
-
-      /**
-       * Clear all purchase tracking data (for debugging/testing)
-       * @param {string} trackingType Optional - specific tracking type to clear
-       */
-      clearAllPurchaseTracking: function (trackingType) {
-        if (!window.localStorage) {
-          return;
-        }
-
-        var keysToRemove = [];
-        var prefix = trackingType
-          ? "purchase_tracked_" + trackingType + "_"
-          : "purchase_tracked_";
-
-        for (var i = 0; i < localStorage.length; i++) {
-          var key = localStorage.key(i);
-
-          if (key && key.startsWith(prefix)) {
-            keysToRemove.push(key);
-          }
-        }
-
-        keysToRemove.forEach(function (key) {
-          localStorage.removeItem(key);
-        });
-
-        GA4Utils.helpers.log(
-          "Cleared " +
-            keysToRemove.length +
-            " purchase tracking records" +
-            (trackingType ? " for " + trackingType : ""),
-          null,
-          {},
-          "[Purchase Tracking]"
-        );
-      },
-
+  
       /**
        * Check if we're on a product list page
        * @returns {boolean}
@@ -2201,29 +2135,6 @@
        */
       isProductPage: function (config) {
         return config && config.productData ? true : false;
-      },
-
-      /**
-       * Reset purchase tracking for testing purposes
-       * @param {string} orderId Order ID to reset
-       * @param {string} trackingType Optional tracking type to reset ('ga4', or 'all')
-       */
-      resetPurchaseTracking: function (orderId, trackingType) {
-        trackingType = trackingType || "all";
-
-        if (trackingType === "all" || trackingType === "ga4") {
-          localStorage.removeItem("purchase_tracked_ga4_" + orderId);
-        }
-
-        GA4Utils.helpers.log(
-          "Reset purchase tracking for order: " +
-            orderId +
-            ", type: " +
-            trackingType,
-          null,
-          {},
-          "[Purchase Tracking]"
-        );
       },
 
       /**
@@ -2252,13 +2163,7 @@
         GA4Utils.session._clearExpiredUserData(customExpirationHours);
       },
 
-      /**
-       * @deprecated Use cleanupExpiredUserData() instead
-       * Backward compatibility alias for cleanupExpiredLocationData
-       */
-      cleanupExpiredLocationData: function () {
-        this.cleanupExpiredUserData();
-      },
+    
     },
 
     /**
@@ -2329,10 +2234,11 @@
           headers["X-WP-Nonce"] = window.ga4ServerSideTagging?.nonce || config.nonce || "";
           
           // Check if this is the send-event endpoint and encryption is enabled
-          // For secure transmission method, always encrypt
-          const transmissionMethod = config.transmissionMethod || 'secure_wp_to_cf';
+          // Only encrypt when using wp_rest_endpoint method with encryption enabled
+          const transmissionMethod = config.transmissionMethod || 'direct_to_cf';
           const shouldEncrypt = endpoint.includes('/send-events') && 
-                              (transmissionMethod === 'secure_wp_to_cf' || config.encryptionEnabled);
+                              transmissionMethod === 'wp_rest_endpoint' && 
+                              config.encryptionEnabled;
           
           if (shouldEncrypt) {
             try {
@@ -2426,128 +2332,6 @@
 
           if (!response.ok) {
             const errorText = await response.text();
-            
-            // Check if it's a nonce error (403) and try to extract fresh nonce
-            if (response.status === 403 && errorText.includes('rest_cookie_invalid_nonce')) {
-              try {
-                const errorData = JSON.parse(errorText);
-                if (errorData.data && errorData.data.fresh_nonce) {
-                  GA4Utils.helpers.log(
-                    "Received fresh nonce from server, retrying request",
-                    { freshNonce: errorData.data.fresh_nonce.substring(0, 10) + "..." },
-                    config,
-                    logPrefix
-                  );
-                  
-                  // Update nonce in headers and retry
-                  headers["X-WP-Nonce"] = errorData.data.fresh_nonce;
-                  
-                  // Update the nonce in the main configuration if available
-                  if (window.ga4ServerSideTagging) {
-                    window.ga4ServerSideTagging.nonce = errorData.data.fresh_nonce;
-                  }
-                  
-                  // Retry the request with fresh nonce
-                  const retryResponse = await fetch(endpoint, {
-                    method: "POST",
-                    headers: headers,
-                    body: requestBody,
-                    keepalive: true,
-                    type: "ping",
-                    credentials: endpoint.includes('wp-json') ? 'same-origin' : 'omit'
-                  });
-                  
-                  if (!retryResponse.ok) {
-                    const retryErrorText = await retryResponse.text();
-                    throw new Error(
-                      "Network response was not ok after nonce refresh: " + retryResponse.status + " - " + retryErrorText
-                    );
-                  }
-                  
-                  let retryData = await retryResponse.json();
-                  GA4Utils.helpers.log(
-                    "Request successful after nonce refresh",
-                    retryData,
-                    config,
-                    logPrefix
-                  );
-                  return retryData;
-                }
-              } catch (parseError) {
-                // If parsing fails, try AJAX nonce refresh as fallback
-                GA4Utils.helpers.log(
-                  "Failed to parse error response for nonce refresh, trying AJAX fallback",
-                  parseError,
-                  config,
-                  logPrefix
-                );
-                
-                // Try to refresh nonce via AJAX if the global function is available
-                if (window.ga4ServerSideTagging && typeof window.ga4ServerSideTagging.refreshNonce === 'function') {
-                  try {
-                    GA4Utils.helpers.log("Attempting AJAX nonce refresh", {}, config, logPrefix);
-                    
-                    // Call the refresh function and wait for it to complete
-                    await new Promise((resolve, reject) => {
-                      const originalNonce = window.ga4ServerSideTagging.nonce;
-                      
-                      // Set up a temporary listener for nonce changes
-                      const checkNonceChange = setInterval(() => {
-                        if (window.ga4ServerSideTagging.nonce && window.ga4ServerSideTagging.nonce !== originalNonce) {
-                          clearInterval(checkNonceChange);
-                          resolve();
-                        }
-                      }, 100);
-                      
-                      // Timeout after 5 seconds
-                      setTimeout(() => {
-                        clearInterval(checkNonceChange);
-                        reject(new Error('AJAX nonce refresh timeout'));
-                      }, 5000);
-                      
-                      // Trigger the refresh
-                      window.ga4ServerSideTagging.refreshNonce();
-                    });
-                    
-                    // Update headers with new nonce and retry
-                    headers["X-WP-Nonce"] = window.ga4ServerSideTagging.nonce;
-                    
-                    const retryResponse = await fetch(endpoint, {
-                      method: "POST",
-                      headers: headers,
-                      body: requestBody,
-                      keepalive: true,
-                      type: "ping",
-                      credentials: endpoint.includes('wp-json') ? 'same-origin' : 'omit'
-                    });
-                    
-                    if (!retryResponse.ok) {
-                      const retryErrorText = await retryResponse.text();
-                      throw new Error(
-                        "Network response was not ok after AJAX nonce refresh: " + retryResponse.status + " - " + retryErrorText
-                      );
-                    }
-                    
-                    let retryData = await retryResponse.json();
-                    GA4Utils.helpers.log(
-                      "Request successful after AJAX nonce refresh",
-                      retryData,
-                      config,
-                      logPrefix
-                    );
-                    return retryData;
-                    
-                  } catch (ajaxError) {
-                    GA4Utils.helpers.log(
-                      "AJAX nonce refresh failed",
-                      ajaxError,
-                      config,
-                      logPrefix
-                    );
-                  }
-                }
-              }
-            }
             
             throw new Error(
               "Network response was not ok: " + response.status + " - " + errorText
@@ -2775,35 +2559,7 @@
         };
       },
 
-      /**
-       * Check if element is in viewport
-       * @param {Element} element DOM element to check
-       * @param {number} threshold Threshold percentage (0-1)
-       * @returns {boolean}
-       */
-      isInViewport: function (element, threshold) {
-        threshold = threshold || 0.5;
-
-        if (!element || typeof element.getBoundingClientRect !== "function") {
-          return false;
-        }
-
-        var rect = element.getBoundingClientRect();
-        var windowHeight =
-          window.innerHeight || document.documentElement.clientHeight;
-        var windowWidth =
-          window.innerWidth || document.documentElement.clientWidth;
-
-        var verticalVisible =
-          rect.top + rect.height * threshold <= windowHeight &&
-          rect.bottom - rect.height * threshold >= 0;
-        var horizontalVisible =
-          rect.left + rect.width * threshold <= windowWidth &&
-          rect.right - rect.width * threshold >= 0;
-
-        return verticalVisible && horizontalVisible;
-      },
-
+   
       /**
        * Get cookie value by name
        * @param {string} name Cookie name
@@ -3263,108 +3019,7 @@
         return cleanupResults;
       },
 
-      /**
-       * Quick GDPR compliance cleanup - removes all user data
-       * This is a convenience method for complete data removal
-       * @param {string} reason Reason for cleanup (for logging)
-       * @returns {Object} Cleanup results summary
-       */
-      gdprCompliantCleanup: function(reason) {
-        reason = reason || 'GDPR compliance request';
-        
-        return this.cleanupUserData({
-          clearClientId: true,
-          clearSessionData: true,
-          clearConsentData: false, // Keep consent data for compliance
-          clearLocationData: true,
-          clearPurchaseTracking: true,
-          clearQueuedEvents: true,
-          clearAttribution: true,
-          clearUserInfo: true,
-          reason: reason
-        });
-      },
-
-      /**
-       * Selective cleanup for consent withdrawal
-       * Removes tracking data but keeps consent preferences
-       * @param {string} reason Reason for cleanup (for logging)
-       * @returns {Object} Cleanup results summary
-       */
-      consentWithdrawalCleanup: function(reason) {
-        reason = reason || 'Consent withdrawal';
-        
-        return this.cleanupUserData({
-          clearClientId: true,
-          clearSessionData: true,
-          clearConsentData: false, // Keep consent data to remember withdrawal
-          clearLocationData: true,
-          clearPurchaseTracking: false, // Keep purchase data for business purposes
-          clearQueuedEvents: true,
-          clearAttribution: true,
-          clearUserInfo: true,
-          reason: reason
-        });
-      },
-
-      /**
-       * Reset all tracking data (for testing or fresh start)
-       * @param {string} reason Reason for cleanup (for logging)
-       * @returns {Object} Cleanup results summary
-       */
-      resetAllTrackingData: function(reason) {
-        reason = reason || 'Reset all tracking data';
-        
-        return this.cleanupUserData({
-          clearClientId: true,
-          clearSessionData: true,
-          clearConsentData: true,
-          clearLocationData: true,
-          clearPurchaseTracking: true,
-          clearQueuedEvents: true,
-          clearAttribution: true,
-          clearUserInfo: true,
-          reason: reason
-        });
-      },
-
-      /**
-       * Get summary of stored user data (for privacy dashboard)
-       * @returns {Object} Summary of all stored data
-       */
-      getStoredDataSummary: function() {
-        var summary = {
-          localStorage: {
-            clientId: localStorage.getItem('server_side_ga4_client_id') !== null,
-            sessionData: localStorage.getItem('server_side_ga4_session_id') !== null,
-            consentData: localStorage.getItem('ga4_consent_status') !== null,
-            locationData: localStorage.getItem('user_location_data') !== null,
-            attributionData: localStorage.getItem('server_side_ga4_last_source') !== null,
-            userInfo: localStorage.getItem('ga4_user_data') !== null,
-            purchaseTracking: 0
-          },
-          sessionStorage: {
-            queuedEvents: window.sessionStorage ? sessionStorage.getItem('ga4_queued_events') !== null : false
-          },
-          cookies: {
-            ga: GA4Utils.helpers.getCookie('_ga') !== null,
-            gid: GA4Utils.helpers.getCookie('_gid') !== null,
-            gat: GA4Utils.helpers.getCookie('_gat') !== null,
-            consent: GA4Utils.helpers.getCookie('ga4_consent') !== null
-          },
-          timestamp: Date.now()
-        };
-        
-        // Count purchase tracking entries
-        for (var i = 0; i < localStorage.length; i++) {
-          var key = localStorage.key(i);
-          if (key && key.startsWith('purchase_tracked_')) {
-            summary.localStorage.purchaseTracking++;
-          }
-        }
-        
-        return summary;
-      },
+    
     },
 
     /**
