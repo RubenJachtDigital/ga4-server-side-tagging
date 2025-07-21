@@ -51,6 +51,15 @@ function ga4_server_side_tagging_activate() {
     // Create necessary database tables and options
     update_option( 'ga4_server_side_tagging_version', GA4_SERVER_SIDE_TAGGING_VERSION );
     update_option( 'ga4_server_side_tagging_debug_mode', false );
+    
+    // Create events queue table
+    require_once GA4_SERVER_SIDE_TAGGING_PLUGIN_DIR . 'includes/class-ga4-server-side-tagging-logger.php';
+    require_once GA4_SERVER_SIDE_TAGGING_PLUGIN_DIR . 'includes/class-ga4-encryption-util.php';
+    require_once GA4_SERVER_SIDE_TAGGING_PLUGIN_DIR . 'includes/class-ga4-cronjob-manager.php';
+    
+    $logger = new GA4ServerSideTagging\Core\GA4_Server_Side_Tagging_Logger();
+    $cronjob_manager = new GA4ServerSideTagging\Core\GA4_Cronjob_Manager($logger);
+    $cronjob_manager->maybe_create_table();
 }
 
 /**

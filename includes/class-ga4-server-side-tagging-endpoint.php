@@ -4,6 +4,7 @@ namespace GA4ServerSideTagging\API;
 
 use GA4ServerSideTagging\Core\GA4_Server_Side_Tagging_Logger;
 use GA4ServerSideTagging\Utilities\GA4_Encryption_Util;
+use GA4ServerSideTagging\Core\GA4_Cronjob_Manager;
 
 /**
  * REST API endpoint for GA4 Server-Side Tagging.
@@ -55,6 +56,15 @@ class GA4_Server_Side_Tagging_Endpoint
     private $validation_session_key = 'ga4_session_validated';
 
     /**
+     * The cronjob manager instance.
+     *
+     * @since    2.0.0
+     * @access   private
+     * @var      GA4_Cronjob_Manager    $cronjob_manager    Handles event queuing.
+     */
+    private $cronjob_manager;
+
+    /**
      * Initialize the class.
      *
      * @since    1.0.0
@@ -63,6 +73,7 @@ class GA4_Server_Side_Tagging_Endpoint
     public function __construct(GA4_Server_Side_Tagging_Logger $logger)
     {
         $this->logger = $logger;
+        $this->cronjob_manager = new GA4_Cronjob_Manager($logger);
         
         // Ensure session is started for validation tracking
         if (!session_id()) {
@@ -686,61 +697,146 @@ class GA4_Server_Side_Tagging_Endpoint
             // Log batch info with type distinction
             $event_count = count($request_data['events']);            
 
-            // Get configuration from database
-            $cloudflare_url = get_option('ga4_cloudflare_worker_url', '');
-            $worker_api_key = GA4_Encryption_Util::retrieve_encrypted_key('ga4_worker_api_key') ?: get_option('ga4_worker_api_key', '');
-            $encryption_enabled = (bool) get_option('ga4_jwt_encryption_enabled', false);
-            $encryption_key = GA4_Encryption_Util::retrieve_encrypted_key('ga4_jwt_encryption_key') ?: '';
+            // Check if cronjob batching is enabled
+            $cronjob_enabled = get_option('ga4_cronjob_enabled', true);
             
-            if (empty($cloudflare_url) || empty($worker_api_key)) {
-                return new \WP_REST_Response(array('error' => 'Configuration incomplete'), 500);
+            if (!$cronjob_enabled) {
+                // Fall back to direct sending (old behavior)
+                return $this->send_events_directly($request_data, $start_time, $session_id);
             }
-
-            // Forward the complete batch payload to Cloudflare
-            $batch_payload = $request_data;
             
-            // Check if debug mode is enabled
-            $debug_mode = get_option('ga4_server_side_tagging_debug_mode', false);
+            // Queue events for batch processing instead of sending directly
+            $queued_events = 0;
+            $failed_events = 0;
             
-            if ($debug_mode) {
-                // Debug mode: Wait for response from Cloudflare for debugging
-                $result = $this->forward_to_cloudflare($batch_payload, $cloudflare_url, $worker_api_key, $encryption_enabled, $encryption_key, $request);
-                $processing_time = round((microtime(true) - $start_time) * 1000, 2);
-
-                if ($result['success']) {
-                    $response_data = array(
-                        'success' => true, 
-                        'events_processed' => $event_count,
-                        'processing_time_ms' => $processing_time
-                    );
-                    if (isset($result['worker_response'])) {
-                        $response_data['worker_response'] = $result['worker_response'];
-                    }
-                    return new \WP_REST_Response($response_data, 200);
-                } else {
-                    $this->logger->error("Failed to send batch events to Cloudflare for session: {$session_id} after {$processing_time}ms: " . $result['error']);
-                    return new \WP_REST_Response(array(
-                        'error' => 'Batch event sending failed', 
-                        'details' => $result['error'],
-                        'events_failed' => $event_count
-                    ), 500);
-                }
-            } else {
-                // Production mode: Fire and forget for maximum performance
-                $this->forward_to_cloudflare_async($batch_payload, $cloudflare_url, $worker_api_key, $encryption_enabled, $encryption_key, $request);
-                $processing_time = round((microtime(true) - $start_time) * 1000, 2);
+            // Check if secured transmission is enabled for re-encryption when storing
+            $secured_transmission = (bool) get_option('ga4_jwt_encryption_enabled', false);
+            
+            // Process each event for queuing
+            foreach ($request_data['events'] as $event) {
+                // Prepare event data with context
+                $event_data = array(
+                    'event' => $event,
+                    'consent' => $request_data['consent'] ?? null,
+                    'batch' => $request_data['batch'] ?? false,
+                    'timestamp' => time(),
+                    'session_id' => $session_id,
+                    'client_ip' => $client_ip
+                );
                 
-                return new \WP_REST_Response(array(
-                    'success' => true, 
-                    'events_processed' => $event_count,
-                    'processing_time_ms' => $processing_time
-                ), 200);
+                // Determine if we should encrypt when storing
+                $should_encrypt = false;
+                if ($secured_transmission) {
+                    $encryption_key = GA4_Encryption_Util::retrieve_encrypted_key('ga4_jwt_encryption_key');
+                    if (!empty($encryption_key)) {
+                        try {
+                            $encrypted_data = GA4_Encryption_Util::encrypt(wp_json_encode($event_data), $encryption_key);
+                            $should_encrypt = true;
+                            $event_data = $encrypted_data;
+                        } catch (Exception $e) {
+                            $this->logger->warning("Failed to encrypt event for queuing: " . $e->getMessage());
+                            // Continue with unencrypted data
+                        }
+                    }
+                }
+                
+                // Queue the event
+                $queued = $this->cronjob_manager->queue_event($event_data, $should_encrypt);
+                
+                if ($queued) {
+                    $queued_events++;
+                } else {
+                    $failed_events++;
+                }
             }
+            
+            $processing_time = round((microtime(true) - $start_time) * 1000, 2);
+            
+            if ($failed_events > 0) {
+                $this->logger->warning("Some events failed to queue - Queued: $queued_events, Failed: $failed_events");
+            }
+            
+            $this->logger->info("Events queued for batch processing - Queued: $queued_events, Failed: $failed_events, Session: $session_id");
+            
+            return new \WP_REST_Response(array(
+                'success' => true,
+                'events_queued' => $queued_events,
+                'events_failed' => $failed_events,
+                'processing_time_ms' => $processing_time,
+                'message' => 'Events queued for batch processing every 5 minutes'
+            ), 200);
 
         } catch (\Exception $e) {
             $processing_time = round((microtime(true) - $start_time) * 1000, 2);
             $this->logger->error("Failed to process batch events request for session: {$session_id} after {$processing_time}ms: " . $e->getMessage());
             return new \WP_REST_Response(array('error' => 'Processing error'), 500);
+        }
+    }
+
+    /**
+     * Send events directly to Cloudflare (legacy behavior when cronjob is disabled)
+     *
+     * @since    2.0.0
+     * @param    array  $request_data  The request data
+     * @param    float  $start_time    The start time for performance measurement
+     * @param    string $session_id    The session ID
+     * @return   \WP_REST_Response     The response
+     */
+    private function send_events_directly($request_data, $start_time, $session_id)
+    {
+        $event_count = count($request_data['events']);
+
+        // Get configuration from database
+        $cloudflare_url = get_option('ga4_cloudflare_worker_url', '');
+        $encryption_enabled = (bool) get_option('ga4_jwt_encryption_enabled', false);
+        $encryption_key = GA4_Encryption_Util::retrieve_encrypted_key('ga4_jwt_encryption_key') ?: '';
+        
+        if (empty($cloudflare_url)) {
+            return new \WP_REST_Response(array('error' => 'Cloudflare Worker URL not configured'), 500);
+        }
+
+        // Forward the complete batch payload to Cloudflare
+        $batch_payload = $request_data;
+        
+        // Check if debug mode is enabled
+        $debug_mode = get_option('ga4_server_side_tagging_debug_mode', false);
+        
+        if ($debug_mode) {
+            // Debug mode: Wait for response from Cloudflare for debugging
+            $result = $this->forward_to_cloudflare($batch_payload, $cloudflare_url, $encryption_enabled, $encryption_key, null);
+            $processing_time = round((microtime(true) - $start_time) * 1000, 2);
+
+            if ($result['success']) {
+                $response_data = array(
+                    'success' => true, 
+                    'events_processed' => $event_count,
+                    'processing_time_ms' => $processing_time,
+                    'mode' => 'direct_sending'
+                );
+                if (isset($result['worker_response'])) {
+                    $response_data['worker_response'] = $result['worker_response'];
+                }
+                return new \WP_REST_Response($response_data, 200);
+            } else {
+                $this->logger->error("Failed to send batch events to Cloudflare for session: {$session_id} after {$processing_time}ms: " . $result['error']);
+                return new \WP_REST_Response(array(
+                    'error' => 'Batch event sending failed', 
+                    'details' => $result['error'],
+                    'events_failed' => $event_count,
+                    'mode' => 'direct_sending'
+                ), 500);
+            }
+        } else {
+            // Production mode: Fire and forget for maximum performance
+            $this->forward_to_cloudflare_async($batch_payload, $cloudflare_url, $encryption_enabled, $encryption_key, null);
+            $processing_time = round((microtime(true) - $start_time) * 1000, 2);
+            
+            return new \WP_REST_Response(array(
+                'success' => true, 
+                'events_processed' => $event_count,
+                'processing_time_ms' => $processing_time,
+                'mode' => 'direct_sending'
+            ), 200);
         }
     }
 
@@ -1032,13 +1128,12 @@ class GA4_Server_Side_Tagging_Endpoint
      * @since    1.0.0
      * @param    array                  $event_payload      The event payload.
      * @param    string                 $cloudflare_url     The Cloudflare Worker URL.
-     * @param    string                 $worker_api_key     The API key.
      * @param    bool                   $encryption_enabled Whether encryption is enabled.
      * @param    string                 $encryption_key     The encryption key.
      * @param    \WP_REST_Request|null  $original_request   The original request object for header forwarding.
      * @return   void
      */
-    private function forward_to_cloudflare_async($event_payload, $cloudflare_url, $worker_api_key, $encryption_enabled, $encryption_key, $original_request = null)
+    private function forward_to_cloudflare_async($event_payload, $cloudflare_url, $encryption_enabled, $encryption_key, $original_request = null)
     {
         try {
             // Ensure Cloudflare Worker URL uses HTTPS
@@ -1047,11 +1142,8 @@ class GA4_Server_Side_Tagging_Endpoint
                 return;
             }
 
-            $auth_header_value = $worker_api_key;
-
             $headers = array(
-                'Content-Type' => 'application/json',
-                'Authorization' => 'Bearer ' . $auth_header_value
+                'Content-Type' => 'application/json'
             );
 
             // Forward Origin, Referer, and User-Agent headers from the original request
@@ -1104,28 +1196,22 @@ class GA4_Server_Side_Tagging_Endpoint
      * @since    1.0.0
      * @param    array     $event_payload      The event data.
      * @param    string    $cloudflare_url     The Cloudflare Worker URL.
-     * @param    string    $worker_api_key     The Worker API key.
      * @param    bool      $encryption_enabled Whether encryption is enabled.
      * @param    string    $encryption_key     The encryption key.
      * @param    \WP_REST_Request $original_request The original client request.
      * @return   array                         Success/failure result.
      */
-    private function forward_to_cloudflare($event_payload, $cloudflare_url, $worker_api_key, $encryption_enabled, $encryption_key, $original_request = null)
+    private function forward_to_cloudflare($event_payload, $cloudflare_url, $encryption_enabled, $encryption_key, $original_request = null)
     {
         try {
             // Ensure Cloudflare Worker URL uses HTTPS
             if (!empty($cloudflare_url) && strpos($cloudflare_url, 'https://') !== 0) {
                 return array('success' => false, 'error' => 'Cloudflare Worker URL must use HTTPS protocol for security');
             }
-            // Use the API key as-is for Authorization header (already decrypted from database)
-            $auth_header_value = $worker_api_key;
-            
-            
             // Performance: Removed error logging for faster processing
 
             $headers = array(
-                'Content-Type' => 'application/json',
-                'Authorization' => 'Bearer ' . $auth_header_value
+                'Content-Type' => 'application/json'
             );
 
             // Forward Origin, Referer, and User-Agent headers from the original request to Cloudflare Worker

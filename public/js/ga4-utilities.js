@@ -2329,10 +2329,11 @@
           headers["X-WP-Nonce"] = window.ga4ServerSideTagging?.nonce || config.nonce || "";
           
           // Check if this is the send-event endpoint and encryption is enabled
-          // For secure transmission method, always encrypt
-          const transmissionMethod = config.transmissionMethod || 'secure_wp_to_cf';
+          // Only encrypt when using wp_rest_endpoint method with encryption enabled
+          const transmissionMethod = config.transmissionMethod || 'direct_to_cf';
           const shouldEncrypt = endpoint.includes('/send-events') && 
-                              (transmissionMethod === 'secure_wp_to_cf' || config.encryptionEnabled);
+                              transmissionMethod === 'wp_rest_endpoint' && 
+                              config.encryptionEnabled;
           
           if (shouldEncrypt) {
             try {

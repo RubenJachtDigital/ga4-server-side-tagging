@@ -175,21 +175,19 @@ class GA4_Server_Side_Tagging_Public
             'conversionFormIds' => get_option('ga4_conversion_form_ids', ''),
             'currency' => function_exists('get_woocommerce_currency') ? get_woocommerce_currency() : 'EUR',
             'siteName' => get_bloginfo('name'),
-            'transmissionMethod' => get_option('ga4_transmission_method', 'secure_wp_to_cf'),
+            'transmissionMethod' => get_option('ga4_transmission_method', 'direct_to_cf'),
         );
 
         // Add transmission method specific settings
-        $transmission_method = get_option('ga4_transmission_method', 'secure_wp_to_cf');
+        $transmission_method = get_option('ga4_transmission_method', 'direct_to_cf');
         
-        // Handle encryption based on transmission method
-        if ($transmission_method === 'secure_wp_to_cf') {
-            // Secure method always encrypts payloads
-            $script_data['encryptionEnabled'] = true;
-        } else if ($transmission_method === 'wp_endpoint_to_cf') {
-            // Balanced method uses security checks but no encryption
-            $script_data['encryptionEnabled'] = false;
+        // Handle encryption based on transmission method and settings
+        if ($transmission_method === 'wp_rest_endpoint') {
+            // WP REST Endpoint method - check if encryption is enabled
+            $encryption_enabled = get_option('ga4_jwt_encryption_enabled', false);
+            $script_data['encryptionEnabled'] = $encryption_enabled;
         } else if ($transmission_method === 'direct_to_cf') {
-            // Direct method no encryption and includes cloudflare URL
+            // Direct method - no encryption, includes cloudflare URL
             $script_data['encryptionEnabled'] = false;
             $script_data['cloudflareWorkerUrl'] = get_option('ga4_cloudflare_worker_url', '');
         }

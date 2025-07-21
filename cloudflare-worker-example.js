@@ -9,7 +9,7 @@
  * 
  * TRANSMISSION METHODS SUPPORTED:
  * ==============================
- * 1. direct_to_cf (Simple): Direct client-to-worker, minimal security, no API key
+ * 1. direct_to_cf (Simple): Direct client-to-worker, minimal security
  *    - Headers: X-Simple-request: true
  *    - Payload: Plain JSON
  *    - Security: Basic rate limiting only
@@ -24,10 +24,6 @@
  *    - Payload: JWT encrypted (time_jwt field)
  *    - Security: WordPress validation + JWT encryption + rate limiting
  * 
- * 4. regular (Legacy): Direct with API key, full security validation
- *    - Headers: Authorization: Bearer [api_key]
- *    - Payload: Plain JSON or JWT encrypted
- *    - Security: API key + origin validation + rate limiting
  * 
  * IMPORTANT: CONFIGURATION REQUIRED
  * ================================
@@ -37,8 +33,7 @@
  * 
  * GA4_MEASUREMENT_ID    = Your GA4 Measurement ID (e.g., G-XXXXXXXXXX)
  * GA4_API_SECRET        = Your GA4 API Secret from Google Analytics
- * API_KEY              = API key from WordPress plugin admin (for legacy method)
- * ENCRYPTION_KEY       = JWT encryption key from WordPress plugin admin
+ * ENCRYPTION_KEY       = JWT encryption key from WordPress plugin admin (optional)
  * ALLOWED_DOMAINS      = Comma-separated domains (e.g., example.com,www.example.com)
  * 
  * DO NOT hardcode these values in this script - always use environment variables!
@@ -61,7 +56,6 @@ const BOT_LOG_ENABLED = true; // Set to false to disable bot logging
 const RATE_LIMIT_REQUESTS = 100; // Max requests per IP per minute
 const RATE_LIMIT_WINDOW = 60; // Rate limit window in seconds
 const MAX_PAYLOAD_SIZE = 50000; // Max payload size in bytes (50KB)
-const REQUIRE_API_KEY = true; // Set to true to require API key authentication
 
 // JWT Encryption Configuration
 const JWT_ENCRYPTION_ENABLED = true; // Set to true to enable JWT encryption
@@ -71,7 +65,6 @@ let GA4_MEASUREMENT_ID; // Loaded from env.GA4_MEASUREMENT_ID
 let GA4_API_SECRET; // Loaded from env.GA4_API_SECRET
 let ENCRYPTION_KEY; // Loaded from env.ENCRYPTION_KEY
 let ALLOWED_DOMAINS; // Loaded from env.ALLOWED_DOMAINS (comma-separated)
-let API_KEY; // Loaded from env.API_KEY
 
 /**
  * =============================================================================
@@ -355,36 +348,6 @@ function hexToBytes(hex) {
     bytes[i / 2] = parseInt(hex.substr(i, 2), 16);
   }
   return bytes;
-}
-
-/**
- * =============================================================================
- * API KEY JWT UTILITIES
- * =============================================================================
- */
-
-/**
- * Verify and decrypt JWT encrypted API key using static encryption key
- * @param {string} jwtToken - JWT token to verify
- * @return {Promise<string|null>} Decrypted API key or null on failure
- */
-async function verifyJWTApiKey(jwtToken) {
-  if (!ENCRYPTION_KEY) {
-    throw new Error('ENCRYPTION_KEY not configured for JWT decryption');
-  }
-  
-  try {
-    // Use the static encryption key to decrypt the JWT token
-    const decryptedData = await verifyJWTToken(jwtToken, ENCRYPTION_KEY);
-    
-    // The decrypted data should be the plain API key string
-    return decryptedData;
-  } catch (error) {
-    if (DEBUG_MODE) {
-      console.log('JWT API key verification failed with static encryption key:', error.message);
-    }
-    throw new Error('JWT API key verification failed: ' + error.message);
-  }
 }
 
 
@@ -1170,120 +1133,6 @@ async function checkRateLimit(request) {
   return { allowed: true, count: currentData.count, limit: RATE_LIMIT_REQUESTS };
 }
 
-/**
- * Detect API key format and decode accordingly
- * @param {string} apiKey - The raw API key from headers
- * @returns {Promise<{key: string, format: string}>} Decoded key and detected format
- */
-async function detectAndDecodeApiKey(apiKey) {
-  const originalKey = apiKey;
-  
-  // 1. Check if it's a JWT token (3 parts separated by dots)
-  if (apiKey.includes('.') && apiKey.split('.').length === 3) {
-    // 1a. First try JWT API key decryption using static encryption key
-    try {
-      const jwtDecryptedApiKey = await verifyJWTApiKey(apiKey);
-      if (jwtDecryptedApiKey) {
-        return { key: jwtDecryptedApiKey, format: 'JWT (Static Key)' };
-      }
-    } catch (jwtError) {
-      if (DEBUG_MODE) {
-        console.log("JWT API key decryption failed:", jwtError.message);
-      }
-    }
-    
-    // 1b. Fall back to regular JWT decryption
-    if (JWT_ENCRYPTION_ENABLED && ENCRYPTION_KEY) {
-      try {
-        const decryptedKey = await decrypt(apiKey, ENCRYPTION_KEY);
-        return { key: decryptedKey, format: 'JWT' };
-      } catch (jwtError) {
-        if (DEBUG_MODE) {
-          console.log("JWT decryption failed:", jwtError.message);
-        }
-      }
-    }
-  }
-  
-  // 2. Check if it's base64 encoded (common pattern: alphanumeric + / + = padding)
-  if (/^[A-Za-z0-9+/]*={0,2}$/.test(apiKey) && apiKey.length > 8) {
-    try {
-      const decodedKey = atob(apiKey);
-      // Verify the decoded result looks like a reasonable API key
-      if (decodedKey.length >= 8 && /^[A-Za-z0-9_-]+$/.test(decodedKey)) {
-        return { key: decodedKey, format: 'Base64' };
-      }
-    } catch (base64Error) {
-      if (DEBUG_MODE) {
-        console.log("Base64 decoding failed:", base64Error.message);
-      }
-    }
-  }
-  
-  // 3. Check if it matches the expected API key directly (plain text)
-  if (apiKey === API_KEY) {
-    return { key: apiKey, format: 'Plain Text' };
-  }
-  
-  // 4. Last attempt: try base64 decode anyway (some keys might not match the pattern)
-  if (apiKey.length > 8) {
-    try {
-      const decodedKey = atob(apiKey);
-      if (decodedKey === API_KEY) {
-        return { key: decodedKey, format: 'Base64 (Fallback)' };
-      }
-    } catch (e) {
-      // Ignore error and continue
-    }
-  }
-  
-  // 5. Return original key as last resort
-  return { key: originalKey, format: 'Unknown/Plain Text' };
-}
-
-/**
- * Validate API key if required
- * @param {Request} request - The incoming request
- * @returns {Promise<boolean>} Whether API key is valid
- */
-async function validateApiKey(request) {
-  let receivedApiKey = request.headers.get('X-API-Key') || 
-  request.headers.get('Authorization')?.replace('Bearer ', '');
-  
-  if (!REQUIRE_API_KEY) return true;
-  
-  if (!receivedApiKey) {
-    if (DEBUG_MODE) {
-      console.log("❌ No API key was sent in the request");
-    }
-    return false;
-  }
-  
-  try {
-    // Detect format and decode the API key
-    const { key: decodedKey, format } = await detectAndDecodeApiKey(receivedApiKey);
-    
-    // Compare with expected API key
-    const isValid = decodedKey === API_KEY;
-    
-    if (DEBUG_MODE) {
-      if (isValid) {
-      } else {
-        console.log(`❌ API key validation failed (${format})`);
-        console.log(`Expected: ${API_KEY?.substring(0, 8)}...`);
-        console.log(`Received: ${decodedKey?.substring(0, 8)}...`);
-      }
-    }
-    
-    return isValid;
-    
-  } catch (error) {
-    if (DEBUG_MODE) {
-      console.log("⚠️ Error during API key validation:", error.message);
-    }
-    return false;
-  }
-}
 
 /**
  * Validate request payload size
@@ -1310,15 +1159,6 @@ async function runSecurityChecks(request) {
       passed: false, 
       reason: "payload_too_large", 
       details: `Payload exceeds ${MAX_PAYLOAD_SIZE} bytes` 
-    };
-  }
-  
-  // 2. Validate API key if required
-  if (!(await validateApiKey(request))) {
-    return { 
-      passed: false, 
-      reason: "invalid_api_key", 
-      details: "Missing or invalid API key" 
     };
   }
   
@@ -1371,7 +1211,6 @@ async function handleRequest(request, env) {
   if (env) {
     GA4_MEASUREMENT_ID = env.GA4_MEASUREMENT_ID || GA4_MEASUREMENT_ID;
     GA4_API_SECRET = env.GA4_API_SECRET || GA4_API_SECRET;
-    API_KEY = env.API_KEY || API_KEY;
     ENCRYPTION_KEY = env.ENCRYPTION_KEY || ENCRYPTION_KEY;
     
     // Parse ALLOWED_DOMAINS from environment (comma-separated string)
@@ -1398,10 +1237,8 @@ async function handleRequest(request, env) {
   // Detect sendBeacon requests (they can't send custom headers)
   // sendBeacon requests have specific characteristics:
   // 1. Content-Type: application/json or text/plain
-  // 2. No Authorization header
-  // 3. No X-Simple-request header
-  // 4. No X-WP-Nonce header
-  const hasAuthHeader = request.headers.get("Authorization");
+  // 2. No X-Simple-request header
+  // 3. No X-WP-Nonce header
   const hasNonceHeader = request.headers.get("X-WP-Nonce");
   const hasSimpleHeader = request.headers.get("X-Simple-request");
   const contentType = request.headers.get("Content-Type") || "";
@@ -1422,7 +1259,7 @@ async function handleRequest(request, env) {
 
   // SECURITY CHECKS - Run validation based on request type
   if (requestType === "regular") {
-    // Regular requests: Full security validation (payload, API key, origin, rate limiting)
+    // Regular requests: Full security validation (payload, origin, rate limiting)
     const securityCheck = await runSecurityChecks(request);
     if (!securityCheck.passed) {
       if (DEBUG_MODE) {
@@ -1455,15 +1292,12 @@ async function handleRequest(request, env) {
     }
   } else if (requestType === "simple") {
     // Simple requests: Only essential checks (payload size, basic rate limiting)
-    // Skip API key validation and origin validation for performance
     
     if (DEBUG_MODE) {
-      console.log("⚡ Simple request - bypassing API key and origin validation");
+      console.log("⚡ Simple request - bypassing and origin validation");
     }
   } else if (requestType === "sendbeacon") {
-    // sendBeacon requests: Fastest processing, minimal security checks
-    // Skip API key validation and origin validation for maximum performance
-    
+    // sendBeacon requests: Fastest processing, minimal security checks    
 
     // Still validate payload size for sendBeacon requests
     if (!validatePayloadSize(request)) {
@@ -1502,11 +1336,9 @@ async function handleRequest(request, env) {
       );
     }
   } else if (requestType === "wp_standard" || requestType === "wp_encrypted") {
-    // WordPress requests: Skip API key validation but run other security checks
-    // These come from WordPress endpoint and don't need API key validation
     
     if (DEBUG_MODE) {
-      console.log(`🔒 WordPress ${requestType === "wp_encrypted" ? "encrypted" : "standard"} request - skipping API key validation`);
+      console.log(`🔒 WordPress ${requestType === "wp_encrypted" ? "encrypted" : "standard"} request - skipping validation`);
     }
     
     // Still validate payload size for WordPress requests
@@ -2840,7 +2672,7 @@ function getCORSHeaders(request) {
   return {
     "Access-Control-Allow-Origin": origin,
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization, X-API-Key, X-Encrypted, X-Simple-request, X-WP-Nonce",
+    "Access-Control-Allow-Headers": "Content-Type, X-Encrypted, X-Simple-request, X-WP-Nonce",
     "Access-Control-Allow-Credentials": "true",
     "Access-Control-Max-Age": "86400",
   };

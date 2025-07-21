@@ -2610,7 +2610,7 @@
       });
       
       // Determine transmission method based on configuration
-      const transmissionMethod = this.config.transmissionMethod || 'secure_wp_to_cf';
+      const transmissionMethod = this.config.transmissionMethod || 'direct_to_cf';
       
       if (transmissionMethod === 'direct_to_cf' && this.config.cloudflareWorkerUrl) {
         this.log("⚡ Direct to Cloudflare transmission - sending directly to Worker", {
@@ -2622,14 +2622,13 @@
         });
         
         this.sendSimpleRequest(data, false); // false = no bot detection
-      } else if (transmissionMethod === 'wp_endpoint_to_cf' && this.config.cloudflareWorkerUrl) {
-        this.log("🛡️ WP Bot Check before sending to CF transmission - optimized WordPress endpoint", {
+      } else if (transmissionMethod === 'wp_rest_endpoint' && this.config.cloudflareWorkerUrl) {
+        this.log("🛡️ WP REST Endpoint transmission - secure WordPress API", {
           eventName: eventName,
           workerUrl: this.config.cloudflareWorkerUrl,
-          method: 'wp_endpoint_to_cf',
+          method: 'wp_rest_endpoint',
           bypassWordPress: false,
           botDetection: true,
-          apiKeyValidation: false,
           encryption: false,
           asyncForwarding: true
         });
@@ -2640,7 +2639,6 @@
           eventName: eventName,
           method: 'secure_wp_to_cf',
           encryption: true,
-          apiKeyValidation: true
         });
         
         this.sendAjaxPayload(null, data);
@@ -2722,7 +2720,7 @@
         };
 
         // Send with reliable method
-        const transmissionMethod = this.config.transmissionMethod || 'secure_wp_to_cf';
+        const transmissionMethod = this.config.transmissionMethod || 'direct_to_cf';
         
         this.log("🚀 Sending reliable event via " + transmissionMethod, {
           eventName: eventName,
@@ -2734,7 +2732,7 @@
         if (transmissionMethod === 'direct_to_cf' && this.config.cloudflareWorkerUrl) {
           this.log("⚡ Direct to Cloudflare reliable transmission");
           await this.sendEventToCloudflareReliable(data, isCritical);
-        } else if (transmissionMethod === 'wp_endpoint_to_cf') {
+        } else if (transmissionMethod === 'wp_rest_endpoint') {
           this.log("🛡️ WP Bot Check before sending to CF reliable transmission (balanced)");
           await this.sendEventViaWordPressReliable(data, false, isCritical);
         } else {
@@ -2936,7 +2934,7 @@
       });
 
       // Determine transmission method based on configuration
-      const transmissionMethod = this.config.transmissionMethod || 'secure_wp_to_cf';
+      const transmissionMethod = this.config.transmissionMethod || 'direct_to_cf';
       
       // Format batch data for transmission
       var data = {
@@ -2956,7 +2954,7 @@
       if (transmissionMethod === 'direct_to_cf' && this.config.cloudflareWorkerUrl) {
         this.log("⚡ Direct to Cloudflare batch transmission");
         this.sendBatchToCloudflare(data, isCritical);
-      } else if (transmissionMethod === 'wp_endpoint_to_cf') {
+      } else if (transmissionMethod === 'wp_rest_endpoint') {
         this.log("🛡️ WP Bot Check before sending to CF batch transmission (balanced)");
         this.sendBatchViaWordPress(data, false, isCritical); // Use optimized WordPress endpoint (no encryption)
       } else {
@@ -3009,7 +3007,7 @@
             'X-Simple-request': 'true'
           };
           
-          // Add X-WP-Nonce header if we have a nonce (for wp_endpoint_to_cf method)
+          // Add X-WP-Nonce header if we have a nonce (for wp_rest_endpoint method)
           const currentNonce = window.ga4ServerSideTagging?.nonce || this.config.nonce;
           if (currentNonce) {
             headers['X-WP-Nonce'] = currentNonce;
@@ -3336,7 +3334,6 @@
           eventName: payload.name,
           bypassWordPress: true,
           encryptionDisabled: true,
-          apiKeyValidationDisabled: true,
           botDetectionEnabled: botDetectionEnabled
         });
         // Prepare headers for the request
@@ -3345,7 +3342,7 @@
           'X-Simple-request': 'true'
         };
         
-        // Add X-WP-Nonce header if we have a nonce (for wp_endpoint_to_cf method)
+        // Add X-WP-Nonce header if we have a nonce (for wp_rest_endpoint method)
         const currentNonce = window.ga4ServerSideTagging?.nonce || this.config.nonce;
         if (currentNonce) {
           headers['X-WP-Nonce'] = currentNonce;
