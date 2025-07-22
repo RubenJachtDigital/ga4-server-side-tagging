@@ -92,6 +92,7 @@ $next_scheduled = wp_next_scheduled('ga4_process_event_queue');
         <?php if (empty($recent_events)): ?>
             <p><?php echo esc_html__('No events found in the queue.', 'ga4-server-side-tagging'); ?></p>
         <?php else: ?>
+            <div style="max-height: 400px; overflow-y: auto; border: 1px solid #ddd; border-radius: 3px;">
             <table class="widefat striped">
                 <thead>
                     <tr>
@@ -128,6 +129,7 @@ $next_scheduled = wp_next_scheduled('ga4_process_event_queue');
                     <?php endforeach; ?>
                 </tbody>
             </table>
+            </div>
         <?php endif; ?>
     </div>
 
