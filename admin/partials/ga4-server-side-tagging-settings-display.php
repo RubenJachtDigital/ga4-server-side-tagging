@@ -23,6 +23,7 @@ $transmission_method = get_option('ga4_transmission_method', 'direct_to_cf');
 $cloudflare_worker_url = get_option('ga4_cloudflare_worker_url', '');
 $jwt_encryption_enabled = get_option('ga4_jwt_encryption_enabled', false);
 $jwt_encryption_key = \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::retrieve_encrypted_key('ga4_jwt_encryption_key');
+$worker_api_key = \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::retrieve_encrypted_key('ga4_worker_api_key');
 $measurement_id = get_option('ga4_measurement_id', '');
 $api_secret = get_option('ga4_api_secret', '');
 $debug_mode = get_option('ga4_server_side_tagging_debug_mode', false);
@@ -228,6 +229,33 @@ $disable_all_ip = get_option('ga4_disable_all_ip', false);
                         </tr>
                     </table>
 
+                    <!-- Worker API Key Settings -->
+                    <div id="worker_api_settings" style="<?php echo $transmission_method === 'wp_rest_endpoint' ? '' : 'display: none;'; ?>">
+                        <table class="form-table">
+                            <tr>
+                                <th scope="row">
+                                    <label for="ga4_worker_api_key">Worker API Key</label>
+                                </th>
+                                <td>
+                                    <input type="text" id="ga4_worker_api_key" name="ga4_worker_api_key" 
+                                        value="<?php echo esc_attr($worker_api_key); ?>" class="regular-text" 
+                                        placeholder="Generate a 32-character API key" />
+                                    <button type="button" id="generate_worker_api_key" class="button button-secondary" style="margin-left: 10px;">
+                                        Generate API Key
+                                    </button>
+                                    <button type="button" id="copy_worker_api_key" class="button button-secondary" style="margin-left: 5px;" <?php echo empty($worker_api_key) ? 'disabled' : ''; ?>>
+                                        Copy Key
+                                    </button>
+                                    <p class="description">
+                                        <strong>32-character API key for Cloudflare Worker authentication.</strong> 
+                                        This key must be configured in your Cloudflare Worker as the <code>API_KEY</code> environment variable.
+                                        <br><strong>Important:</strong> Save settings after generating a new key, then update your Worker configuration.
+                                    </p>
+                                </td>
+                            </tr>
+                        </table>
+                    </div>
+
                     <!-- Encryption Settings (shown only for WP REST Endpoint method) -->
                     <div id="encryption_settings" style="<?php echo $transmission_method === 'wp_rest_endpoint' ? '' : 'display: none;'; ?>">
                         <table class="form-table">
@@ -430,6 +458,13 @@ $disable_all_ip = get_option('ga4_disable_all_ip', false);
                         <code id="cf_ga4_api_secret"><?php echo esc_html($api_secret ?: '[Set your GA4 API Secret first - Generate in GA4 Admin]'); ?></code>
                         <button type="button" class="copy-secret-btn" data-target="cf_ga4_api_secret">Copy</button>
                     </div>
+                    <?php if ($transmission_method === 'wp_rest_endpoint'): ?>
+                    <div class="cf-secret-item">
+                        <strong>API_KEY:</strong>
+                        <code id="cf_api_key"><?php echo esc_html($worker_api_key ?: '[Generate Worker API key first]'); ?></code>
+                        <button type="button" class="copy-secret-btn" data-target="cf_api_key">Copy</button>
+                    </div>
+                    <?php endif; ?>
                     <?php if ($transmission_method === 'wp_rest_endpoint' && $jwt_encryption_enabled): ?>
                     <div class="cf-secret-item">
                         <strong>ENCRYPTION_KEY:</strong>
@@ -508,11 +543,13 @@ jQuery(document).ready(function($) {
     $('#ga4_consent_default_timeout').change(toggleTimeoutAction);
     toggleTimeoutAction(); // Initial state
 
-    // Toggle encryption settings based on transmission method
+    // Toggle encryption settings and worker API settings based on transmission method
     $('#ga4_transmission_method').change(function() {
         if ($(this).val() === 'wp_rest_endpoint') {
+            $('#worker_api_settings').show();
             $('#encryption_settings').show();
         } else {
+            $('#worker_api_settings').hide();
             $('#encryption_settings').hide();
         }
     });
@@ -600,6 +637,28 @@ jQuery(document).ready(function($) {
 
     // Encryption Key generation is handled by admin.js
     
+    // Worker API Key generation
+    $('#generate_worker_api_key').click(function() {
+        // Generate 32-character API key (similar to the example: 688c55fb1612a36774be794c8a385ce1)
+        var apiKey = '';
+        var chars = '0123456789abcdef';
+        for (var i = 0; i < 32; i++) {
+            apiKey += chars.charAt(Math.floor(Math.random() * chars.length));
+        }
+        
+        $('#ga4_worker_api_key').val(apiKey);
+        $('#copy_worker_api_key').prop('disabled', false);
+        updateCopyButtonState();
+    });
+    
+    // Copy Worker API Key
+    $('#copy_worker_api_key').click(function() {
+        var apiKey = $('#ga4_worker_api_key').val();
+        if (apiKey) {
+            copyToClipboard(apiKey, $(this), 'Copied!');
+        }
+    });
+    
     // Cloudflare Secrets Modal functionality
     $('#open_secrets_popup').click(function(e) {
         e.preventDefault();
@@ -637,6 +696,7 @@ jQuery(document).ready(function($) {
         // Update values in the modal with current form values
         var measurementId = $('#ga4_measurement_id').val() || '<?php echo esc_js($measurement_id); ?>';
         var apiSecret = $('#ga4_api_secret').val() || '<?php echo esc_js($api_secret); ?>';
+        var workerApiKey = $('#ga4_worker_api_key').val() || '<?php echo esc_js($worker_api_key); ?>';
         var encryptionKey = $('#ga4_jwt_encryption_key').val() || '<?php echo esc_js($jwt_encryption_key); ?>';
         var transmissionMethod = $('#ga4_transmission_method').val() || '<?php echo esc_js($transmission_method); ?>';
         var encryptionEnabled = $('#ga4_jwt_encryption_enabled').is(':checked') || <?php echo $jwt_encryption_enabled ? 'true' : 'false'; ?>;
@@ -646,6 +706,14 @@ jQuery(document).ready(function($) {
         
         // Update API secret
         $('#cf_ga4_api_secret').text(apiSecret || '[Set your GA4 API Secret first - Generate in GA4 Admin]');
+        
+        // Update Worker API key if applicable
+        if (transmissionMethod === 'wp_rest_endpoint') {
+            $('#cf_api_key').text(workerApiKey || '[Generate Worker API key first]');
+            $('.cf-secret-item').has('#cf_api_key').show();
+        } else {
+            $('.cf-secret-item').has('#cf_api_key').hide();
+        }
         
         // Update encryption key if applicable
         if (transmissionMethod === 'wp_rest_endpoint' && encryptionEnabled) {

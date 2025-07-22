@@ -604,8 +604,25 @@ class GA4_Server_Side_Tagging_Endpoint
         $client_ip = $this->get_client_ip($request);
         
         try {
-            // Bot detection check - prevent bots from storing events in database
-            if ($this->is_bot_request($request)) {
+            // Check for Worker API key authentication (bypasses bot detection)
+            $auth_header = $request->get_header('authorization');
+            $is_authenticated = false;
+            
+            if ($auth_header && strpos($auth_header, 'Bearer ') === 0) {
+                $provided_token = substr($auth_header, 7); // Remove "Bearer " prefix
+                $worker_api_key = \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::retrieve_encrypted_key('ga4_worker_api_key');
+                
+                if (!empty($worker_api_key) && $provided_token === $worker_api_key) {
+                    $is_authenticated = true;
+                    $this->logger->info("Authenticated request from send-events endpoint - bypassing bot detection", array(
+                        'ip' => $client_ip,
+                        'user_agent' => $request->get_header('user-agent')
+                    ));
+                }
+            }
+            
+            // Only perform bot detection if not authenticated
+            if (!$is_authenticated && $this->is_bot_request($request)) {
                 $this->logger->warning("Bot detected attempting to send events - blocked from database storage", array(
                     'ip' => $client_ip,
                     'user_agent' => $request->get_header('user-agent'),
@@ -1175,6 +1192,12 @@ class GA4_Server_Side_Tagging_Endpoint
                 'Content-Type' => 'application/json'
             );
 
+            // Add Worker API key authentication header
+            $worker_api_key = \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::retrieve_encrypted_key('ga4_worker_api_key');
+            if (!empty($worker_api_key)) {
+                $headers['Authorization'] = 'Bearer ' . $worker_api_key;
+            }
+
             // Forward Origin, Referer, and User-Agent headers from the original request
             if ($original_request) {
                 $origin = $original_request->get_header('origin');
@@ -1242,6 +1265,12 @@ class GA4_Server_Side_Tagging_Endpoint
             $headers = array(
                 'Content-Type' => 'application/json'
             );
+
+            // Add Worker API key authentication header
+            $worker_api_key = \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::retrieve_encrypted_key('ga4_worker_api_key');
+            if (!empty($worker_api_key)) {
+                $headers['Authorization'] = 'Bearer ' . $worker_api_key;
+            }
 
             // Forward Origin, Referer, and User-Agent headers from the original request to Cloudflare Worker
             if ($original_request) {

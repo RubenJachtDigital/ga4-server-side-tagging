@@ -292,6 +292,18 @@ class GA4_Server_Side_Tagging_Admin
 
         register_setting(
             'ga4_server_side_tagging_settings',
+            'ga4_worker_api_key',
+            array(
+                'type' => 'string',
+                'description' => 'Worker API Key',
+                'sanitize_callback' => 'sanitize_text_field',
+                'show_in_rest' => false,
+                'default' => '',
+            )
+        );
+
+        register_setting(
+            'ga4_server_side_tagging_settings',
             'ga4_yith_raq_form_id',
             array(
                 'type' => 'string',
@@ -903,6 +915,27 @@ class GA4_Server_Side_Tagging_Admin
                     'ga4_settings_form',
                     'invalid_encryption_key',
                     'Invalid encryption key format. Must be 64 hexadecimal characters (256-bit key) or empty.',
+                    'error'
+                );
+            }
+        }
+
+        if (isset($_POST['ga4_worker_api_key'])) {
+            $worker_api_key = sanitize_text_field(wp_unslash($_POST['ga4_worker_api_key']));
+            // Basic validation for Worker API key format (32 hex characters)
+            if (empty($worker_api_key) || (strlen($worker_api_key) === 32 && ctype_xdigit($worker_api_key))) {
+                if (!empty($worker_api_key)) {
+                    // Store Worker API key using encryption utility
+                    \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::store_encrypted_key($worker_api_key, 'ga4_worker_api_key');
+                } else {
+                    // Clear the key if empty
+                    update_option('ga4_worker_api_key', '');
+                }
+            } else {
+                add_settings_error(
+                    'ga4_settings_form',
+                    'invalid_worker_api_key',
+                    'Invalid Worker API key format. Must be 32 hexadecimal characters or empty.',
                     'error'
                 );
             }

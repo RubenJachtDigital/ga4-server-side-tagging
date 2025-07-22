@@ -359,12 +359,21 @@ class GA4_Cronjob_Manager
             }
         }
 
+        // Prepare headers with Worker API key authentication
+        $headers = array(
+            'Content-Type' => 'application/json',
+            'User-Agent' => 'GA4-Server-Side-Tagging-Batch/2.0.0'
+        );
+
+        // Add Worker API key authentication header
+        $worker_api_key = \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::retrieve_encrypted_key('ga4_worker_api_key');
+        if (!empty($worker_api_key)) {
+            $headers['Authorization'] = 'Bearer ' . $worker_api_key;
+        }
+
         // Send request to Cloudflare Worker
         $response = wp_remote_post($worker_url, array(
-            'headers' => array(
-                'Content-Type' => 'application/json',
-                'User-Agent' => 'GA4-Server-Side-Tagging-Batch/2.0.0'
-            ),
+            'headers' => $headers,
             'body' => wp_json_encode($payload),
             'timeout' => 30,
             'sslverify' => true

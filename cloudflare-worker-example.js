@@ -33,6 +33,7 @@ const JWT_ENCRYPTION_ENABLED = true; // Set to true to enable JWT encryption
 // These are loaded from Cloudflare Variables and Secrets - DO NOT HARDCODE
 let GA4_MEASUREMENT_ID; // Loaded from env.GA4_MEASUREMENT_ID
 let GA4_API_SECRET; // Loaded from env.GA4_API_SECRET
+let API_KEY; // Loaded from env.API_KEY
 let ENCRYPTION_KEY; // Loaded from env.ENCRYPTION_KEY
 let ALLOWED_DOMAINS; // Loaded from env.ALLOWED_DOMAINS (comma-separated)
 
@@ -583,6 +584,32 @@ function detectBot(request, payload) {
       threatScore: cfData.threatScore
     }
   };
+}
+
+/**
+ * Check if the Authorization header contains a valid Worker API key
+ * @param {string|null} authHeader - The Authorization header value
+ * @returns {boolean} True if authenticated, false otherwise
+ */
+function isValidWorkerApiKey(authHeader) {
+  if (!authHeader) {
+    return false;
+  }
+  
+  // Check if it's a Bearer token
+  if (!authHeader.startsWith('Bearer ')) {
+    return false;
+  }
+  
+  const providedToken = authHeader.substring(7); // Remove "Bearer " prefix
+  const validApiKey = API_KEY || '';
+  
+  if (!validApiKey || !providedToken) {
+    return false;
+  }
+  
+  // Compare the provided token with the configured API key
+  return providedToken === validApiKey;
 }
 
 /**
@@ -1181,6 +1208,7 @@ async function handleRequest(request, env) {
   if (env) {
     GA4_MEASUREMENT_ID = env.GA4_MEASUREMENT_ID || GA4_MEASUREMENT_ID;
     GA4_API_SECRET = env.GA4_API_SECRET || GA4_API_SECRET;
+    API_KEY = env.API_KEY || API_KEY;
     ENCRYPTION_KEY = env.ENCRYPTION_KEY || ENCRYPTION_KEY;
     
     // Parse ALLOWED_DOMAINS from environment (comma-separated string)
@@ -1211,6 +1239,7 @@ async function handleRequest(request, env) {
   // 3. No X-WP-Nonce header
   const hasNonceHeader = request.headers.get("X-WP-Nonce");
   const hasSimpleHeader = request.headers.get("X-Simple-request");
+  const hasAuthHeader = request.headers.get("Authorization");
   const contentType = request.headers.get("Content-Type") || "";
   
   const isSendBeaconRequest = !hasAuthHeader && !hasNonceHeader && !hasSimpleHeader && 
@@ -1227,8 +1256,11 @@ async function handleRequest(request, env) {
     console.log(`🔍 Processing ${requestType} request`);
   }
 
-  // SECURITY CHECKS - Run validation based on request type
-  if (requestType === "regular") {
+  // Check if request is authenticated with Worker API key
+  const isAuthenticated = isValidWorkerApiKey(hasAuthHeader);
+  
+  // SECURITY CHECKS - Run validation based on request type (skip all if authenticated)
+  if (!isAuthenticated && requestType === "regular") {
     // Regular requests: Full security validation (payload, origin, rate limiting)
     const securityCheck = await runSecurityChecks(request);
     if (!securityCheck.passed) {
@@ -1260,13 +1292,15 @@ async function handleRequest(request, env) {
         rateLimit: `${securityCheck.rateLimit?.count}/${securityCheck.rateLimit?.limit}`
       }));
     }
-  } else if (requestType === "simple") {
+  } else if (isAuthenticated && DEBUG_MODE) {
+    console.log("🔐 Authenticated request - bypassing all security checks");
+  } else if (!isAuthenticated && requestType === "simple") {
     // Simple requests: Only essential checks (payload size, basic rate limiting)
     
     if (DEBUG_MODE) {
       console.log("⚡ Simple request - bypassing and origin validation");
     }
-  } else if (requestType === "sendbeacon") {
+  } else if (!isAuthenticated && requestType === "sendbeacon") {
     // sendBeacon requests: Fastest processing, minimal security checks    
 
     // Still validate payload size for sendBeacon requests
@@ -1365,7 +1399,8 @@ async function handleRequest(request, env) {
 
     // Check if the request uses JWT encryption (skip for Simple requests)
     const isJWTEncrypted = requestType === "wp_encrypted" || 
-                          (requestType === "regular" && request.headers.get('X-Encrypted') === 'true');
+                          (requestType === "regular" && request.headers.get('X-Encrypted') === 'true') ||
+                          (payload.encrypted === true && payload.jwt); // Check payload structure for cron jobs
     
     if (isJWTEncrypted) {
       if (!JWT_ENCRYPTION_ENABLED) {
@@ -1390,6 +1425,14 @@ async function handleRequest(request, env) {
                 console.log("Available payload fields:", Object.keys(payload));
                 console.log("Full payload:", JSON.stringify(payload));
               }
+            }
+          } else if (payload.encrypted === true && payload.jwt) {
+            // Cron job encrypted requests use {encrypted: true, jwt: <data>} format
+            const decryptedData = await decrypt(payload.jwt, ENCRYPTION_KEY);
+            payload = JSON.parse(decryptedData);
+            
+            if (DEBUG_MODE) {
+              console.log("Decrypted cron job payload:", JSON.stringify(payload));
             }
           } else {
             // Regular encrypted requests use legacy jwt format
@@ -1436,8 +1479,15 @@ async function handleRequest(request, env) {
     // GDPR CONSENT PROCESSING - Apply before bot detection (single event)
     const consentProcessedPayload = processGDPRConsent(payload, request);
 
-    // BOT DETECTION CHECK
-    const botDetection = detectBot(request, consentProcessedPayload);
+    // Check for Worker API key authentication (bypasses bot detection)
+    const authHeader = request.headers.get("Authorization");
+    const isAuthenticated = isValidWorkerApiKey(authHeader);
+    
+    // BOT DETECTION CHECK (skip if authenticated)
+    let botDetection = { isBot: false, reason: "authenticated_bypass" };
+    if (!isAuthenticated) {
+      botDetection = detectBot(request, consentProcessedPayload);
+    }
     
     if (botDetection.isBot) {
       logBotDetection(botDetection, request, consentProcessedPayload);
@@ -1605,7 +1655,15 @@ async function handleBatchEvents(batchPayload, request) {
 
         // Bot detection for batch (use first event's data as representative)
         if (i === 0) {
-          const botDetection = detectBot(request, consentProcessedPayload);
+          // Check for Worker API key authentication (bypasses bot detection)
+          const authHeader = request.headers.get("Authorization");
+          const isAuthenticated = isValidWorkerApiKey(authHeader);
+          
+          // Only perform bot detection if not authenticated
+          let botDetection = { isBot: false, reason: "authenticated_bypass" };
+          if (!isAuthenticated) {
+            botDetection = detectBot(request, consentProcessedPayload);
+          }
           
           if (botDetection.isBot) {
             logBotDetection(botDetection, request, consentProcessedPayload);
