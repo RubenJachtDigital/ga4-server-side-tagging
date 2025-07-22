@@ -28,7 +28,8 @@ if (!defined('WPINC')) {
 
         <div class="ga4-server-side-tagging-admin-content">
             <form method="post" action="">
-                <?php wp_nonce_field('ga4_server_side_tagging_settings'); ?>
+                <?php wp_nonce_field('ga4_admin_features_form'); ?>
+                <input type="hidden" name="form_type" value="features" />
 
                 <!-- A/B Testing Settings -->
                 <div class="ga4-server-side-tagging-admin-section">
@@ -186,7 +187,7 @@ if (!defined('WPINC')) {
                     </div>
                 </div>
 
-                <?php submit_button(); ?>
+                <?php submit_button('Save Features', 'primary', 'save_features'); ?>
 
             </form>
         </div>

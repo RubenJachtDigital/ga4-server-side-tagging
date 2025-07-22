@@ -46,7 +46,8 @@ $disable_all_ip = get_option('ga4_disable_all_ip', false);
 
         <div class="ga4-server-side-tagging-admin-content">
             <form method="post" action="">
-                <?php wp_nonce_field('ga4_server_side_tagging_settings'); ?>
+                <?php wp_nonce_field('ga4_settings_form'); ?>
+                <input type="hidden" name="form_type" value="settings" />
 
                 <!-- GDPR Consent Settings -->
                 <div class="ga4-server-side-tagging-admin-section">
@@ -323,7 +324,7 @@ $disable_all_ip = get_option('ga4_disable_all_ip', false);
                     </div>
                 <?php endif; ?>
 
-                <?php submit_button(); ?>
+                <?php submit_button('Save Settings', 'primary', 'save_settings'); ?>
 
             </form>
         </div>

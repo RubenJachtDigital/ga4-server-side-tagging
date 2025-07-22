@@ -756,13 +756,15 @@ class GA4_Server_Side_Tagging_Admin
         }
 
         // Save settings if form is submitted
-        if ((isset($_POST['ga4_server_side_tagging_settings_submit']) || isset($_POST['submit'])) && isset($_POST['_wpnonce']) && wp_verify_nonce(sanitize_text_field(wp_unslash($_POST['_wpnonce'])), 'ga4_server_side_tagging_settings')) {
+        if (isset($_POST['save_features']) && isset($_POST['_wpnonce']) && wp_verify_nonce(sanitize_text_field(wp_unslash($_POST['_wpnonce'])), 'ga4_admin_features_form')) {
+            $this->save_admin_features();
+        } elseif ((isset($_POST['ga4_server_side_tagging_settings_submit']) || isset($_POST['submit'])) && isset($_POST['_wpnonce']) && wp_verify_nonce(sanitize_text_field(wp_unslash($_POST['_wpnonce'])), 'ga4_server_side_tagging_settings')) {
             $this->save_settings();
         }
 
         // Test connection if requested
         $test_result = null;
-        if (isset($_POST['ga4_test_connection']) && isset($_POST['_wpnonce']) && wp_verify_nonce(sanitize_text_field(wp_unslash($_POST['_wpnonce'])), 'ga4_server_side_tagging_settings')) {
+        if (isset($_POST['ga4_test_connection']) && isset($_POST['_wpnonce']) && wp_verify_nonce(sanitize_text_field(wp_unslash($_POST['_wpnonce'])), 'ga4_admin_features_form')) {
             $test_result = $this->test_ga4_connection();
         }
 
@@ -860,13 +862,12 @@ class GA4_Server_Side_Tagging_Admin
     }
 
     /**
-     * Save plugin settings.
+     * Save GA4 settings only (from settings page).
      *
-     * @since    1.0.0
+     * @since    2.1.0
      */
-    private function save_settings()
+    private function save_ga4_settings()
     {
-        
         // Sanitize and save each GA4 setting
         if (isset($_POST['ga4_measurement_id'])) {
             update_option('ga4_measurement_id', sanitize_text_field(wp_unslash($_POST['ga4_measurement_id'])));
@@ -899,7 +900,7 @@ class GA4_Server_Side_Tagging_Admin
                 }
             } else {
                 add_settings_error(
-                    'ga4_server_side_tagging_settings',
+                    'ga4_settings_form',
                     'invalid_encryption_key',
                     'Invalid encryption key format. Must be 64 hexadecimal characters (256-bit key) or empty.',
                     'error'
@@ -965,6 +966,31 @@ class GA4_Server_Side_Tagging_Admin
             update_option('ga4_storage_expiration_hours', $hours);
         }
 
+        // Update logger debug mode
+        $this->logger->set_debug_mode(isset($_POST['ga4_server_side_tagging_debug_mode']));
+
+        // Ensure existing plain text keys are encrypted after settings save
+        $this->ensure_encryption_key_is_encrypted();
+
+        // Log settings update
+        $this->logger->info('GA4 settings updated');
+
+        // Add admin notice with cache clearing reminder
+        add_settings_error(
+            'ga4_settings_form',
+            'settings_updated',
+            '✅ GA4 Settings saved successfully! <strong>Important:</strong> Please clear your website cache and any CDN/server cache for changes to take effect immediately.',
+            'updated'
+        );
+    }
+
+    /**
+     * Save admin features (A/B testing and click tracking).
+     *
+     * @since    2.1.0
+     */
+    private function save_admin_features()
+    {
         // A/B Testing settings
         error_log('A/B Testing enabled: ' . (isset($_POST['ga4_ab_tests_enabled']) ? 'yes' : 'no'));
         update_option('ga4_ab_tests_enabled', isset($_POST['ga4_ab_tests_enabled']));
@@ -995,22 +1021,31 @@ class GA4_Server_Side_Tagging_Admin
             update_option('ga4_click_tracks_config', '[]');
         }
 
-        // Update logger debug mode
-        $this->logger->set_debug_mode(isset($_POST['ga4_server_side_tagging_debug_mode']));
-
-        // Ensure existing plain text keys are encrypted after settings save
-        $this->ensure_encryption_key_is_encrypted();
-
         // Log settings update
-        $this->logger->info('Plugin settings updated');
+        $this->logger->info('Admin features updated');
 
-        // Add admin notice with cache clearing reminder
+        // Add admin notice
         add_settings_error(
-            'ga4_server_side_tagging_settings',
-            'settings_updated',
-            '✅ Settings saved successfully! <strong>Important:</strong> Please clear your website cache and any CDN/server cache for changes to take effect immediately.',
+            'ga4_admin_features_form',
+            'features_updated',
+            '✅ Features saved successfully!',
             'updated'
         );
+    }
+
+    /**
+     * Save plugin settings (legacy method - combines both).
+     *
+     * @since    1.0.0
+     */
+    private function save_settings()
+    {
+        // Call both specialized save methods
+        $this->save_ga4_settings();
+        $this->save_admin_features();
+        
+        // Log legacy settings update
+        $this->logger->info('Plugin settings updated (legacy method)');
     }
 
     /**
@@ -1510,13 +1545,15 @@ class GA4_Server_Side_Tagging_Admin
         }
 
         // Save settings if form is submitted
-        if (isset($_POST['submit']) && isset($_POST['_wpnonce']) && wp_verify_nonce(sanitize_text_field(wp_unslash($_POST['_wpnonce'])), 'ga4_server_side_tagging_settings')) {
+        if (isset($_POST['save_settings']) && isset($_POST['_wpnonce']) && wp_verify_nonce(sanitize_text_field(wp_unslash($_POST['_wpnonce'])), 'ga4_settings_form')) {
+            $this->save_ga4_settings();
+        } elseif (isset($_POST['submit']) && isset($_POST['_wpnonce']) && wp_verify_nonce(sanitize_text_field(wp_unslash($_POST['_wpnonce'])), 'ga4_server_side_tagging_settings')) {
             $this->save_settings();
         }
 
         // Test connection if requested
         $test_result = null;
-        if (isset($_POST['test_ga4_connection']) && isset($_POST['_wpnonce']) && wp_verify_nonce(sanitize_text_field(wp_unslash($_POST['_wpnonce'])), 'ga4_server_side_tagging_settings')) {
+        if (isset($_POST['test_ga4_connection']) && isset($_POST['_wpnonce']) && wp_verify_nonce(sanitize_text_field(wp_unslash($_POST['_wpnonce'])), 'ga4_settings_form')) {
             $test_result = $this->test_ga4_connection();
         }
 
