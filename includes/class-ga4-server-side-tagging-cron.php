@@ -90,6 +90,19 @@ class GA4_Server_Side_Tagging_Cron
     }
 
     /**
+     * Ensure cron jobs are scheduled (called on init to catch missed activations).
+     *
+     * @since    2.0.0
+     */
+    public function maybe_schedule_crons()
+    {
+        // Only schedule if cron processing is enabled
+        if (get_option('ga4_cronjob_enabled', true)) {
+            $this->schedule_cron_jobs();
+        }
+    }
+
+    /**
      * Add custom cron intervals.
      *
      * @since    1.0.0

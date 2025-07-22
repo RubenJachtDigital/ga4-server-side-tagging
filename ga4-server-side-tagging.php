@@ -56,17 +56,28 @@ function ga4_server_side_tagging_activate() {
     require_once GA4_SERVER_SIDE_TAGGING_PLUGIN_DIR . 'includes/class-ga4-server-side-tagging-logger.php';
     require_once GA4_SERVER_SIDE_TAGGING_PLUGIN_DIR . 'includes/class-ga4-encryption-util.php';
     require_once GA4_SERVER_SIDE_TAGGING_PLUGIN_DIR . 'includes/class-ga4-cronjob-manager.php';
+    require_once GA4_SERVER_SIDE_TAGGING_PLUGIN_DIR . 'includes/class-ga4-server-side-tagging-cron.php';
     
     $logger = new GA4ServerSideTagging\Core\GA4_Server_Side_Tagging_Logger();
     $cronjob_manager = new GA4ServerSideTagging\Core\GA4_Cronjob_Manager($logger);
     $cronjob_manager->maybe_create_table();
+    
+    // Schedule cron jobs
+    $cron_handler = new GA4ServerSideTagging\Core\GA4_Server_Side_Tagging_Cron($logger);
+    $cron_handler->schedule_cron_jobs();
 }
 
 /**
  * The code that runs during plugin deactivation.
  */
 function ga4_server_side_tagging_deactivate() {
-    // Clean up if needed
+    // Clear scheduled cron jobs
+    require_once GA4_SERVER_SIDE_TAGGING_PLUGIN_DIR . 'includes/class-ga4-server-side-tagging-logger.php';
+    require_once GA4_SERVER_SIDE_TAGGING_PLUGIN_DIR . 'includes/class-ga4-server-side-tagging-cron.php';
+    
+    $logger = new GA4ServerSideTagging\Core\GA4_Server_Side_Tagging_Logger();
+    $cron_handler = new GA4ServerSideTagging\Core\GA4_Server_Side_Tagging_Cron($logger);
+    $cron_handler->clear_scheduled_jobs();
 }
 
 /**

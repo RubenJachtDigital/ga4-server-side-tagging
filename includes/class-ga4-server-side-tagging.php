@@ -8,6 +8,7 @@ use GA4ServerSideTagging\Admin\GA4_Server_Side_Tagging_Admin;
 use GA4ServerSideTagging\Frontend\GA4_Server_Side_Tagging_Public;
 use GA4ServerSideTagging\API\GA4_Server_Side_Tagging_Endpoint;
 use GA4ServerSideTagging\Core\GA4_Cronjob_Manager;
+use GA4ServerSideTagging\Core\GA4_Server_Side_Tagging_Cron;
 
 /**
  * The core plugin class.
@@ -60,6 +61,15 @@ class GA4_Server_Side_Tagging
     protected $cronjob_manager;
 
     /**
+     * The cron handler instance.
+     *
+     * @since    2.0.0
+     * @access   protected
+     * @var      GA4_Server_Side_Tagging_Cron    $cron_handler    Handles cron scheduling and execution.
+     */
+    protected $cron_handler;
+
+    /**
      * Define the core functionality of the plugin.
      *
      * @since    1.0.0
@@ -98,6 +108,9 @@ class GA4_Server_Side_Tagging
         
         // Cronjob manager
         require_once GA4_SERVER_SIDE_TAGGING_PLUGIN_DIR . 'includes/class-ga4-cronjob-manager.php';
+        
+        // Cron handler
+        require_once GA4_SERVER_SIDE_TAGGING_PLUGIN_DIR . 'includes/class-ga4-server-side-tagging-cron.php';
     }
 
     /**
@@ -152,9 +165,16 @@ class GA4_Server_Side_Tagging
     private function define_cronjob_hooks()
     {
         $this->cronjob_manager = new GA4_Cronjob_Manager($this->logger);
+        $this->cron_handler = new GA4_Server_Side_Tagging_Cron($this->logger);
 
+        // Register cron jobs and schedules
+        $this->cron_handler->register_cron_jobs();
+        
         // Add custom cron schedule
-        $this->loader->add_filter('cron_schedules', $this->cronjob_manager, 'add_cron_schedule');
+        $this->loader->add_filter('cron_schedules', $this->cron_handler, 'add_cron_intervals');
+        
+        // Ensure cron jobs are scheduled (in case activation was missed)
+        add_action('init', array($this->cron_handler, 'maybe_schedule_crons'), 10);
     }
 
 
