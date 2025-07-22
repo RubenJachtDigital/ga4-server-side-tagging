@@ -33,7 +33,7 @@ A comprehensive WordPress plugin that provides advanced server-side tagging for 
 ### Performance & Reliability
 - **🚀 Event Batching System** - Queue events and send as optimized batches every 5 minutes
 - **📊 Cronjob Management** - WordPress cron-based processing with admin monitoring interface
-- **⚡ Batch Processing** - Up to 1000 events per batch for improved Cloudflare Worker performance
+- **⚡ Batch Processing** - Up to 10,000 events per batch for improved Cloudflare Worker performance
 - **🔄 Retry Logic** - Failed events automatically retried with comprehensive error logging
 - **📈 Queue Analytics** - Real-time statistics on event processing, success/failure rates
 - **🧹 Automatic Cleanup** - Configurable retention of processed events (1-365 days)
@@ -201,7 +201,7 @@ Client Browser → WordPress API → Event Queue → Batch Processor → Cloudfl
      ↓              ↓               ↓             ↓                ↓                ↓
 1. Event Generated → 2. Security Validation → 3. Database Storage → 4. Batch Processing → 5. Server Processing → 6. GA4 Delivery
    • Attribution     • Rate Limiting (100/min)  • Event Queuing      • Every 5 minutes    • Bot Detection      • Clean Events
-   • Consent Check   • Bot Detection           • Encryption         • Up to 1000 events  • GDPR Processing    • Proper Consent
+   • Consent Check   • Bot Detection           • Encryption         • Up to 10,000 events • GDPR Processing    • Proper Consent
    • Encryption      • Origin Validation       • Database Storage   • Single HTTP Request • Event Enhancement  • Attribution Data
    • Client Data     • API Key Encryption      • Status Tracking    • Error Handling     • Response Processing
 ```
@@ -225,7 +225,7 @@ The plugin now features an advanced **event batching system** that queues events
 Individual Events → Database Queue → WordPress Cron → Batch Request → Cloudflare Worker
      ↓                   ↓               ↓              ↓                ↓
 1. Event Captured → 2. Queue Storage → 3. Scheduled Processing → 4. Single HTTP Request → 5. Parallel GA4 Forwarding
-   • page_view        • Encrypted        • Every 5 minutes      • Up to 1000 events    • Individual event processing
+   • page_view        • Encrypted        • Every 5 minutes      • Up to 10,000 events  • Individual event processing
    • purchase         • Status tracking  • WordPress cron       • JWT encrypted        • GDPR compliance per event
    • add_to_cart      • Error logging    • Batch processor      • Single response      • Bot detection per batch
    • form_submit      • Retry counting   • Automatic cleanup    • Success/failure      • Attribution preserved
@@ -253,7 +253,7 @@ Individual Events → Database Queue → WordPress Cron → Batch Request → Cl
 ```php
 // Enable/disable cronjob batching (WordPress Admin → GA4 Settings)
 'ga4_cronjob_enabled' => true,          // Enable batch processing
-'ga4_cronjob_batch_size' => 1000,       // Events per batch (100-10,000)
+'ga4_cronjob_batch_size' => 10000,      // Events per batch (100-10,000)
 'ga4_cronjob_cleanup_days' => 7,        // Days to keep processed events
 
 // Cronjob runs every 5 minutes via WordPress cron
@@ -300,7 +300,7 @@ CREATE TABLE wp_ga4_events_queue (
     { "name": "page_view", "params": { "client_id": "...", "session_id": "..." } },
     { "name": "purchase", "params": { "transaction_id": "123", "value": 99.99 } },
     { "name": "add_to_cart", "params": { "item_id": "product_456" } }
-    // ... up to 1000 events per batch
+    // ... up to 10,000 events per batch
   ],
   "batch": true,                    // Indicates batch processing
   "consent": {                      // Batch-level consent (from first event)
@@ -511,7 +511,7 @@ Upon activation, the plugin automatically:
 - **📊 Creates Event Queue Table** - Database table for batched event processing
 - **⏰ Schedules WordPress Cron** - 5-minute recurring event processing
 - **⚙️ Enables Batch Processing** - Default setting for optimized performance
-- **🔧 Configures Default Settings** - 1000 events per batch, 7-day cleanup retention
+- **🔧 Configures Default Settings** - 10,000 events per batch, 7-day cleanup retention
 
 **Post-Installation Steps:**
 1. **Monitor Queue**: Visit `GA4 Tagging → Cronjobs` to view real-time queue statistics
@@ -606,7 +606,7 @@ Configure the advanced event batching system for optimal performance:
 **1. Basic Configuration:**
 1. Go to WordPress admin → GA4 Tagging settings
 2. **Event Batching**: Enable/disable cronjob batch processing
-3. **Batch Size**: Configure events per batch (100-10,000, default: 1000)
+3. **Batch Size**: Configure events per batch (100-10,000, default: 10,000)
 4. **Cleanup Days**: Set retention period for processed events (1-365 days, default: 7)
 
 **2. Monitor Queue:**
@@ -623,12 +623,12 @@ Configure the advanced event batching system for optimal performance:
 
 **Performance Recommendations:**
 ```php
-// High-traffic sites (>10,000 events/day)
-'ga4_cronjob_batch_size' => 2000        // Process larger batches
-'ga4_cronjob_cleanup_days' => 3         // Cleanup more frequently
+// High-traffic sites (>100,000 events/day)
+'ga4_cronjob_batch_size' => 10000       // Maximum batch size
+'ga4_cronjob_cleanup_days' => 1         // Cleanup daily for storage
 
-// Standard sites (<10,000 events/day)  
-'ga4_cronjob_batch_size' => 1000        // Default batch size
+// Standard sites (<100,000 events/day)  
+'ga4_cronjob_batch_size' => 10000       // Default batch size
 'ga4_cronjob_cleanup_days' => 7         // Standard cleanup
 
 // Low-traffic sites (<1,000 events/day)

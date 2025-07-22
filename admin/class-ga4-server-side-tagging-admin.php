@@ -506,7 +506,7 @@ class GA4_Server_Side_Tagging_Admin
                 'description' => 'Maximum number of events to process per batch',
                 'sanitize_callback' => array($this, 'sanitize_batch_size'),
                 'show_in_rest' => false,
-                'default' => 1000,
+                'default' => 10000,
             )
         );
 
