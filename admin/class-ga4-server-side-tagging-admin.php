@@ -1629,4 +1629,36 @@ class GA4_Server_Side_Tagging_Admin
             }
         }
     }
+
+    /**
+     * Display admin notice for DISABLE_WP_CRON warning.
+     *
+     * @since    2.0.0
+     */
+    public function display_wp_cron_warning_notice()
+    {
+        // Only show on plugin admin pages
+        $screen = get_current_screen();
+        if (!$screen || strpos($screen->id, 'ga4-server-side-tagging') === false) {
+            return;
+        }
+
+        // Check if DISABLE_WP_CRON is set to true
+        if (defined('DISABLE_WP_CRON') && DISABLE_WP_CRON) {
+            echo '<div class="notice notice-warning is-dismissible">';
+            echo '<p><strong>' . esc_html__('GA4 Server-Side Tagging Waarschuwing:', 'ga4-server-side-tagging') . '</strong> ';
+            echo esc_html__('WordPress Cron (WP-Cron) is uitgeschakeld op deze website. De plugin gebruikt nu direct verzenden in plaats van batch processing, wat de prestaties kan beïnvloeden.', 'ga4-server-side-tagging');
+            echo '</p>';
+            echo '<p><strong>' . esc_html__('Oplossing:', 'ga4-server-side-tagging') . '</strong> ';
+            echo esc_html__('Voeg deze regel toe aan je wp-config.php bestand om WP-Cron in te schakelen:', 'ga4-server-side-tagging');
+            echo '<br><code>define(\'DISABLE_WP_CRON\', false);</code>';
+            echo '<br>' . esc_html__('Of verwijder de regel helemaal uit wp-config.php.', 'ga4-server-side-tagging');
+            echo '</p>';
+            echo '<p><strong>' . esc_html__('Alternatief:', 'ga4-server-side-tagging') . '</strong> ';
+            echo esc_html__('Stel een system cron job in op je server:', 'ga4-server-side-tagging');
+            echo '<br><code>*/5 * * * * curl -s ' . esc_url(site_url('/wp-cron.php?doing_wp_cron')) . ' >/dev/null 2>&1</code>';
+            echo '</p>';
+            echo '</div>';
+        }
+    }
 }

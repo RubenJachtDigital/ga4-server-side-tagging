@@ -12,7 +12,8 @@
       "Bash(git commit:*)",
       "Bash(npm run:*)",
       "Bash(ls:*)",
-      "Bash(wp cron event:*)"
+      "Bash(wp cron event:*)",
+      "Bash(git config:*)"
     ],
     "deny": []
   }

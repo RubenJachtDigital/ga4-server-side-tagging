@@ -24,7 +24,7 @@ if (isset($_POST['cleanup_events']) && wp_verify_nonce($_POST['_wpnonce'], 'ga4_
 
 // Get queue statistics
 $stats = $this->cronjob_manager->get_queue_stats();
-$recent_events = $this->cronjob_manager->get_recent_events(20);
+$recent_events = $this->cronjob_manager->get_recent_events(100);
 $next_scheduled = wp_next_scheduled('ga4_process_event_queue');
 ?>
 
@@ -88,7 +88,7 @@ $next_scheduled = wp_next_scheduled('ga4_process_event_queue');
     </div>
 
     <div class="ga4-admin-section">
-        <h2><?php echo esc_html__('Recent Events (Last 20)', 'ga4-server-side-tagging'); ?></h2>
+        <h2><?php echo esc_html__('Recent Events (Last 100)', 'ga4-server-side-tagging'); ?></h2>
         <?php if (empty($recent_events)): ?>
             <p><?php echo esc_html__('No events found in the queue.', 'ga4-server-side-tagging'); ?></p>
         <?php else: ?>

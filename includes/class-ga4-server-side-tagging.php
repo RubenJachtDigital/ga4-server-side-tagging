@@ -131,6 +131,9 @@ class GA4_Server_Side_Tagging
 
         // Add AJAX handler for generating encryption key
         $this->loader->add_action('wp_ajax_ga4_generate_encryption_key', $plugin_admin, 'ajax_generate_encryption_key');
+
+        // Add admin notice for WP-Cron warning
+        $this->loader->add_action('admin_notices', $plugin_admin, 'display_wp_cron_warning_notice');
     }
 
     /**

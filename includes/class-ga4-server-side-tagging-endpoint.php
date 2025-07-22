@@ -734,11 +734,15 @@ class GA4_Server_Side_Tagging_Endpoint
             // Log batch info with type distinction
             $event_count = count($request_data['events']);            
 
-            // Check if cronjob batching is enabled
+            // Check if cronjob batching is enabled and WP-Cron is available
             $cronjob_enabled = get_option('ga4_cronjob_enabled', true);
+            $wp_cron_disabled = defined('DISABLE_WP_CRON') && DISABLE_WP_CRON;
             
-            if (!$cronjob_enabled) {
-                // Fall back to direct sending (old behavior)
+            if (!$cronjob_enabled || $wp_cron_disabled) {
+                // Fall back to direct sending if cronjobs disabled or WP-Cron is disabled
+                if ($wp_cron_disabled) {
+                    $this->logger->info('WP-Cron is disabled (DISABLE_WP_CRON=true), using direct sending instead of queue');
+                }
                 return $this->send_events_directly($request_data, $start_time, $session_id);
             }
             
