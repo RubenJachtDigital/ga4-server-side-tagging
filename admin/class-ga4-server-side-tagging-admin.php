@@ -4,6 +4,7 @@ namespace GA4ServerSideTagging\Admin;
 
 use GA4ServerSideTagging\Core\GA4_Server_Side_Tagging_Logger;
 use GA4ServerSideTagging\Core\GA4_Cronjob_Manager;
+use GA4ServerSideTagging\Core\GA4_Event_Logger;
 
 /**
  * The admin-specific functionality of the plugin.
@@ -46,6 +47,15 @@ class GA4_Server_Side_Tagging_Admin
     private $cronjob_manager;
 
     /**
+     * The event logger instance.
+     *
+     * @since    2.1.0
+     * @access   private
+     * @var      GA4_Event_Logger    $event_logger    Handles comprehensive event logging.
+     */
+    private $event_logger;
+
+    /**
      * Initialize the class and set its properties.
      *
      * @since    1.0.0
@@ -55,6 +65,7 @@ class GA4_Server_Side_Tagging_Admin
     {
         $this->logger = $logger;
         $this->cronjob_manager = new GA4_Cronjob_Manager($logger);
+        $this->event_logger = new GA4_Event_Logger();
         
         // Initialize encryption salts if they don't exist
         $this->ensure_encryption_salts_exist();
@@ -158,6 +169,16 @@ class GA4_Server_Side_Tagging_Admin
             'manage_options',
             'ga4-server-side-tagging-cronjobs',
             array($this, 'display_cronjobs_page')
+        );
+
+        // Add submenu for event monitoring
+        add_submenu_page(
+            'ga4-server-side-tagging',
+            'Event Monitor',
+            'Event Monitor',
+            'manage_options',
+            'ga4-server-side-tagging-events',
+            array($this, 'display_events_page')
         );
     }
 
@@ -408,6 +429,18 @@ class GA4_Server_Side_Tagging_Admin
                 'sanitize_callback' => array($this, 'sanitize_storage_expiration_hours'),
                 'show_in_rest' => false,
                 'default' => 24,
+            )
+        );
+
+        register_setting(
+            'ga4_server_side_tagging_settings',
+            'ga4_consent_mode_enabled',
+            array(
+                'type' => 'boolean',
+                'description' => 'Enable Google Consent Mode v2',
+                'sanitize_callback' => array($this, 'sanitize_checkbox'),
+                'show_in_rest' => false,
+                'default' => true,
             )
         );
 
@@ -950,6 +983,7 @@ class GA4_Server_Side_Tagging_Admin
         }
 
         // GDPR Consent settings
+        update_option('ga4_consent_mode_enabled', isset($_POST['ga4_consent_mode_enabled']));
         update_option('ga4_use_iubenda', isset($_POST['ga4_use_iubenda']));
 
         if (isset($_POST['ga4_consent_accept_selector'])) {
@@ -1580,6 +1614,21 @@ class GA4_Server_Side_Tagging_Admin
         $this->ensure_encryption_key_is_encrypted();
 
         include_once 'partials/ga4-server-side-tagging-settings-display.php';
+    }
+
+    /**
+     * Display the event monitoring page.
+     *
+     * @since    2.1.0
+     */
+    public function display_events_page()
+    {
+        // Check user capabilities
+        if (!current_user_can('manage_options')) {
+            return;
+        }
+
+        include_once 'partials/ga4-server-side-tagging-events-display.php';
     }
 
     /**

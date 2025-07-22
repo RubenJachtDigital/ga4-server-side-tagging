@@ -111,6 +111,9 @@ class GA4_Server_Side_Tagging
         
         // Cron handler
         require_once GA4_SERVER_SIDE_TAGGING_PLUGIN_DIR . 'includes/class-ga4-server-side-tagging-cron.php';
+        
+        // Event logger
+        require_once GA4_SERVER_SIDE_TAGGING_PLUGIN_DIR . 'includes/class-ga4-event-logger.php';
     }
 
     /**
