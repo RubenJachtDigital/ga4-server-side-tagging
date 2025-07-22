@@ -95,6 +95,13 @@ class GA4_Server_Side_Tagging_Endpoint
             'permission_callback' => array($this, 'check_strong_permission'),
         ));
 
+        // Encrypted events endpoint (for sendBeacon compatibility - no X-Encrypted header needed)
+        register_rest_route('ga4-server-side-tagging/v1', '/send-events/encrypted', array(
+            'methods' => 'POST',
+            'callback' => array($this, 'send_events_encrypted'),
+            'permission_callback' => array($this, 'check_strong_permission'),
+        ));
+
     }
 
 
@@ -109,14 +116,16 @@ class GA4_Server_Side_Tagging_Endpoint
     {
         $session_id = session_id();
         $client_ip = $this->get_client_ip($request);
+        $route = $request->get_route();
+        $is_encrypted_endpoint = strpos($route, '/send-events/encrypted') !== false;
         
-        // Check WordPress nonce first
-        $nonce = $request->get_header('X-WP-Nonce');
-        if (!empty($nonce)) {
-            if (!wp_verify_nonce($nonce, 'wp_rest')) {
-                $this->logger->warning('Nonce verification failed for IP: ' . $client_ip . ', generating fresh nonce');
-                
-                // Return error with fresh nonce for JavaScript retry
+        // Check WordPress nonce - handle differently for encrypted endpoint
+        if ($is_encrypted_endpoint) {
+            // For encrypted endpoint, nonce should be embedded in JWT payload (extracted during decryption)
+            // This is handled in handle_encrypted_request() method
+            $nonce_verified = $this->verify_nonce_from_encrypted_payload($request);
+            if (!$nonce_verified) {
+                $this->logger->warning('Nonce verification failed for encrypted endpoint from IP: ' . $client_ip);
                 return new \WP_Error(
                     'rest_cookie_invalid_nonce',
                     'Cookie controle mislukt',
@@ -125,6 +134,24 @@ class GA4_Server_Side_Tagging_Endpoint
                         'fresh_nonce' => wp_create_nonce('wp_rest')
                     )
                 );
+            }
+        } else {
+            // Standard endpoint - check nonce from header
+            $nonce = $request->get_header('X-WP-Nonce');
+            if (!empty($nonce)) {
+                if (!wp_verify_nonce($nonce, 'wp_rest')) {
+                    $this->logger->warning('Nonce verification failed for IP: ' . $client_ip . ', generating fresh nonce');
+                    
+                    // Return error with fresh nonce for JavaScript retry
+                    return new \WP_Error(
+                        'rest_cookie_invalid_nonce',
+                        'Cookie controle mislukt',
+                        array(
+                            'status' => 403,
+                            'freshNonce' => wp_create_nonce('wp_rest')
+                        )
+                    );
+                }
             }
         }
         
@@ -218,13 +245,13 @@ class GA4_Server_Side_Tagging_Endpoint
             $context = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 2)[1]['function'] ?? 'unknown';
             $message = ($context === 'send_events') ? 'Bot detected attempting to send events' : 'Bot detected attempting to access secure config';
             
-            $this->logger->bot_detected($message, array(
+            $this->logger->bot_detected($message, json_encode(array(
                 'ip' => $client_ip,
                 'user_agent' => $user_agent,
                 'referer' => $referer,
                 'detection_details' => $detection_details,
                 'context' => $context
-            ));
+            )));
         }
 
         return $is_bot;
@@ -591,6 +618,45 @@ class GA4_Server_Side_Tagging_Endpoint
     }
 
     /**
+     * Send events to Cloudflare Worker via encrypted endpoint (batch processing only).
+     *
+     * @since    1.0.0
+     * @param    \WP_REST_Request    $request    The request object.
+     * @return   \WP_REST_Response               The response object.
+     */
+    public function send_events_encrypted($request)
+    {
+        // Force the request to be treated as encrypted for processing
+        // This allows sendBeacon to work without X-Encrypted header
+        $original_body = $request->get_json_params();
+        
+        // SECURITY: For encrypted endpoint, we use enhanced session validation instead of URL nonces
+        // This is much safer than exposing nonces in URL parameters which can be logged/cached
+        
+        // The session-based validation happens in check_strong_permission() which is already 
+        // applied to this route, providing adequate security for encrypted requests
+        
+        // Additional validation: Ensure request contains encrypted JWT data
+        if (!isset($original_body['time_jwt']) || empty($original_body['time_jwt'])) {
+            $this->logger->warning('Encrypted endpoint accessed without encrypted payload from IP: ' . $this->get_client_ip($request));
+            return new \WP_REST_Response(
+                array('error' => 'Invalid request format for encrypted endpoint'),
+                400
+            );
+        }
+        
+        // Log that we're processing an encrypted request via the encrypted endpoint
+        $this->logger->info('Processing encrypted request via dedicated encrypted endpoint', json_encode(array(
+            'endpoint' => '/send-events/encrypted',
+            'ip' => $this->get_client_ip($request),
+            'security_method' => 'session_based_validation'
+        )));
+        
+        // Delegate to the main send_events method - it already handles encrypted requests
+        return $this->send_events($request);
+    }
+
+    /**
      * Send events to Cloudflare Worker (batch processing only).
      *
      * @since    1.0.0
@@ -614,20 +680,20 @@ class GA4_Server_Side_Tagging_Endpoint
                 
                 if (!empty($worker_api_key) && $provided_token === $worker_api_key) {
                     $is_authenticated = true;
-                    $this->logger->info("Authenticated request from send-events endpoint - bypassing bot detection", array(
+                    $this->logger->info("Authenticated request from send-events endpoint - bypassing bot detection", json_encode(array(
                         'ip' => $client_ip,
                         'user_agent' => $request->get_header('user-agent')
-                    ));
+                    )));
                 }
             }
             
             // Only perform bot detection if not authenticated
             if (!$is_authenticated && $this->is_bot_request($request)) {
-                $this->logger->warning("Bot detected attempting to send events - blocked from database storage", array(
+                $this->logger->warning("Bot detected attempting to send events - blocked from database storage", json_encode(array(
                     'ip' => $client_ip,
                     'user_agent' => $request->get_header('user-agent'),
                     'referer' => $request->get_header('referer')
-                ));
+                )));
                 return new \WP_REST_Response(
                     array(
                         'error' => 'Request blocked',
@@ -729,6 +795,36 @@ class GA4_Server_Side_Tagging_Endpoint
                     'consent_mode' => 'DENIED',
                     'consent_reason' => 'missing_data'
                 );
+            }
+
+            // WordPress-side bot detection (mirrors Cloudflare Worker logic)
+            if (!$is_authenticated) {
+                $bot_detection_result = $this->detect_bot_from_event_data($request, $request_data);
+                if ($bot_detection_result['is_bot']) {
+                    $this->logger->warning("Bot detected via WordPress endpoint - blocked from processing", array(
+                        'ip' => $client_ip,
+                        'user_agent' => $request->get_header('user-agent'),
+                        'bot_score' => $bot_detection_result['score'],
+                        'reasons' => $bot_detection_result['reasons'],
+                        'event_count' => count($request_data['events'])
+                    ));
+                    
+                    // Return success response but don't process the events (same as Cloudflare Worker)
+                    return new \WP_REST_Response(array(
+                        'success' => true,
+                        'events_processed' => count($request_data['events']),
+                        'processing_time_ms' => round((microtime(true) - $start_time) * 1000, 2),
+                        'filtered' => true,
+                        'message' => 'Events processed successfully'
+                    ), 200);
+                }
+                
+                // Clean botData from all events after bot detection (before database storage)
+                foreach ($request_data['events'] as $index => $event) {
+                    if (isset($event['params']['botData'])) {
+                        unset($request_data['events'][$index]['params']['botData']);
+                    }
+                }
             }
 
             // Log batch info with type distinction
@@ -847,6 +943,13 @@ class GA4_Server_Side_Tagging_Endpoint
 
         // Forward the complete batch payload to Cloudflare
         $batch_payload = $request_data;
+        
+        // Clean botData from all events before sending to Cloudflare (direct mode)
+        foreach ($batch_payload['events'] as $index => $event) {
+            if (isset($event['params']['botData'])) {
+                unset($batch_payload['events'][$index]['params']['botData']);
+            }
+        }
         
         // Check if debug mode is enabled
         $debug_mode = get_option('ga4_server_side_tagging_debug_mode', false);
@@ -1487,6 +1590,368 @@ class GA4_Server_Side_Tagging_Endpoint
         }
     }
 
+    /**
+     * Verify WordPress nonce from encrypted JWT payload
+     *
+     * @since    1.0.0
+     * @param    \WP_REST_Request    $request    The request object.
+     * @return   bool                          Whether the nonce is valid.
+     */
+    private function verify_nonce_from_encrypted_payload($request)
+    {
+        try {
+            $request_body = $request->get_json_params();
+            
+            // Debug: Log the raw request body
+            $this->logger->info(json_encode(array(
+                'has_time_jwt' => isset($request_body['time_jwt']),
+                'time_jwt_length' => isset($request_body['time_jwt']) ? strlen($request_body['time_jwt']) : 0,
+                'request_body_keys' => array_keys($request_body)
+            )), '[JWT Debug] Raw request body received:');
+            
+            // Check for time-based JWT encryption first
+            if (isset($request_body['time_jwt']) && !empty($request_body['time_jwt'])) {
+                // Debug: Log JWT before decryption
+                $this->logger->info(json_encode(array(
+                    'jwt_preview' => substr($request_body['time_jwt'], 0, 50) . '...',
+                    'jwt_full_length' => strlen($request_body['time_jwt'])
+                )), '[JWT Debug] About to decrypt JWT:');
+                
+                // Decrypt the JWT to get the original payload
+                $decrypted_data = GA4_Encryption_Util::verify_time_based_jwt($request_body['time_jwt']);
+                
+                // Debug: Log decryption result
+                $this->logger->info(json_encode(array(
+                    'decryption_success' => $decrypted_data !== false,
+                    'decrypted_data_type' => gettype($decrypted_data),
+                    'is_array' => is_array($decrypted_data),
+                    'is_string' => is_string($decrypted_data)
+                )), '[JWT Debug] JWT decryption result:');
+                
+                if ($decrypted_data === false) {
+                    $this->logger->warning('JWT verification failed for encrypted endpoint nonce check');
+                    return false;
+                }
+                
+                // Debug: Log the COMPLETE decrypted payload structure
+                $this->logger->info(json_encode(array(
+                    'decrypted_data_type' => gettype($decrypted_data),
+                    'decrypted_data_keys' => is_array($decrypted_data) ? array_keys($decrypted_data) : 'not_array',
+                    'has_wpnonce' => isset($decrypted_data['_wpnonce']),
+                    '_wpnonce_value' => isset($decrypted_data['_wpnonce']) ? substr($decrypted_data['_wpnonce'], 0, 10) . '...' : 'missing',
+                    '_wpnonce_length' => isset($decrypted_data['_wpnonce']) ? strlen($decrypted_data['_wpnonce']) : 0,
+                    'FULL_DECRYPTED_PAYLOAD' => $decrypted_data // Log the complete payload
+                )), '[JWT Debug] Decrypted payload structure:');
+                
+                // Check if nonce is embedded in the decrypted payload
+                if (isset($decrypted_data['_wpnonce']) && !empty($decrypted_data['_wpnonce'])) {
+                    $embedded_nonce = $decrypted_data['_wpnonce'];
+                    
+                    // Debug: Log nonce verification attempt
+                    $this->logger->info(json_encode(array(
+                        'nonce_preview' => substr($embedded_nonce, 0, 10) . '...',
+                        'nonce_length' => strlen($embedded_nonce)
+                    )), '[JWT Debug] Attempting nonce verification:');
+                    
+                    // Verify the embedded nonce
+                    $nonceVerificationResult = wp_verify_nonce($embedded_nonce, 'wp_rest');
+                    if (!$nonceVerificationResult) {
+                          $this->logger->warning(json_encode(array(
+                            'nonce_preview' => substr($embedded_nonce, 0, 10) . '...',
+                            'expected_action' => 'wp_rest'
+                        )), 'Embedded nonce verification failed in encrypted payload');
+                        return false;
+                    } else {
+                         $this->logger->info('Nonce verification successful', '[JWT Debug] Nonce verification successful');
+                        return true;
+                    }
+                } else {
+                    $this->logger->warning(json_encode(array(
+                        'decrypted_keys' => is_array($decrypted_data) ? array_keys($decrypted_data) : 'not_array',
+                        'FULL_DECRYPTED_PAYLOAD_NO_NONCE' => $decrypted_data // Log complete payload when nonce missing
+                    )), 'No nonce found in encrypted payload');
+                    return false;
+                }
+            }
+            
+            $this->logger->warning('No time_jwt found in encrypted endpoint request');
+            return false;
+            
+        } catch (\Exception $e) {
+            $this->logger->error('Error verifying nonce from encrypted payload: ' . $e->getMessage());
+            return false;
+        }
+    }
 
+    /**
+     * Detect bot from event data (mirrors Cloudflare Worker bot detection)
+     *
+     * @since    1.0.0
+     * @param    \WP_REST_Request    $request      The request object.
+     * @param    array              $request_data  The event request data.
+     * @return   array                           Bot detection result.
+     */
+    private function detect_bot_from_event_data($request, $request_data)
+    {
+        $bot_checks = array();
+        $reasons = array();
+        $total_score = 0;
+        
+        // Extract botData from the first event (if available)
+        $bot_data = null;
+        $event_params = null;
+        if (!empty($request_data['events']) && isset($request_data['events'][0]['params'])) {
+            $event_params = $request_data['events'][0]['params'];
+            $bot_data = isset($event_params['botData']) ? $event_params['botData'] : null;
+        }
+        
+        // 1. Check existing WordPress bot detection patterns (existing method)
+        if ($this->is_bot_request($request)) {
+            $bot_checks[] = true;
+            $reasons[] = 'wordpress_bot_patterns';
+            $total_score += 50;
+        } else {
+            $bot_checks[] = false;
+        }
+        
+        // 2. WordPress botData analysis (mirrors Cloudflare checkWordPressBotData)
+        if ($bot_data) {
+            $botdata_result = $this->check_wordpress_bot_data($bot_data);
+            $bot_checks[] = $botdata_result['is_bot'];
+            if ($botdata_result['is_bot']) {
+                $reasons[] = 'botdata_analysis';
+                $total_score += $botdata_result['score'];
+            }
+        } else {
+            $bot_checks[] = false;
+        }
+        
+        // 3. Behavior patterns analysis (mirrors Cloudflare checkBehaviorPatterns)
+        if ($bot_data && $event_params) {
+            $behavior_result = $this->check_behavior_patterns($bot_data, $event_params);
+            $bot_checks[] = $behavior_result['is_bot'];
+            if ($behavior_result['is_bot']) {
+                $reasons[] = 'behavior_patterns';
+                $total_score += $behavior_result['score'];
+            }
+        } else {
+            $bot_checks[] = false;
+        }
+        
+        // 4. User agent analysis (enhanced)
+        $user_agent = $request->get_header('user-agent');
+        $ua_result = $this->check_enhanced_user_agent($user_agent);
+        $bot_checks[] = $ua_result['is_bot'];
+        if ($ua_result['is_bot']) {
+            $reasons[] = 'user_agent_patterns';
+            $total_score += $ua_result['score'];
+        }
+        
+        // Mirror Cloudflare Worker logic: require at least 2 positive checks to classify as bot
+        $positive_checks = array_filter($bot_checks);
+        $is_bot = count($positive_checks) >= 2;
+        
+        return array(
+            'is_bot' => $is_bot,
+            'score' => $total_score,
+            'reasons' => $reasons,
+            'positive_checks' => count($positive_checks),
+            'check_details' => array(
+                'wordpress_patterns' => $bot_checks[0],
+                'botdata_analysis' => $bot_checks[1],
+                'behavior_patterns' => $bot_checks[2],
+                'user_agent' => $bot_checks[3]
+            )
+        );
+    }
+    
+    /**
+     * Check WordPress botData for bot indicators (mirrors Cloudflare checkWordPressBotData)
+     *
+     * @since    1.0.0
+     * @param    array    $bot_data    The botData from client.
+     * @return   array                Bot detection result.
+     */
+    private function check_wordpress_bot_data($bot_data)
+    {
+        $score = 0;
+        $indicators = array();
+        
+        // Bot score check (primary indicator)
+        if (isset($bot_data['bot_score']) && $bot_data['bot_score'] > 35) {
+            $score += 40;
+            $indicators[] = 'high_bot_score';
+        }
+        
+        // Webdriver detection
+        if (isset($bot_data['webdriver_detected']) && $bot_data['webdriver_detected']) {
+            $score += 50;
+            $indicators[] = 'webdriver_detected';
+        }
+        
+        // Automation indicators
+        if (isset($bot_data['has_automation_indicators']) && $bot_data['has_automation_indicators']) {
+            $score += 30;
+            $indicators[] = 'automation_indicators';
+        }
+        
+        // JavaScript availability (missing JS is suspicious)
+        if (isset($bot_data['has_javascript']) && !$bot_data['has_javascript']) {
+            $score += 20;
+            $indicators[] = 'no_javascript';
+        }
+        
+        // Hardware checks
+        if (isset($bot_data['hardware_concurrency']) && $bot_data['hardware_concurrency'] === 0) {
+            $score += 15;
+            $indicators[] = 'no_hardware_concurrency';
+        }
+        
+        // Cookie support
+        if (isset($bot_data['cookie_enabled']) && !$bot_data['cookie_enabled']) {
+            $score += 10;
+            $indicators[] = 'cookies_disabled';
+        }
+        
+        // Screen dimension validation
+        if (isset($bot_data['screen_available_width']) && isset($bot_data['screen_available_height'])) {
+            $width = intval($bot_data['screen_available_width']);
+            $height = intval($bot_data['screen_available_height']);
+            
+            if ($width < 320 || $width > 7680 || $height < 240 || $height > 4320) {
+                $score += 25;
+                $indicators[] = 'invalid_screen_dimensions';
+            }
+        }
+        
+        // Color depth check
+        if (isset($bot_data['color_depth'])) {
+            $color_depth = intval($bot_data['color_depth']);
+            if ($color_depth < 16 || $color_depth > 32) {
+                $score += 15;
+                $indicators[] = 'invalid_color_depth';
+            }
+        }
+        
+        // Engagement time check
+        if (isset($bot_data['engagement_calculated']) && $bot_data['engagement_calculated'] < 500) {
+            $score += 20;
+            $indicators[] = 'low_engagement';
+        }
+        
+        // Timezone check (UTC/GMT is suspicious)
+        if (isset($bot_data['timezone'])) {
+            $timezone = strtolower($bot_data['timezone']);
+            if (in_array($timezone, array('utc', 'gmt', 'utc+0', 'gmt+0'))) {
+                $score += 10;
+                $indicators[] = 'suspicious_timezone';
+            }
+        }
+        
+        return array(
+            'is_bot' => $score >= 30, // Threshold for bot classification
+            'score' => $score,
+            'indicators' => $indicators
+        );
+    }
+    
+    /**
+     * Check behavior patterns for bot indicators (mirrors Cloudflare checkBehaviorPatterns)
+     *
+     * @since    1.0.0
+     * @param    array    $bot_data      The botData from client.
+     * @param    array    $event_params  The event parameters.
+     * @return   array                   Bot detection result.
+     */
+    private function check_behavior_patterns($bot_data, $event_params)
+    {
+        $score = 0;
+        $indicators = array();
+        
+        // Session timing analysis
+        if (isset($bot_data['event_creation_time']) && isset($bot_data['session_start_time'])) {
+            $session_duration = $bot_data['event_creation_time'] - $bot_data['session_start_time'];
+            if ($session_duration < 1000) { // Less than 1 second
+                $score += 25;
+                $indicators[] = 'short_session_duration';
+            }
+        }
+        
+        // Event timestamp patterns
+        if (isset($event_params['event_timestamp'])) {
+            $timestamp = $event_params['event_timestamp'];
+            // Check for round timestamps (artificial)
+            if ($timestamp % 1000 === 0) {
+                $score += 15;
+                $indicators[] = 'round_timestamp';
+            }
+        }
+        
+        // Engagement time analysis
+        if (isset($event_params['engagement_time_msec'])) {
+            $engagement = intval($event_params['engagement_time_msec']);
+            if ($engagement < 100) {
+                $score += 20;
+                $indicators[] = 'impossible_fast_engagement';
+            }
+        }
+        
+        // Perfect scroll percentages (bot-like behavior)
+        if (isset($event_params['percent_scrolled'])) {
+            $scroll_percent = intval($event_params['percent_scrolled']);
+            if (in_array($scroll_percent, array(25, 50, 75, 90, 100))) {
+                $score += 10;
+                $indicators[] = 'perfect_scroll_percentage';
+            }
+        }
+        
+        return array(
+            'is_bot' => $score >= 20, // Threshold for bot classification
+            'score' => $score,
+            'indicators' => $indicators
+        );
+    }
+    
+    /**
+     * Enhanced user agent analysis (beyond existing is_bot_request)
+     *
+     * @since    1.0.0
+     * @param    string    $user_agent    The user agent string.
+     * @return   array                   Bot detection result.
+     */
+    private function check_enhanced_user_agent($user_agent)
+    {
+        $score = 0;
+        $indicators = array();
+        
+        if (empty($user_agent) || strlen($user_agent) < 10) {
+            $score += 30;
+            $indicators[] = 'missing_or_short_ua';
+        }
+        
+        // Additional automation tool patterns not in existing check
+        $automation_patterns = array(
+            '/puppeteer/i',
+            '/playwright/i', 
+            '/cypress/i',
+            '/testcafe/i',
+            '/nightwatch/i',
+            '/webdriverio/i'
+        );
+        
+        foreach ($automation_patterns as $pattern) {
+            if (preg_match($pattern, $user_agent)) {
+                $score += 40;
+                $indicators[] = 'automation_tool';
+                break;
+            }
+        }
+        
+        return array(
+            'is_bot' => $score >= 25,
+            'score' => $score,
+            'indicators' => $indicators
+        );
+    }
 
 }

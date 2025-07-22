@@ -1768,6 +1768,32 @@ async function handleGA4Event(payload, request) {
     processedData.name = processedData.event_name;
   }
 
+  // Remove internal WordPress/system fields from processedData before GA4 payload construction
+  // These fields are only for internal processing and should not be sent to GA4
+  
+  // WordPress nonce (authentication)
+  if (processedData._wpnonce) {
+    delete processedData._wpnonce;
+  }
+  if (processedData.params && processedData.params._wpnonce) {
+    delete processedData.params._wpnonce;
+  }
+  
+  // Other potential internal fields that shouldn't reach GA4
+  const internalFieldsToRemove = [
+    'session_id', 'batch', 'timestamp', 'client_ip', 'isCompleteData',
+    'encryption_enabled', 'transmission_method', 'worker_api_key'
+  ];
+  
+  internalFieldsToRemove.forEach(field => {
+    if (processedData[field]) {
+      delete processedData[field];
+    }
+    if (processedData.params && processedData.params[field]) {
+      delete processedData.params[field];
+    }
+  });
+
   // Extract location data from params before preparing GA4 payload
   const userLocation = extractLocationData(processedData.params);
 
@@ -1849,6 +1875,8 @@ async function handleGA4Event(payload, request) {
   if (ga4Payload.events[0].params.hasOwnProperty("botData")) {
     delete ga4Payload.events[0].params.botData;
   }
+  
+  // WordPress nonce already cleaned earlier in processedData cleanup
   
   // Remove device-related data from params since it's now at top level
   const deviceParamsToRemove = [

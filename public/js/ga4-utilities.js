@@ -2172,7 +2172,7 @@
     ajax: {
 
       /**
-       * Send payload reliably using sendBeacon fallback for critical events
+       * Send payload reliably using sendBeacon first with fetch fallback for critical events
        * @param {string} endpoint URL to send to
        * @param {Object} payload Data to send
        * @param {Object} config Configuration object
@@ -2183,12 +2183,165 @@
       sendPayloadReliable: async function (endpoint, payload, config, logPrefix, isCritical = false) {
         logPrefix = logPrefix || "[GA4Utils Reliable]";
         
-        // Use only fetch for all events (sendBeacon completely removed)
+        // SECURITY VALIDATION - Do not send request if security checks fail
+        const securityValidation = this.validateRequestSecurity(endpoint, payload, config);
+        if (!securityValidation.valid) {
+          const error = new Error("Security validation failed: " + securityValidation.reason);
+          GA4Utils.helpers.log("🚫 Request blocked by security validation: " + securityValidation.reason, error, config, logPrefix);
+          throw error;
+        }
+        
+        // Check if this is a WordPress REST endpoint that needs encryption
+        const transmissionMethod = config?.transmissionMethod || 'direct_to_cf';
+        const isWordPressEndpoint = config && config.apiEndpoint && endpoint.startsWith(config.apiEndpoint);
+        const isEncryptedEndpoint = endpoint.includes('/send-events/encrypted');
+        const shouldEncrypt = (endpoint.includes('/send-events') && 
+                            transmissionMethod === 'wp_rest_endpoint' && 
+                            config.encryptionEnabled) || isEncryptedEndpoint;
+        
+        // Try sendBeacon first for better reliability
+        if (navigator.sendBeacon) {
+          try {
+            let beaconData;
+            let beaconSuccess = false;
+            
+            // For WordPress endpoints, handle encryption (no URL nonce for security)
+            if (isWordPressEndpoint) {
+              // SECURITY: We don't add nonce to URL for sendBeacon as it's unsafe (logs/cache exposure)
+              // Instead, encrypted endpoints use session-based validation
+              const beaconUrl = endpoint;
+              
+              // For encrypted endpoints, encrypt the payload before sending
+              if (shouldEncrypt && isEncryptedEndpoint) {
+                try {
+                  // Generate encrypted JWT payload for encrypted endpoint
+                  const timeBasedJWT = await GA4Utils.encryption.createSelfGeneratedTimeBasedJWT(payload);
+                  beaconData = new Blob([JSON.stringify({ time_jwt: timeBasedJWT })], { type: 'application/json' });
+                  
+                  GA4Utils.helpers.log(logPrefix + " Attempting sendBeacon to encrypted WordPress endpoint", {
+                    endpoint: beaconUrl,
+                    encrypted: true,
+                    payloadSize: timeBasedJWT.length,
+                    security_method: 'session_based_validation'
+                  });
+                } catch (encryptError) {
+                  GA4Utils.helpers.log(logPrefix + " ⚠️ Encryption failed for sendBeacon, falling back to fetch", {
+                    error: encryptError.message,
+                    endpoint: endpoint
+                  });
+                  // Skip sendBeacon and go directly to fetch
+                  beaconData = null;
+                }
+              } else {
+                // Standard unencrypted payload
+                beaconData = new Blob([JSON.stringify(payload)], { type: 'application/json' });
+                
+                GA4Utils.helpers.log(logPrefix + " Attempting sendBeacon to WordPress endpoint", {
+                  endpoint: beaconUrl,
+                  encrypted: false,
+                  payloadSize: JSON.stringify(payload).length,
+                  security_method: 'session_based_validation'
+                });
+              }
+              
+              if (beaconData) {
+                beaconSuccess = navigator.sendBeacon(beaconUrl, beaconData);
+              }
+            } else {
+              // Non-WordPress endpoint (like Cloudflare)
+              beaconData = new Blob([JSON.stringify(payload)], { type: 'application/json' });
+              beaconSuccess = navigator.sendBeacon(endpoint, beaconData);
+              
+              GA4Utils.helpers.log(logPrefix + " Attempting sendBeacon to external endpoint", {
+                endpoint: endpoint,
+                encrypted: false,
+                payloadSize: JSON.stringify(payload).length
+              });
+            }
+            
+            if (beaconSuccess) {
+              GA4Utils.helpers.log(logPrefix + " ✅ Event sent successfully via sendBeacon (reliable)", {
+                endpoint: endpoint,
+                isCritical: isCritical,
+                encrypted: shouldEncrypt && isEncryptedEndpoint
+              });
+              return Promise.resolve({ success: true, method: 'sendBeacon', encrypted: shouldEncrypt && isEncryptedEndpoint });
+            } else {
+              GA4Utils.helpers.log(logPrefix + " ⚠️ sendBeacon failed, falling back to fetch", {
+                endpoint: endpoint,
+                reason: "beacon_failed"
+              });
+            }
+          } catch (beaconError) {
+            GA4Utils.helpers.log(logPrefix + " ⚠️ sendBeacon error, falling back to fetch", {
+              error: beaconError.message,
+              endpoint: endpoint
+            });
+          }
+        } else {
+          GA4Utils.helpers.log(logPrefix + " sendBeacon not supported, using fetch", {
+            endpoint: endpoint
+          });
+        }
+        
+        // Fallback to fetch (handles encryption, headers, etc.)
         try {
           const response = await this.sendPayloadFetch(endpoint, payload, config, logPrefix);
           return response;
         } catch (fetchError) {
-          // Simply throw the error without retry logic
+          // Check if it's a nonce error and retry with fresh nonce
+          if (fetchError.message && fetchError.message.includes('rest_cookie_invalid_nonce')) {
+            GA4Utils.helpers.log(logPrefix + " Nonce expired, attempting retry with fresh nonce and new JWT", {
+              originalError: fetchError.message,
+              endpoint: endpoint
+            });
+            
+            try {
+              // Extract fresh nonce from error response if available
+              const errorData = JSON.parse(fetchError.message.split(': ')[1]);
+              if (errorData.data && errorData.data.fresh_nonce) {
+                // Update the global nonce
+                if (window.ga4ServerSideTagging) {
+                  const oldNonce = window.ga4ServerSideTagging.nonce;
+                  window.ga4ServerSideTagging.nonce = errorData.data.fresh_nonce;
+                  
+                  GA4Utils.helpers.log(logPrefix + " Updated global nonce", {
+                    oldNonce: oldNonce,
+                    newNonce: errorData.data.fresh_nonce
+                  });
+                }
+                
+                // For encrypted endpoints, we need to recreate the payload with fresh nonce
+                if (isWordPressEndpoint && shouldEncrypt && isEncryptedEndpoint) {
+                  GA4Utils.helpers.log(logPrefix + " Recreating encrypted payload with fresh nonce for retry");
+                  
+                  // The original payload needs to be re-encrypted with the new nonce
+                  // This requires access to the original unencrypted payload
+                  // Since we can't easily extract it, let's use a different approach:
+                  // Signal that a nonce refresh is needed and let the caller handle it
+                  const nonceError = new Error('NONCE_REFRESH_REQUIRED');
+                  nonceError.freshNonce = errorData.data.fresh_nonce;
+                  throw nonceError;
+                } else {
+                  // For non-encrypted requests, retry with updated global nonce
+                  GA4Utils.helpers.log(logPrefix + " Retrying non-encrypted request with fresh nonce from server response");
+                  const retryResponse = await this.sendPayloadFetch(endpoint, payload, config, logPrefix);
+                  return retryResponse;
+                }
+              }
+            } catch (retryError) {
+              // If it's our special nonce refresh signal, re-throw it
+              if (retryError.message === 'NONCE_REFRESH_REQUIRED') {
+                throw retryError;
+              }
+              
+              GA4Utils.helpers.log(logPrefix + " Retry with fresh nonce failed", {
+                retryError: retryError.message
+              });
+            }
+          }
+          
+          // If not a nonce error or retry failed, throw original error
           throw fetchError;
         }
       },
@@ -2234,11 +2387,12 @@
           headers["X-WP-Nonce"] = window.ga4ServerSideTagging?.nonce || config.nonce || "";
           
           // Check if this is the send-event endpoint and encryption is enabled
-          // Only encrypt when using wp_rest_endpoint method with encryption enabled
+          // Encrypt when using wp_rest_endpoint method with encryption enabled OR when using encrypted endpoint
           const transmissionMethod = config.transmissionMethod || 'direct_to_cf';
-          const shouldEncrypt = endpoint.includes('/send-events') && 
+          const isEncryptedEndpoint = endpoint.includes('/send-events/encrypted');
+          const shouldEncrypt = (endpoint.includes('/send-events') && 
                               transmissionMethod === 'wp_rest_endpoint' && 
-                              config.encryptionEnabled;
+                              config.encryptionEnabled) || isEncryptedEndpoint;
           
           if (shouldEncrypt) {
             try {
@@ -2249,8 +2403,10 @@
                 time_jwt: timeBasedJWT
               });
               
-              // Add encryption header to inform WordPress endpoint
-              headers["X-Encrypted"] = "true";
+              // Add encryption header only for standard endpoint, not for encrypted endpoint
+              if (!isEncryptedEndpoint) {
+                headers["X-Encrypted"] = "true";
+              }
               
               GA4Utils.helpers.log(
                 "🔐 Payload encrypted with self-generated time-based JWT",
@@ -2264,6 +2420,8 @@
                 originalPayloadKeys: Object.keys(payload),
                 encryptedJwtLength: timeBasedJWT.length,
                 endpoint: endpoint,
+                usingEncryptedEndpoint: isEncryptedEndpoint,
+                hasXEncryptedHeader: !isEncryptedEndpoint,
                 timestamp: new Date().toISOString(),
                 status: "ENCRYPTED"
               });
@@ -2302,15 +2460,19 @@
         
         // Additional console logging for request status
         if (endpoint.includes('/send-events')) {
-          if (headers["X-Encrypted"]) {
-            GA4Utils.helpers.log("🔐 [GA4 Encryption] Sending encrypted request to send-events endpoint", {
+          const isEncryptedEndpoint = endpoint.includes('/send-events/encrypted');
+          const hasEncryption = headers["X-Encrypted"] || isEncryptedEndpoint;
+          
+          if (hasEncryption) {
+            GA4Utils.helpers.log("🔐 [GA4 Encryption] Sending encrypted request", {
               endpoint: endpoint,
-              hasEncryptionHeader: true,
+              usingEncryptedEndpoint: isEncryptedEndpoint,
+              hasEncryptionHeader: !!headers["X-Encrypted"],
               timestamp: new Date().toISOString(),
               status: "SENDING_ENCRYPTED"
             });
           } else {
-            GA4Utils.helpers.log("📤 [GA4 Encryption] Sending unencrypted request to send-events endpoint", {
+            GA4Utils.helpers.log("📤 [GA4 Encryption] Sending unencrypted request", {
               endpoint: endpoint,
               encryptionEnabled: config?.encryptionEnabled || false,
               reason: config?.encryptionEnabled ? "encryption_failed" : "encryption_disabled",
@@ -2349,9 +2511,13 @@
           
           // Additional console logging for successful response
           if (endpoint.includes('/send-events')) {
+            const isEncryptedEndpoint = endpoint.includes('/send-events/encrypted');
+            const wasEncrypted = headers["X-Encrypted"] || isEncryptedEndpoint;
+            
             GA4Utils.helpers.log("✅ [GA4 Encryption] Event sent successfully", {
               endpoint: endpoint,
-              wasEncrypted: !!headers["X-Encrypted"],
+              wasEncrypted: wasEncrypted,
+              usingEncryptedEndpoint: isEncryptedEndpoint,
               responseData: data,
               timestamp: new Date().toISOString(),
               status: "SUCCESS"
@@ -3522,9 +3688,85 @@
        */
       createSelfGeneratedTimeBasedJWT: async function(payload) {
         const timeBasedKey = await this.generateSelfGeneratedTimeBasedKey();
-        const jsonPayload = JSON.stringify(payload);
+        
+        // Debug: Check nonce availability from all possible sources
+        const nonce1 = window.ga4ServerSideTagging?.nonce;
+        const nonce2 = window.ga4ServerSideTaggingPublic?.nonce;
+        const nonce3 = window.wpApiSettings?.nonce;
+        const nonce4 = window.ga4_rest_nonce; // Alternative global variable
+        const nonce5 = document.querySelector('meta[name="wp-nonce"]')?.getAttribute('content');
+        let selectedNonce = nonce1 || nonce2 || nonce3 || nonce4 || nonce5 || '';
+        
+        // If no nonce found, try to get a fresh one via AJAX (synchronous as last resort)
+        if (!selectedNonce && window.ga4ServerSideTagging?.refreshNonce) {
+          console.log('[GA4 JWT Debug] No nonce found, attempting synchronous refresh...');
+          try {
+            // Try to refresh nonce synchronously as last resort
+            const freshNonce = await this.getFreshNonceSynchronously();
+            if (freshNonce) {
+              selectedNonce = freshNonce;
+              if (window.ga4ServerSideTagging) {
+                window.ga4ServerSideTagging.nonce = freshNonce;
+              }
+              console.log('[GA4 JWT Debug] Successfully got fresh nonce:', freshNonce.substring(0, 10) + '...');
+            }
+          } catch (error) {
+            console.error('[GA4 JWT Debug] Failed to get fresh nonce:', error);
+          }
+        }
+        
+        console.log('[GA4 JWT Debug] Comprehensive nonce availability check:', {
+          'window.ga4ServerSideTagging?.nonce': nonce1,
+          'window.ga4ServerSideTaggingPublic?.nonce': nonce2,
+          'window.wpApiSettings?.nonce': nonce3,
+          'window.ga4_rest_nonce': nonce4,
+          'meta[name="wp-nonce"]': nonce5,
+          'selectedNonce': selectedNonce,
+          'selectedNonceLength': selectedNonce.length,
+          'originalPayload': payload,
+          'allWindowKeys': Object.keys(window).filter(key => key.toLowerCase().includes('nonce') || key.toLowerCase().includes('ga4'))
+        });
+        
+        // Include WordPress nonce in payload for proper authentication
+        const enhancedPayload = {
+          ...payload,
+          _wpnonce: selectedNonce
+        };
+        
+        console.log('[GA4 JWT Debug] Enhanced payload with nonce:', enhancedPayload);
+        
+        const jsonPayload = JSON.stringify(enhancedPayload);
+        
+        console.log('[GA4 JWT Debug] JSON payload string:', jsonPayload);
         
         return await this.createJWTToken(jsonPayload, timeBasedKey);
+      },
+
+      /**
+       * Get fresh nonce synchronously as last resort
+       * @returns {Promise<string>} Fresh nonce or empty string
+       */
+      getFreshNonceSynchronously: async function() {
+        try {
+          const response = await fetch(window.location.origin + '/wp-admin/admin-ajax.php', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: 'action=ga4_refresh_nonce'
+          });
+          
+          if (response.ok) {
+            const data = await response.json();
+            if (data.success && data.data.nonce) {
+              return data.data.nonce;
+            }
+          }
+          return '';
+        } catch (error) {
+          console.error('[GA4 JWT Debug] Error getting fresh nonce:', error);
+          return '';
+        }
       },
 
       /**

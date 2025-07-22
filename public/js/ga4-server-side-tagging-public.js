@@ -61,7 +61,7 @@
 
       // Log initialization
       this.log(
-        "%c GA4 Server-Side Tagging initialized v2",
+        "%c GA4 Server-Side Tagging initialized v3",
         "background: #4CAF50; color: white; font-size: 16px; font-weight: bold; padding: 8px 12px; border-radius: 4px;"
       );
     },
@@ -2701,7 +2701,9 @@
      * @param {boolean} isCritical - Whether this is a critical event
      */
     sendEventViaWordPressReliable: async function(eventData, withEncryption = false, isCritical = false) {
-      var endpoint = this.config.apiEndpoint + '/send-events';
+      var endpoint = withEncryption 
+        ? this.config.apiEndpoint + '/send-events/encrypted'
+        : this.config.apiEndpoint + '/send-events';
 
       if (!endpoint || !this.config.apiEndpoint) {
         this.log("❌ WordPress endpoint not configured for reliable transmission", {
@@ -3275,40 +3277,79 @@
           return Promise.resolve({ queued: true });
         }
         
-        // Use the single send-event endpoint
-        const sendEventEndpoint = this.config.apiEndpoint + '/send-events';
+        // Use different endpoint based on encryption settings
+        const transmissionMethod = this.config.transmissionMethod || 'direct_to_cf';
+        const shouldEncrypt = transmissionMethod === 'wp_rest_endpoint' && this.config.encryptionEnabled;
+        const sendEventEndpoint = shouldEncrypt 
+          ? this.config.apiEndpoint + '/send-events/encrypted'
+          : this.config.apiEndpoint + '/send-events';
         
         this.log("📤 Sending event via send-event endpoint", {
           endpoint: sendEventEndpoint,
           eventName: payload.name,
           consentReady: this.consentReady,
-          encryptionEnabled: this.config.encryptionEnabled
+          encryptionEnabled: this.config.encryptionEnabled,
+          usingEncryptedEndpoint: shouldEncrypt
         });
         
         // Log encryption status for debugging
-        if (this.config.encryptionEnabled) {
-          this.log("🔐 [GA4 Encryption] Event will be encrypted before sending", {
+        if (shouldEncrypt) {
+          this.log("🔐 [GA4 Encryption] Event will be encrypted and sent to encrypted endpoint", {
             eventName: payload.name,
             endpoint: sendEventEndpoint,
             timestamp: new Date().toISOString()
           });
         } else {
-          this.log("📤 [GA4 Encryption] Event will be sent unencrypted", {
+          this.log("📤 [GA4 Encryption] Event will be sent unencrypted to standard endpoint", {
             eventName: payload.name,
             endpoint: sendEventEndpoint,
+            transmissionMethod: transmissionMethod,
             timestamp: new Date().toISOString()
           });
         }
         
-        return await GA4Utils.ajax.sendPayloadFetch(
-          sendEventEndpoint,
-          {
-            event_name: payload.name,
-            params: payload.params || {}
-          },
-          this.config,
-          "[GA4 Server-Side Tagging]"
-        );
+        // Try sendBeacon first, fallback to fetch
+        try {
+          return await GA4Utils.ajax.sendPayloadReliable(
+            sendEventEndpoint,
+            {
+              event_name: payload.name,
+              params: payload.params || {}
+            },
+            this.config,
+            "[GA4 Server-Side Tagging]",
+            false // Not a critical event
+          );
+        } catch (error) {
+          // Handle nonce refresh requirement for encrypted endpoints
+          if (error.message === 'NONCE_REFRESH_REQUIRED' && error.freshNonce) {
+            this.log("🔄 Nonce expired for encrypted endpoint, retrying with fresh nonce", {
+              oldNonce: window.ga4ServerSideTagging?.nonce,
+              newNonce: error.freshNonce,
+              endpoint: sendEventEndpoint
+            });
+            
+            // Update global nonce
+            if (window.ga4ServerSideTagging) {
+              window.ga4ServerSideTagging.nonce = error.freshNonce;
+            }
+            
+            // Retry the entire operation with fresh nonce (this will recreate the JWT)
+            return await GA4Utils.ajax.sendPayloadReliable(
+              sendEventEndpoint,
+              {
+                event_name: payload.name,
+                params: payload.params || {}
+              },
+              this.config,
+              "[GA4 Server-Side Tagging] [RETRY]",
+              false // Not a critical event
+            );
+          }
+          
+          // Re-throw other errors
+          throw error;
+        }
       } catch (error) {
         this.log("❌ Error sending event", {
           error: error.message
