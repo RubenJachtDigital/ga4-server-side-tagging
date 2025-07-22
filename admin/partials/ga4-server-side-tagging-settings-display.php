@@ -32,7 +32,6 @@ $track_logged_in_users = get_option('ga4_track_logged_in_users', true);
 $yith_raq_form_id = get_option('ga4_yith_raq_form_id', '');
 $conversion_form_ids = get_option('ga4_conversion_form_ids', '');
 $disable_all_ip = get_option('ga4_disable_all_ip', false);
-$consent_mode_enabled = get_option('ga4_consent_mode_enabled', true);
 ?>
 
 <div class="wrap">
@@ -56,16 +55,6 @@ $consent_mode_enabled = get_option('ga4_consent_mode_enabled', true);
                     <h3>GDPR Consent Settings</h3>
                     
                     <table class="form-table">
-                        <tr>
-                            <th scope="row">Enable Consent Mode</th>
-                            <td>
-                                <label for="ga4_consent_mode_enabled">
-                                    <input type="checkbox" id="ga4_consent_mode_enabled" name="ga4_consent_mode_enabled" <?php checked($consent_mode_enabled); ?> />
-                                    Enable Google Consent Mode v2
-                                </label>
-                                <p class="description">Enable consent management and GDPR compliance. When disabled, tracking starts immediately without waiting for consent.</p>
-                            </td>
-                        </tr>
                         <tr>
                             <th scope="row">Use Iubenda</th>
                             <td>

@@ -377,18 +377,6 @@ class GA4_Server_Side_Tagging_Admin
 
         register_setting(
             'ga4_server_side_tagging_settings',
-            'ga4_consent_mode_enabled',
-            array(
-                'type' => 'boolean',
-                'description' => 'Enable Google Consent Mode v2',
-                'sanitize_callback' => array($this, 'sanitize_checkbox'),
-                'show_in_rest' => false,
-                'default' => true,
-            )
-        );
-
-        register_setting(
-            'ga4_server_side_tagging_settings',
             'ga4_consent_timeout_action',
             array(
                 'type' => 'string',
@@ -810,7 +798,6 @@ class GA4_Server_Side_Tagging_Admin
         $consent_accept_selector = get_option('ga4_consent_accept_selector', '.accept-all');
         $consent_deny_selector = get_option('ga4_consent_deny_selector', '.deny-all');
         $consent_default_timeout = get_option('ga4_consent_default_timeout', 30);
-        $consent_mode_enabled = get_option('ga4_consent_mode_enabled', true);
         $consent_timeout_action = get_option('ga4_consent_timeout_action', 'deny');
         $disable_all_ip = get_option('ga4_disable_all_ip', false);
         $storage_expiration_hours = get_option('ga4_storage_expiration_hours', 24);
@@ -964,7 +951,6 @@ class GA4_Server_Side_Tagging_Admin
 
         // GDPR Consent settings
         update_option('ga4_use_iubenda', isset($_POST['ga4_use_iubenda']));
-        update_option('ga4_consent_mode_enabled', isset($_POST['ga4_consent_mode_enabled']));
 
         if (isset($_POST['ga4_consent_accept_selector'])) {
             update_option('ga4_consent_accept_selector', sanitize_text_field(wp_unslash($_POST['ga4_consent_accept_selector'])));
