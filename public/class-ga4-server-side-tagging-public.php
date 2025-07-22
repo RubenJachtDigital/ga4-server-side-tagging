@@ -201,7 +201,7 @@ class GA4_Server_Side_Tagging_Public
                 'denySelector' => get_option('ga4_consent_deny_selector', '.deny-all'),
                 'defaultTimeout' => (int) get_option('ga4_consent_default_timeout', 0),
                 'timeoutAction' => get_option('ga4_consent_timeout_action', 'deny'),
-                'consentModeEnabled' => (bool) get_option('ga4_consent_mode_enabled', true),
+                'consentModeEnabled' => true,
                 'disableAllIP' => (bool) get_option('ga4_disable_all_ip', false),
                 'storageExpirationHours' => (int) get_option('ga4_storage_expiration_hours', 24)
             ),
