@@ -2210,6 +2210,11 @@
               // SECURITY: We don't add nonce to URL for sendBeacon as it's unsafe (logs/cache exposure)
               // Instead, encrypted endpoints use session-based validation
               const beaconUrl = endpoint;
+               // Add X-WP-Nonce header if we have a nonce (for wp_rest_endpoint method)
+              const currentNonce = window.ga4ServerSideTagging?.nonce || config.nonce;
+              if (currentNonce) {
+                    payload._wpnonce = currentNonce;
+              }
               
               // For encrypted endpoints, encrypt the payload before sending
               if (shouldEncrypt && isEncryptedEndpoint) {
@@ -3689,68 +3694,12 @@
       createSelfGeneratedTimeBasedJWT: async function(payload) {
         const timeBasedKey = await this.generateSelfGeneratedTimeBasedKey();
         
-        // Debug: Check nonce availability from all possible sources
-        const nonce1 = window.ga4ServerSideTagging?.nonce;
-        const nonce2 = window.ga4ServerSideTaggingPublic?.nonce;
-        const nonce3 = window.wpApiSettings?.nonce;
-        const nonce4 = window.ga4_rest_nonce; // Alternative global variable
-        const nonce5 = document.querySelector('meta[name="wp-nonce"]')?.getAttribute('content');
-        let selectedNonce = nonce1 || nonce2 || nonce3 || nonce4 || nonce5 || '';
-        
-        // If no nonce found, try to get a fresh one via AJAX (synchronous as last resort)
-        if (!selectedNonce && window.ga4ServerSideTagging?.refreshNonce) {
-          try {
-            // Try to refresh nonce synchronously as last resort
-            const freshNonce = await this.getFreshNonceSynchronously();
-            if (freshNonce) {
-              selectedNonce = freshNonce;
-              if (window.ga4ServerSideTagging) {
-                window.ga4ServerSideTagging.nonce = freshNonce;
-              }
-            }
-          } catch (error) {
-            console.error('[GA4 JWT Debug] Failed to get fresh nonce:', error);
-          }
-        }
-        
-        // Include WordPress nonce in payload for proper authentication
-        const enhancedPayload = {
-          ...payload,
-          _wpnonce: selectedNonce
-        };
-        
-        
-        const jsonPayload = JSON.stringify(enhancedPayload);
+        const jsonPayload = JSON.stringify(payload);
                 
         return await this.createJWTToken(jsonPayload, timeBasedKey);
       },
 
-      /**
-       * Get fresh nonce synchronously as last resort
-       * @returns {Promise<string>} Fresh nonce or empty string
-       */
-      getFreshNonceSynchronously: async function() {
-        try {
-          const response = await fetch(window.location.origin + '/wp-admin/admin-ajax.php', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/x-www-form-urlencoded',
-            },
-            body: 'action=ga4_refresh_nonce'
-          });
-          
-          if (response.ok) {
-            const data = await response.json();
-            if (data.success && data.data.nonce) {
-              return data.data.nonce;
-            }
-          }
-          return '';
-        } catch (error) {
-          console.error('[GA4 JWT Debug] Error getting fresh nonce:', error);
-          return '';
-        }
-      },
+  
 
       /**
        * SHA-256 hash function
