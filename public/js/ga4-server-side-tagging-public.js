@@ -2243,7 +2243,9 @@
       if (!eventParams.hasOwnProperty("event_timestamp")) {
         eventParams.event_timestamp = Math.floor(Date.now() / 1000);
       }
-
+      if (!eventParams.hasOwnProperty("user_agent")) {
+        params.user_agent = navigator.userAgent;
+      }
       // ALWAYS ensure complete location data is present for all events
       try {
         eventParams = await this.enrichEventWithLocationData(eventParams, eventName);

@@ -1754,12 +1754,7 @@ class GA4_Server_Side_Tagging_Endpoint
             
             // Check for time-based JWT encryption first
             if (isset($request_body['time_jwt']) && !empty($request_body['time_jwt'])) {
-                // Debug: Log JWT before decryption
-                $this->logger->info(json_encode(array(
-                    'jwt_preview' => substr($request_body['time_jwt'], 0, 50) . '...',
-                    'jwt_full_length' => strlen($request_body['time_jwt'])
-                )), '[JWT Debug] About to decrypt JWT:');
-                
+           
                 // Decrypt the JWT to get the original payload
                 $decrypted_data = GA4_Encryption_Util::verify_time_based_jwt($request_body['time_jwt']);
                 

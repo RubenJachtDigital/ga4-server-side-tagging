@@ -260,9 +260,6 @@ class GA4_Cronjob_Manager
                 )
             );
 
-            if ($this->logger) {
-                $this->logger->debug("Batch sent successfully, marked " . count($event_ids) . " events as completed");
-            }
         } else {
             // Mark events as failed or retry
             foreach ($event_ids as $event_id) {
@@ -397,9 +394,6 @@ class GA4_Cronjob_Manager
         $response_body = wp_remote_retrieve_body($response);
 
         if ($response_code >= 200 && $response_code < 300) {
-            if ($this->logger) {
-                $this->logger->debug("Batch sent successfully to Cloudflare. Response: " . $response_body);
-            }
             return true;
         } else {
             if ($this->logger) {
