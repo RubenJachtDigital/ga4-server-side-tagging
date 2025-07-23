@@ -655,14 +655,7 @@ class GA4_Server_Side_Tagging_Endpoint
                 400
             );
         }
-        
-        // Log that we're processing an encrypted request via the encrypted endpoint
-        $this->logger->info('Processing encrypted request via dedicated encrypted endpoint', json_encode(array(
-            'endpoint' => '/send-events/encrypted',
-            'ip' => $this->get_client_ip($request),
-            'security_method' => 'session_based_validation'
-        )));
-        
+      
         // Delegate to the main send_events method - it already handles encrypted requests
         return $this->send_events($request);
     }
@@ -1748,39 +1741,15 @@ class GA4_Server_Side_Tagging_Endpoint
                 // Decrypt the JWT to get the original payload
                 $decrypted_data = GA4_Encryption_Util::verify_time_based_jwt($request_body['time_jwt']);
                 
-                // Debug: Log decryption result
-                $this->logger->info(json_encode(array(
-                    'decryption_success' => $decrypted_data !== false,
-                    'decrypted_data_type' => gettype($decrypted_data),
-                    'is_array' => is_array($decrypted_data),
-                    'is_string' => is_string($decrypted_data)
-                )), '[JWT Debug] JWT decryption result:');
-                
                 if ($decrypted_data === false) {
                     $this->logger->warning('JWT verification failed for encrypted endpoint nonce check');
                     return false;
                 }
                 
-                // Debug: Log the COMPLETE decrypted payload structure
-                $this->logger->info(json_encode(array(
-                    'decrypted_data_type' => gettype($decrypted_data),
-                    'decrypted_data_keys' => is_array($decrypted_data) ? array_keys($decrypted_data) : 'not_array',
-                    'has_wpnonce' => isset($decrypted_data['_wpnonce']),
-                    '_wpnonce_value' => isset($decrypted_data['_wpnonce']) ? substr($decrypted_data['_wpnonce'], 0, 10) . '...' : 'missing',
-                    '_wpnonce_length' => isset($decrypted_data['_wpnonce']) ? strlen($decrypted_data['_wpnonce']) : 0,
-                    'FULL_DECRYPTED_PAYLOAD' => $decrypted_data // Log the complete payload
-                )), '[JWT Debug] Decrypted payload structure:');
-                
                 // Check if nonce is embedded in the decrypted payload
                 if (isset($decrypted_data['_wpnonce']) && !empty($decrypted_data['_wpnonce'])) {
                     $embedded_nonce = $decrypted_data['_wpnonce'];
-                    
-                    // Debug: Log nonce verification attempt
-                    $this->logger->info(json_encode(array(
-                        'nonce_preview' => substr($embedded_nonce, 0, 10) . '...',
-                        'nonce_length' => strlen($embedded_nonce)
-                    )), '[JWT Debug] Attempting nonce verification:');
-                    
+        
                     // Verify the embedded nonce
                     $nonceVerificationResult = wp_verify_nonce($embedded_nonce, 'wp_rest');
                     if (!$nonceVerificationResult) {
@@ -1790,7 +1759,6 @@ class GA4_Server_Side_Tagging_Endpoint
                         )), 'Embedded nonce verification failed in encrypted payload');
                         return false;
                     } else {
-                         $this->logger->info('Nonce verification successful', '[JWT Debug] Nonce verification successful');
                         return true;
                     }
                 } else {
@@ -2091,12 +2059,7 @@ class GA4_Server_Side_Tagging_Endpoint
      */
     private function extract_consent_status($request_data)
     {
-        // Debug logging
-        $this->logger->info('Extracting consent status from request_data', json_encode(array(
-            'has_consent_key' => isset($request_data['consent']),
-            'consent_data' => isset($request_data['consent']) ? $request_data['consent'] : 'not_set',
-            'request_data_keys' => array_keys($request_data)
-        )));
+   
         
         if (!isset($request_data['consent']) || !is_array($request_data['consent'])) {
             $this->logger->info('No consent data found or not array', json_encode($request_data['consent'] ?? 'not_set'));
@@ -2119,11 +2082,6 @@ class GA4_Server_Side_Tagging_Endpoint
         // If both fields are present, both must be granted for overall consent to be true
         if (isset($consent['ad_user_data']) && isset($consent['ad_personalization'])) {
             $result = $ad_user_data_granted && $ad_personalization_granted;
-            $this->logger->info('Using both modern consent fields', json_encode(array(
-                'ad_user_data' => $consent['ad_user_data'],
-                'ad_personalization' => $consent['ad_personalization'],
-                'result' => $result
-            )));
             return $result;
         }
         
