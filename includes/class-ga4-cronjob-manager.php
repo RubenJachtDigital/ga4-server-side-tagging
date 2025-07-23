@@ -509,4 +509,76 @@ class GA4_Cronjob_Manager
             $limit
         ));
     }
+
+    /**
+     * Get events with filtering and pagination
+     *
+     * @since    2.0.0
+     * @param    array    $args    Arguments for filtering and pagination.
+     * @return   array    Events and pagination info.
+     */
+    public function get_events_for_table($args = array())
+    {
+        global $wpdb;
+
+        $defaults = array(
+            'limit' => 50,
+            'offset' => 0,
+            'status' => '',
+            'search' => '',
+            'orderby' => 'created_at',
+            'order' => 'DESC'
+        );
+
+        $args = wp_parse_args($args, $defaults);
+
+        // Build WHERE clause
+        $where_conditions = array();
+        $query_args = array();
+
+        if (!empty($args['status'])) {
+            $where_conditions[] = "status = %s";
+            $query_args[] = $args['status'];
+        }
+
+        if (!empty($args['search'])) {
+            $where_conditions[] = "(error_message LIKE %s OR id LIKE %s)";
+            $search_term = '%' . $wpdb->esc_like($args['search']) . '%';
+            $query_args[] = $search_term;
+            $query_args[] = $search_term;
+        }
+
+        $where_sql = '';
+        if (!empty($where_conditions)) {
+            $where_sql = ' WHERE ' . implode(' AND ', $where_conditions);
+        }
+
+        // Get total count
+        $count_query = "SELECT COUNT(*) FROM $this->table_name" . $where_sql;
+        if (!empty($query_args)) {
+            $total_events = $wpdb->get_var($wpdb->prepare($count_query, $query_args));
+        } else {
+            $total_events = $wpdb->get_var($count_query);
+        }
+
+        // Get events
+        $orderby = sanitize_sql_orderby($args['orderby'] . ' ' . $args['order']);
+        if (!$orderby) {
+            $orderby = 'created_at DESC';
+        }
+
+        $query = "SELECT id, status, created_at, processed_at, retry_count, error_message 
+                  FROM $this->table_name 
+                  $where_sql 
+                  ORDER BY $orderby 
+                  LIMIT %d OFFSET %d";
+
+        $final_args = array_merge($query_args, array($args['limit'], $args['offset']));
+        $events = $wpdb->get_results($wpdb->prepare($query, $final_args));
+
+        return array(
+            'events' => $events,
+            'total' => intval($total_events)
+        );
+    }
 }
