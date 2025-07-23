@@ -2579,11 +2579,15 @@
           this.log("⚡ Direct to Cloudflare reliable transmission");
           await this.sendEventToCloudflareReliable(data, isCritical);
         } else if (transmissionMethod === 'wp_rest_endpoint') {
-          this.log("🛡️ wp_rest_endpoint reliable transmission");
-          await this.sendEventViaWordPressReliable(data, false, isCritical);
-        } else {
-          this.log("🔒 Secure WordPress to Cloudflare reliable transmission (always encrypted)");
-          await this.sendEventViaWordPressReliable(data, true, isCritical);
+          if(this.config.encryptionEnabled == true){
+            this.log("🔒 Secure WordPress to Cloudflare reliable transmission (always encrypted)");
+            await this.sendEventViaWordPressReliable(data, true, isCritical);
+          }
+          else{
+            this.log("🛡️ Secure WordPress to Cloudflare reliable transmission (not encrypted)");
+            await this.sendEventViaWordPressReliable(data, false, isCritical);
+          }
+       
         }
       } catch (error) {
         this.log("❌ Error in sendServerSideEventReliable", {
@@ -2894,7 +2898,9 @@
      * @param {boolean} isCritical - Whether this is a critical event
      */
     sendBatchViaWordPress: function(batchData, useEncryption, isCritical = false) {
-      var endpoint = this.config.apiEndpoint + '/send-events';
+      var endpoint = useEncryption 
+        ? this.config.apiEndpoint + '/send-events/encrypted'
+        : this.config.apiEndpoint + '/send-events';
       
       try {
         // If encryption is enabled, use sendPayloadReliable which handles encryption
