@@ -320,11 +320,23 @@ $current_page = floor($offset / $limit) + 1;
                 <tr>
                     <td><strong><?php echo esc_html__('WordPress Cron:', 'ga4-server-side-tagging'); ?></strong></td>
                     <td>
-                        <?php if (wp_doing_cron()): ?>
-                            <span style="color: #28a745;"><?php echo esc_html__('✅ Running', 'ga4-server-side-tagging'); ?></span>
-                        <?php else: ?>
-                            <span style="color: #ffc107;"><?php echo esc_html__('⏸️ Idle', 'ga4-server-side-tagging'); ?></span>
-                        <?php endif; ?>
+                        <?php 
+                        // Check if cron is disabled
+                        if (defined('DISABLE_WP_CRON') && DISABLE_WP_CRON) {
+                            echo '<span style="color: #dc3545;">' . esc_html__('❌ Disabled (DISABLE_WP_CRON)', 'ga4-server-side-tagging') . '</span>';
+                        } elseif (wp_next_scheduled('ga4_process_event_queue')) {
+                            // If our specific cron job is scheduled, show as active
+                            echo '<span style="color: #28a745;">' . esc_html__('✅ Active', 'ga4-server-side-tagging') . '</span>';
+                        } else {
+                            // No scheduled job found
+                            echo '<span style="color: #dc3545;">' . esc_html__('❌ Not Scheduled', 'ga4-server-side-tagging') . '</span>';
+                        }
+                        
+                        // Show if currently executing (rare but possible)
+                        if (wp_doing_cron()) {
+                            echo '<br><small style="color: #0073aa;">' . esc_html__('🔄 Currently executing', 'ga4-server-side-tagging') . '</small>';
+                        }
+                        ?>
                     </td>
                 </tr>
             </tbody>
