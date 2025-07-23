@@ -431,6 +431,7 @@ $disable_all_ip = get_option('ga4_disable_all_ip', false);
                     <li><a href="<?php echo admin_url('admin.php?page=ga4-server-side-tagging'); ?>">🧪 A/B Testing & Click Tracking</a></li>
                     <li><a href="<?php echo admin_url('admin.php?page=ga4-server-side-tagging-cronjobs'); ?>">📊 Event Queue & Cronjobs</a></li>
                     <li><a href="<?php echo admin_url('admin.php?page=ga4-server-side-tagging-logs'); ?>">📄 Error Logs</a></li>
+                    <li><a href="<?php echo admin_url('admin.php?page=ga4-server-side-tagging-events'); ?>">📄 Event Monitor</a></li>
                 </ul>
             </div>
         </div>

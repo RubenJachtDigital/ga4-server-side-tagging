@@ -259,9 +259,7 @@ class GA4_Server_Side_Tagging_Public
         if (method_exists('\CompuactEudonetAPI\Functions\CustomFunctions', 'get_raq_cart_data')) {
             if (!empty(\CompuactEudonetAPI\Functions\CustomFunctions::get_raq_cart_data())) {
                 $quote_data = $this->get_order_quote_data_for_tracking();
-                $this->logger->info('Quote data:' . json_encode($quote_data));
                 $script_data['quoteData'] = $quote_data;
-                $this->logger->info('Added quote data for request a quote event tracking. Order ID: ' . $quote_data['transaction_id']);
             }
         }
 
