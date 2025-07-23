@@ -3699,7 +3699,6 @@
         
         // If no nonce found, try to get a fresh one via AJAX (synchronous as last resort)
         if (!selectedNonce && window.ga4ServerSideTagging?.refreshNonce) {
-          console.log('[GA4 JWT Debug] No nonce found, attempting synchronous refresh...');
           try {
             // Try to refresh nonce synchronously as last resort
             const freshNonce = await this.getFreshNonceSynchronously();
@@ -3708,24 +3707,11 @@
               if (window.ga4ServerSideTagging) {
                 window.ga4ServerSideTagging.nonce = freshNonce;
               }
-              console.log('[GA4 JWT Debug] Successfully got fresh nonce:', freshNonce.substring(0, 10) + '...');
             }
           } catch (error) {
             console.error('[GA4 JWT Debug] Failed to get fresh nonce:', error);
           }
         }
-        
-        console.log('[GA4 JWT Debug] Comprehensive nonce availability check:', {
-          'window.ga4ServerSideTagging?.nonce': nonce1,
-          'window.ga4ServerSideTaggingPublic?.nonce': nonce2,
-          'window.wpApiSettings?.nonce': nonce3,
-          'window.ga4_rest_nonce': nonce4,
-          'meta[name="wp-nonce"]': nonce5,
-          'selectedNonce': selectedNonce,
-          'selectedNonceLength': selectedNonce.length,
-          'originalPayload': payload,
-          'allWindowKeys': Object.keys(window).filter(key => key.toLowerCase().includes('nonce') || key.toLowerCase().includes('ga4'))
-        });
         
         // Include WordPress nonce in payload for proper authentication
         const enhancedPayload = {
@@ -3733,12 +3719,9 @@
           _wpnonce: selectedNonce
         };
         
-        console.log('[GA4 JWT Debug] Enhanced payload with nonce:', enhancedPayload);
         
         const jsonPayload = JSON.stringify(enhancedPayload);
-        
-        console.log('[GA4 JWT Debug] JSON payload string:', jsonPayload);
-        
+                
         return await this.createJWTToken(jsonPayload, timeBasedKey);
       },
 
