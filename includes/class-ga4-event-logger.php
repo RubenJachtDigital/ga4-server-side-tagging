@@ -144,17 +144,25 @@ class GA4_Event_Logger
 
         $args = wp_parse_args($args, $defaults);
 
-        // Serialize complex data
+        // Handle encrypted payload - decrypt time_jwt and re-encrypt with permanent key for DB storage
+        if (is_string($args['payload']) && !empty($args['payload'])) {
+            $args['payload'] = $this->process_encrypted_payload_for_storage($args['payload']);
+        }
+
+        // Serialize and encrypt sensitive data
         if (is_array($args['payload']) || is_object($args['payload'])) {
-            $args['payload'] = json_encode($args['payload'], JSON_PRETTY_PRINT);
+            $serialized_payload = json_encode($args['payload'], JSON_PRETTY_PRINT);
+            $args['payload'] = $this->encrypt_sensitive_data_for_storage($serialized_payload);
         }
         
         if (is_array($args['headers']) || is_object($args['headers'])) {
-            $args['headers'] = json_encode($args['headers'], JSON_PRETTY_PRINT);
+            $serialized_headers = json_encode($args['headers'], JSON_PRETTY_PRINT);
+            $args['headers'] = $this->encrypt_sensitive_data_for_storage($serialized_headers);
         }
 
         if (is_array($args['bot_detection_rules']) || is_object($args['bot_detection_rules'])) {
-            $args['bot_detection_rules'] = json_encode($args['bot_detection_rules'], JSON_PRETTY_PRINT);
+            $serialized_bot_data = json_encode($args['bot_detection_rules'], JSON_PRETTY_PRINT);
+            $args['bot_detection_rules'] = $this->encrypt_sensitive_data_for_storage($serialized_bot_data);
         }
 
         // Insert the log entry
@@ -275,6 +283,19 @@ class GA4_Event_Logger
         
         $results = $wpdb->get_results($results_sql);
 
+        // Decrypt payloads and headers for display
+        foreach ($results as $result) {
+            if (!empty($result->payload)) {
+                $result->payload = $this->decrypt_payload_for_display($result->payload);
+            }
+            if (!empty($result->headers)) {
+                $result->headers = $this->decrypt_payload_for_display($result->headers);
+            }
+            if (!empty($result->bot_detection_rules)) {
+                $result->bot_detection_rules = $this->decrypt_payload_for_display($result->bot_detection_rules);
+            }
+        }
+
         return array(
             'results' => $results,
             'total_items' => $total_items,
@@ -345,6 +366,19 @@ class GA4_Event_Logger
             ORDER BY created_at DESC 
             LIMIT %d
         ", $limit));
+
+        // Decrypt payloads and headers for display
+        foreach ($results as $result) {
+            if (!empty($result->payload)) {
+                $result->payload = $this->decrypt_payload_for_display($result->payload);
+            }
+            if (!empty($result->headers)) {
+                $result->headers = $this->decrypt_payload_for_display($result->headers);
+            }
+            if (!empty($result->bot_detection_rules)) {
+                $result->bot_detection_rules = $this->decrypt_payload_for_display($result->bot_detection_rules);
+            }
+        }
 
         return $results ?: array();
     }
@@ -472,7 +506,22 @@ class GA4_Event_Logger
             $query = $wpdb->prepare($query, $args['limit'], $args['offset']);
         }
 
-        return $wpdb->get_results($query) ?: array();
+        $results = $wpdb->get_results($query) ?: array();
+
+        // Decrypt payloads and headers for display
+        foreach ($results as $result) {
+            if (!empty($result->payload)) {
+                $result->payload = $this->decrypt_payload_for_display($result->payload);
+            }
+            if (!empty($result->headers)) {
+                $result->headers = $this->decrypt_payload_for_display($result->headers);
+            }
+            if (!empty($result->bot_detection_rules)) {
+                $result->bot_detection_rules = $this->decrypt_payload_for_display($result->bot_detection_rules);
+            }
+        }
+
+        return $results;
     }
 
     /**
@@ -588,5 +637,162 @@ class GA4_Event_Logger
             "DELETE FROM $this->table_name WHERE created_at < %s",
             $cutoff_date
         ));
+    }
+
+    /**
+     * Process encrypted payload for database storage
+     * - Decrypt time_jwt if present
+     * - Re-encrypt with permanent key if encryption is enabled
+     * - Store encrypted or plain data based on settings
+     *
+     * @since    2.1.0
+     * @param    string    $payload    The payload data (may be encrypted).
+     * @return   string               The processed payload for database storage.
+     */
+    private function process_encrypted_payload_for_storage($payload)
+    {
+        // Check if the encryption util class exists
+        if (!class_exists('\GA4ServerSideTagging\Utilities\GA4_Encryption_Util')) {
+            return $payload; // Return original if encryption class not available
+        }
+
+        try {
+            $encryption_enabled = get_option('ga4_jwt_encryption_enabled', false);
+            $encryption_key = null;
+            
+            if ($encryption_enabled) {
+                $encryption_key = \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::retrieve_encrypted_key('ga4_jwt_encryption_key');
+            }
+            
+            // Try to parse as JSON first to see if it might be encrypted
+            $payload_data = json_decode($payload, true);
+            $decrypted_data = null;
+            
+            // Check for time-based JWT encryption first
+            if (is_array($payload_data) && isset($payload_data['time_jwt']) && !empty($payload_data['time_jwt'])) {
+                $decrypted_data = \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::verify_time_based_jwt($payload_data['time_jwt']);
+                if ($decrypted_data !== false) {
+                    // Successfully decrypted time_jwt
+                    if ($encryption_enabled && $encryption_key) {
+                        // Re-encrypt with permanent key for database storage
+                        $payload_to_encrypt = is_array($decrypted_data) ? json_encode($decrypted_data) : $decrypted_data;
+                        $re_encrypted = \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::encrypt($payload_to_encrypt, $encryption_key);
+                        if ($re_encrypted !== false) {
+                            return $re_encrypted; // Store re-encrypted data
+                        }
+                    }
+                    // If re-encryption fails or is disabled, store decrypted data
+                    return is_array($decrypted_data) ? json_encode($decrypted_data, JSON_PRETTY_PRINT) : $decrypted_data;
+                }
+            }
+
+            // Try regular JWT with stored encryption key (already encrypted with permanent key)
+            if ($encryption_enabled && $encryption_key) {
+                // Check if this looks like an encrypted JWT format
+                if (is_array($payload_data) && (isset($payload_data['encrypted']) || isset($payload_data['jwt']))) {
+                    // This is already encrypted with permanent key, keep as-is for database
+                    return $payload;
+                }
+                
+                // Try decrypting as permanent key encrypted data to verify it's encrypted
+                $test_decrypt = \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::decrypt($payload, $encryption_key);
+                if ($test_decrypt !== false) {
+                    // This is already encrypted with permanent key, keep as-is
+                    return $payload;
+                }
+            }
+
+            // If no encryption or not encrypted, return original payload
+            return $payload;
+
+        } catch (\Exception $e) {
+            // Log processing failure but don't break the logging process
+            error_log('GA4 Event Logger: Failed to process encrypted payload - ' . $e->getMessage());
+            return $payload; // Return original payload if processing fails
+        }
+    }
+
+    /**
+     * Encrypt sensitive data for database storage
+     *
+     * @since    2.1.0
+     * @param    string    $data    The data to encrypt (already serialized).
+     * @return   string            The encrypted data for storage or original if encryption fails.
+     */
+    private function encrypt_sensitive_data_for_storage($data)
+    {
+        // Check if the encryption util class exists
+        if (!class_exists('\GA4ServerSideTagging\Utilities\GA4_Encryption_Util')) {
+            return $data; // Return original if encryption class not available
+        }
+
+        try {
+            $encryption_enabled = get_option('ga4_jwt_encryption_enabled', false);
+            
+            if (!$encryption_enabled) {
+                return $data; // No encryption enabled, return as-is
+            }
+            
+            $encryption_key = \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::retrieve_encrypted_key('ga4_jwt_encryption_key');
+            if (!$encryption_key) {
+                return $data; // No encryption key available
+            }
+
+            // Encrypt the data with permanent key
+            $encrypted = \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::encrypt($data, $encryption_key);
+            if ($encrypted !== false) {
+                return $encrypted; // Successfully encrypted
+            }
+
+            // If encryption failed, return original data
+            return $data;
+
+        } catch (\Exception $e) {
+            // Log encryption failure but don't break the logging process
+            error_log('GA4 Event Logger: Failed to encrypt sensitive data for storage - ' . $e->getMessage());
+            return $data; // Return original data if encryption fails
+        }
+    }
+
+    /**
+     * Decrypt payload when retrieving from database for display
+     *
+     * @since    2.1.0
+     * @param    string    $payload    The payload data from database (may be encrypted).
+     * @return   string               The decrypted payload for display.
+     */
+    private function decrypt_payload_for_display($payload)
+    {
+        // Check if the encryption util class exists
+        if (!class_exists('\GA4ServerSideTagging\Utilities\GA4_Encryption_Util')) {
+            return $payload; // Return original if encryption class not available
+        }
+
+        try {
+            $encryption_enabled = get_option('ga4_jwt_encryption_enabled', false);
+            
+            if (!$encryption_enabled) {
+                return $payload; // No encryption enabled, return as-is
+            }
+            
+            $encryption_key = \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::retrieve_encrypted_key('ga4_jwt_encryption_key');
+            if (!$encryption_key) {
+                return $payload; // No encryption key available
+            }
+
+            // Try to decrypt with permanent key
+            $decrypted = \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::decrypt($payload, $encryption_key);
+            if ($decrypted !== false) {
+                return $decrypted; // Successfully decrypted
+            }
+
+            // If decryption failed, return original (might not be encrypted)
+            return $payload;
+
+        } catch (\Exception $e) {
+            // Log decryption failure but don't break the display process
+            error_log('GA4 Event Logger: Failed to decrypt payload for display - ' . $e->getMessage());
+            return $payload; // Return original payload if decryption fails
+        }
     }
 }
