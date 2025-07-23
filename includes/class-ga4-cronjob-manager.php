@@ -180,10 +180,6 @@ class GA4_Cronjob_Manager
     {
         global $wpdb;
 
-        if ($this->logger) {
-            $this->logger->debug("Starting event queue processing");
-        }
-
         // Get batch size setting
         $batch_size = get_option('ga4_cronjob_batch_size', 1000);
         
@@ -194,9 +190,6 @@ class GA4_Cronjob_Manager
         ));
 
         if (empty($events)) {
-            if ($this->logger) {
-                $this->logger->debug("No pending events to process");
-            }
             return;
         }
 
@@ -279,7 +272,8 @@ class GA4_Cronjob_Manager
     }
 
     /**
-     * Decrypt event data using time-based or regular JWT
+     * Decrypt event data using permanent, time-based, or regular JWT
+     * Uses permanent JWT decryption for queued events, with fallbacks for compatibility
      *
      * @since    2.0.0
      * @param    string    $encrypted_data    The encrypted event data.
@@ -288,18 +282,30 @@ class GA4_Cronjob_Manager
     private function decrypt_event_data($encrypted_data)
     {
         try {
-            // Try time-based JWT first
-            $decrypted = GA4_Encryption_Util::verify_time_based_jwt($encrypted_data);
+            // Try permanent JWT first (for events stored with permanent encryption)
+            $permanent_key = GA4_Encryption_Util::retrieve_encrypted_key('ga4_jwt_encryption_key');
+            if ($permanent_key) {
+                $decrypted = GA4_Encryption_Util::decrypt_permanent_jwt_token($encrypted_data, $permanent_key);
+                if ($decrypted !== false) {
+                    return $decrypted;
+                }
+            }
             
-            if (!$decrypted) {
-                // Try regular JWT with stored encryption key
-                $encryption_key = GA4_Encryption_Util::retrieve_encrypted_key('ga4_jwt_encryption_key');
-                if ($encryption_key) {
-                    $decrypted = GA4_Encryption_Util::decrypt($encrypted_data, $encryption_key);
+            // Try time-based JWT (for recent events that may still use time-based encryption)
+            $decrypted = GA4_Encryption_Util::verify_time_based_jwt($encrypted_data);
+            if ($decrypted !== false) {
+                return $decrypted;
+            }
+            
+            // Fallback to regular JWT with stored encryption key (legacy compatibility)
+            if ($permanent_key) {
+                $decrypted = GA4_Encryption_Util::decrypt($encrypted_data, $permanent_key);
+                if ($decrypted !== false) {
+                    return $decrypted;
                 }
             }
 
-            return $decrypted;
+            return false;
         } catch (Exception $e) {
             if ($this->logger) {
                 $this->logger->error("Event decryption failed: " . $e->getMessage());
@@ -345,14 +351,15 @@ class GA4_Cronjob_Manager
             $encryption_key = GA4_Encryption_Util::retrieve_encrypted_key('ga4_jwt_encryption_key');
             if ($encryption_key) {
                 try {
-                    $encrypted_payload = GA4_Encryption_Util::encrypt(wp_json_encode($payload), $encryption_key);
+                    // Use permanent JWT encryption for batch payloads (no expiry for async processing)
+                    $encrypted_payload = GA4_Encryption_Util::create_permanent_jwt_token(wp_json_encode($payload), $encryption_key);
                     $payload = array(
                         'encrypted' => true,
                         'jwt' => $encrypted_payload
                     );
                 } catch (Exception $e) {
                     if ($this->logger) {
-                        $this->logger->error("Failed to encrypt batch payload: " . $e->getMessage());
+                        $this->logger->error("Failed to encrypt batch payload with permanent key: " . $e->getMessage());
                     }
                     // Continue with unencrypted payload
                 }

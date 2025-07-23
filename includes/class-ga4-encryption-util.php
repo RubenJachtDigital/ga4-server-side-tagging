@@ -79,6 +79,7 @@ class GA4_Encryption_Util
 
     /**
      * Create JWT token using HMACSHA256 with AES-GCM encrypted payload
+     * This is the internal method used by both time-based and permanent JWT creation
      * 
      * @param string $payload Data to encrypt as JWT payload
      * @param string $key Binary signing key
@@ -264,26 +265,7 @@ class GA4_Encryption_Util
         return $decrypted;
     }
 
-    /**
-     * Create JWT encrypted request payload
-     * 
-     * @param array $data Request data
-     * @param string $encryption_key Backend encryption key (hex)
-     * @return array JWT payload structure
-     */
-    public static function create_encrypted_request($data, $encryption_key)
-    {
-        $json_data = wp_json_encode($data);
-        $jwt_token = self::encrypt($json_data, $encryption_key);
-        
-        if ($jwt_token === false) {
-            throw new \Exception('Failed to create JWT token for request data');
-        }
-        
-        return array(
-            'jwt' => $jwt_token
-        );
-    }
+
 
     /**
      * Parse JWT encrypted request payload
@@ -724,5 +706,166 @@ class GA4_Encryption_Util
         $temp_key = hash('sha256', $key_material, true);
         
         return bin2hex($temp_key);
+    }
+
+    /**
+     * Create time-based JWT token specifically for JS client requests
+     * Uses time-based encryption with 5-minute expiry
+     * 
+     * @param string $payload Data to encrypt as JWT payload
+     * @return string JWT token with time-based encryption
+     */
+    public static function create_time_jwt_token($payload)
+    {
+        // Generate time-based key for current 5-minute slot
+        $time_based_key = self::generate_time_based_key();
+        $binary_key = hex2bin($time_based_key);
+        
+        // Create JWT header for time-based encryption
+        $header = array(
+            'typ' => 'JWT',
+            'alg' => 'HS256',
+            'enc' => 'A256GCM',
+            'time_based' => true // Mark as time-based encryption
+        );
+        
+        // Encrypt the payload data using AES-GCM
+        $encryption_result = self::encrypt_aes_gcm($payload, $binary_key);
+        
+        // JWT Payload with time-based expiry (5 minutes)
+        $jwt_payload = array(
+            'enc_data' => self::base64url_encode($encryption_result['encrypted']),
+            'iv' => self::base64url_encode($encryption_result['iv']),
+            'tag' => self::base64url_encode($encryption_result['tag']),
+            'iat' => time(),
+            'exp' => time() + 300 // 5 minutes expiry for time-based
+        );
+        
+        // Base64URL encode header and payload
+        $header_encoded = self::base64url_encode(wp_json_encode($header));
+        $payload_encoded = self::base64url_encode(wp_json_encode($jwt_payload));
+        
+        // Create signature using HMACSHA256
+        $signature = hash_hmac('sha256', $header_encoded . '.' . $payload_encoded, $binary_key, true);
+        $signature_encoded = self::base64url_encode($signature);
+        
+        // Return complete JWT token
+        return $header_encoded . '.' . $payload_encoded . '.' . $signature_encoded;
+    }
+
+    /**
+     * Create permanent JWT token that doesn't expire
+     * Uses permanent encryption key for long-term storage
+     * 
+     * @param string $payload Data to encrypt as JWT payload
+     * @param string $permanent_key_hex Permanent encryption key (64 chars hex)
+     * @return string JWT token with permanent encryption
+     */
+    public static function create_permanent_jwt_token($payload, $permanent_key_hex)
+    {
+        // Validate permanent key
+        if (!self::validate_encryption_key($permanent_key_hex)) {
+            throw new \Exception('Invalid permanent encryption key format. Must be 64 hex characters.');
+        }
+        
+        $binary_key = hex2bin($permanent_key_hex);
+        
+        // Create JWT header for permanent encryption
+        $header = array(
+            'typ' => 'JWT',
+            'alg' => 'HS256',
+            'enc' => 'A256GCM',
+            'permanent' => true // Mark as permanent encryption
+        );
+        
+        // Encrypt the payload data using AES-GCM
+        $encryption_result = self::encrypt_aes_gcm($payload, $binary_key);
+        
+        // JWT Payload without expiry for permanent tokens
+        $jwt_payload = array(
+            'enc_data' => self::base64url_encode($encryption_result['encrypted']),
+            'iv' => self::base64url_encode($encryption_result['iv']),
+            'tag' => self::base64url_encode($encryption_result['tag']),
+            'iat' => time()
+            // No 'exp' field - permanent tokens don't expire
+        );
+        
+        // Base64URL encode header and payload
+        $header_encoded = self::base64url_encode(wp_json_encode($header));
+        $payload_encoded = self::base64url_encode(wp_json_encode($jwt_payload));
+        
+        // Create signature using HMACSHA256
+        $signature = hash_hmac('sha256', $header_encoded . '.' . $payload_encoded, $binary_key, true);
+        $signature_encoded = self::base64url_encode($signature);
+        
+        // Return complete JWT token
+        return $header_encoded . '.' . $payload_encoded . '.' . $signature_encoded;
+    }
+
+    /**
+     * Decrypt permanent JWT token that doesn't expire
+     * 
+     * @param string $jwt_token Permanent JWT token to decrypt
+     * @param string $permanent_key_hex Permanent encryption key (64 chars hex)
+     * @return string|false Decrypted payload or false on failure
+     */
+    public static function decrypt_permanent_jwt_token($jwt_token, $permanent_key_hex)
+    {
+        try {
+            // Validate permanent key
+            if (!self::validate_encryption_key($permanent_key_hex)) {
+                throw new \Exception('Invalid permanent encryption key format. Must be 64 hex characters.');
+            }
+            
+            $binary_key = hex2bin($permanent_key_hex);
+            
+            // Split JWT token into parts
+            $parts = explode('.', $jwt_token);
+            if (count($parts) !== 3) {
+                throw new \Exception('Invalid JWT token format');
+            }
+            
+            list($header_encoded, $payload_encoded, $signature_encoded) = $parts;
+            
+            // Verify signature first
+            $expected_signature = hash_hmac('sha256', $header_encoded . '.' . $payload_encoded, $binary_key, true);
+            $provided_signature = self::base64url_decode($signature_encoded);
+            
+            if (!hash_equals($expected_signature, $provided_signature)) {
+                throw new \Exception('JWT signature verification failed');
+            }
+            
+            // Decode and validate payload
+            $payload = json_decode(self::base64url_decode($payload_encoded), true);
+            if (json_last_error() !== JSON_ERROR_NONE) {
+                throw new \Exception('Invalid JWT payload JSON');
+            }
+            
+            // Check header for permanent encryption
+            $header = json_decode(self::base64url_decode($header_encoded), true);
+            if (json_last_error() !== JSON_ERROR_NONE) {
+                throw new \Exception('Invalid JWT header JSON');
+            }
+            
+            // Verify this is a permanent token (no expiry check)
+            if (!isset($header['permanent']) || !$header['permanent']) {
+                throw new \Exception('Token is not marked as permanent encryption');
+            }
+            
+            // Decrypt the payload (permanent tokens use encrypted format)
+            if (isset($header['enc']) && $header['enc'] === 'A256GCM' && 
+                isset($payload['enc_data']) && isset($payload['iv']) && isset($payload['tag'])) {
+                $encrypted_data = self::base64url_decode($payload['enc_data']);
+                $iv = self::base64url_decode($payload['iv']);
+                $tag = self::base64url_decode($payload['tag']);
+                return self::decrypt_aes_gcm($encrypted_data, $iv, $tag, $binary_key);
+            } else {
+                throw new \Exception('Invalid permanent JWT payload format');
+            }
+            
+        } catch (\Exception $e) {
+            error_log('GA4 Permanent JWT Decryption Error: ' . $e->getMessage());
+            return false;
+        }
     }
 }

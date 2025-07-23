@@ -906,12 +906,13 @@ class GA4_Server_Side_Tagging_Endpoint
                     $encryption_key = GA4_Encryption_Util::retrieve_encrypted_key('ga4_jwt_encryption_key');
                     if (!empty($encryption_key)) {
                         try {
-                            $encrypted_data = GA4_Encryption_Util::encrypt(wp_json_encode($event_data), $encryption_key);
+                            // Use permanent JWT encryption for database storage (no expiry)
+                            $encrypted_data = GA4_Encryption_Util::create_permanent_jwt_token(wp_json_encode($event_data), $encryption_key);
                             $should_encrypt = true;
                             $event_data = $encrypted_data;
                             
                         } catch (\Exception $e) {
-                            $this->logger->warning("Failed to re-encrypt event for queuing: " . $e->getMessage());
+                            $this->logger->warning("Failed to re-encrypt event for queuing with permanent key: " . $e->getMessage());
                             // Continue with unencrypted data
                         }
                     } else {
@@ -1280,50 +1281,71 @@ class GA4_Server_Side_Tagging_Endpoint
     {
         $request_body = $request->get_json_params();
 
-
-        // Check for time-based JWT encryption first
+        // Check for time-based JWT encryption first (for JS client requests)
         if (isset($request_body['time_jwt']) && !empty($request_body['time_jwt'])) {
-            // This is a time-based JWT encrypted request
-            try {
-                $decrypted_data = GA4_Encryption_Util::verify_time_based_jwt($request_body['time_jwt']);
-                if ($decrypted_data === false) {
-                    throw new \Exception('Time-based JWT verification failed');
-                }
-
-                return $decrypted_data;
-            } catch (\Exception $e) {
-                $this->logger->error('Failed to verify time-based JWT request from IP ' . $this->get_client_ip($request) . ': ' . $e->getMessage());
-                throw new \Exception('Failed to verify time-based JWT request: ' . $e->getMessage());
-            }
+            return $this->handle_time_based_jwt($request_body['time_jwt'], $request);
         }
 
-        // Fall back to legacy JWT encryption
+        // Check for permanent JWT encryption (for backend/stored requests)
         $encryption_enabled = get_option('ga4_jwt_encryption_enabled', false);
         $is_encrypted = GA4_Encryption_Util::is_encrypted_request($request);
 
-        if (!$encryption_enabled || !$is_encrypted) {
-            // Return original request body if not encrypted
-            return $request_body;
+        if ($encryption_enabled && $is_encrypted) {
+            return $this->handle_permanent_jwt($request_body, $request);
         }
 
-        // Use the configured encryption key from backend settings
+        // Return original request body if not encrypted
+        return $request_body;
+    }
+
+    /**
+     * Handle time-based JWT requests from JavaScript clients
+     * Uses 5-minute rotating encryption keys
+     * 
+     * @param string $time_jwt Time-based JWT token
+     * @param \WP_REST_Request $request Request object for logging
+     * @return array Decrypted request data
+     * @throws \Exception If decryption fails
+     */
+    private function handle_time_based_jwt($time_jwt, $request)
+    {
+        try {
+            $decrypted_data = GA4_Encryption_Util::verify_time_based_jwt($time_jwt);
+            if ($decrypted_data === false) {
+                throw new \Exception('Time-based JWT verification failed');
+            }
+
+            return $decrypted_data;
+        } catch (\Exception $e) {
+            $this->logger->error('Failed to verify time-based JWT request from IP ' . $this->get_client_ip($request) . ': ' . $e->getMessage());
+            throw new \Exception('Failed to verify time-based JWT request: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Handle permanent JWT requests (backend/stored data)
+     * Uses permanent encryption keys that don't expire
+     * 
+     * @param array $request_body Request body data
+     * @param \WP_REST_Request $request Request object for logging
+     * @return array Decrypted request data
+     * @throws \Exception If decryption fails
+     */
+    private function handle_permanent_jwt($request_body, $request)
+    {
+        // Use the configured permanent encryption key from backend settings
         $encryption_key = GA4_Encryption_Util::retrieve_encrypted_key('ga4_jwt_encryption_key') ?: '';
 
         if (empty($encryption_key)) {
-            throw new \Exception('Encryption is enabled but no encryption key is configured');
+            throw new \Exception('Encryption is enabled but no permanent encryption key is configured');
         }
 
         try {
             $decrypted_data = GA4_Encryption_Util::parse_encrypted_request($request_body, $encryption_key);
-
-            // JWT verification successful - no logging needed for normal operation
-
             return $decrypted_data;
-
         } catch (\Exception $e) {
-            $this->logger->error('Failed to verify JWT request from IP ' . $this->get_client_ip($request) . ': ' . $e->getMessage());
-
-            throw new \Exception('JWT request verification failed: ' . $e->getMessage());
+            $this->logger->error('Failed to verify permanent JWT request from IP ' . $this->get_client_ip($request) . ': ' . $e->getMessage());
+            throw new \Exception('Permanent JWT request verification failed: ' . $e->getMessage());
         }
     }
 

@@ -1207,7 +1207,8 @@ class GA4_Server_Side_Tagging_Admin
             
             if ($jwt_encryption_enabled && !empty($jwt_encryption_key)) {
                 try {
-                    $encrypted_data = \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::encrypt($request_body, $jwt_encryption_key);
+                    // Use permanent JWT encryption for connection testing (more reliable than time-based)
+                    $encrypted_data = \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::create_permanent_jwt_token($request_body, $jwt_encryption_key);
                     if ($encrypted_data !== false) {
                         $request_body = wp_json_encode(array('jwt' => $encrypted_data));
                         $headers['X-Encrypted'] = 'true';

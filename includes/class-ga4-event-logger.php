@@ -738,8 +738,8 @@ class GA4_Event_Logger
                 return $data; // No encryption key available
             }
 
-            // Encrypt the data with permanent key
-            $encrypted = \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::encrypt($data, $encryption_key);
+            // Encrypt the data with permanent key (no expiry for database storage)
+            $encrypted = \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::create_permanent_jwt_token($data, $encryption_key);
             if ($encrypted !== false) {
                 return $encrypted; // Successfully encrypted
             }
