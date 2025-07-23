@@ -1515,7 +1515,7 @@ class GA4_Server_Side_Tagging_Endpoint
             );
 
             // Add Worker API key authentication header
-            $worker_api_key = \GA4_Encryption_Util::retrieve_encrypted_key('ga4_worker_api_key');
+            $worker_api_key = GA4_Encryption_Util::retrieve_encrypted_key('ga4_worker_api_key');
             if (!empty($worker_api_key)) {
                 $headers['Authorization'] = 'Bearer ' . $worker_api_key;
             }
@@ -1589,7 +1589,7 @@ class GA4_Server_Side_Tagging_Endpoint
             );
 
             // Add Worker API key authentication header
-            $worker_api_key = \GA4_Encryption_Util::retrieve_encrypted_key('ga4_worker_api_key');
+            $worker_api_key = GA4_Encryption_Util::retrieve_encrypted_key('ga4_worker_api_key');
             if (!empty($worker_api_key)) {
                 $headers['Authorization'] = 'Bearer ' . $worker_api_key;
             }

@@ -366,7 +366,7 @@ class GA4_Cronjob_Manager
         );
 
         // Add Worker API key authentication header
-        $worker_api_key = \GA4_Encryption_Util::retrieve_encrypted_key('ga4_worker_api_key');
+        $worker_api_key = GA4_Encryption_Util::retrieve_encrypted_key('ga4_worker_api_key');
         if (!empty($worker_api_key)) {
             $headers['Authorization'] = 'Bearer ' . $worker_api_key;
         }
