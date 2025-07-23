@@ -1236,13 +1236,11 @@ async function handleRequest(request, env) {
   // sendBeacon requests have specific characteristics:
   // 1. Content-Type: application/json or text/plain
   // 2. No X-Simple-request header
-  // 3. No X-WP-Nonce header
-  const hasNonceHeader = request.headers.get("X-WP-Nonce");
   const hasSimpleHeader = request.headers.get("X-Simple-request");
   const hasAuthHeader = request.headers.get("Authorization");
   const contentType = request.headers.get("Content-Type") || "";
   
-  const isSendBeaconRequest = !hasAuthHeader && !hasNonceHeader && !hasSimpleHeader && 
+  const isSendBeaconRequest = !hasAuthHeader && !hasSimpleHeader && 
                              (contentType.includes("application/json") || contentType.includes("text/plain"));
   
   let requestType = "regular";
@@ -1768,16 +1766,7 @@ async function handleGA4Event(payload, request) {
     processedData.name = processedData.event_name;
   }
 
-  // Remove internal WordPress/system fields from processedData before GA4 payload construction
-  // These fields are only for internal processing and should not be sent to GA4
-  
-  // WordPress nonce (authentication)
-  if (processedData._wpnonce) {
-    delete processedData._wpnonce;
-  }
-  if (processedData.params && processedData.params._wpnonce) {
-    delete processedData.params._wpnonce;
-  }
+
   
   // Other potential internal fields that shouldn't reach GA4
   const internalFieldsToRemove = [
@@ -1875,9 +1864,7 @@ async function handleGA4Event(payload, request) {
   if (ga4Payload.events[0].params.hasOwnProperty("botData")) {
     delete ga4Payload.events[0].params.botData;
   }
-  
-  // WordPress nonce already cleaned earlier in processedData cleanup
-  
+    
   // Remove device-related data from params since it's now at top level
   const deviceParamsToRemove = [
     'device_type', 'is_mobile', 'is_tablet', 'is_desktop', 
@@ -2728,7 +2715,7 @@ function getCORSHeaders(request) {
   return {
     "Access-Control-Allow-Origin": origin,
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, X-Encrypted, X-Simple-request, X-WP-Nonce",
+    "Access-Control-Allow-Headers": "Content-Type, X-Encrypted, X-Simple-request",
     "Access-Control-Allow-Credentials": "true",
     "Access-Control-Max-Age": "86400",
   };

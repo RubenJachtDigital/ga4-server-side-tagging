@@ -45,7 +45,7 @@ class GA4_Server_Side_Tagging_Endpoint
      * @access   private
      * @var      bool    $performance_mode_enabled    Whether performance mode is enabled.
      */
-    private $performance_mode_enabled = true;
+    private $performance_mode_enabled = false;
 
     /**
      * Session key for storing validation status
@@ -125,77 +125,6 @@ class GA4_Server_Side_Tagging_Endpoint
      */
     public function check_strong_permission($request)
     {
-        $session_id = session_id();
-        $client_ip = $this->get_client_ip($request);
-        $route = $request->get_route();
-        $is_encrypted_endpoint = strpos($route, '/send-events/encrypted') !== false;
-        
-        // Check WordPress nonce - handle differently for encrypted endpoint
-        if ($is_encrypted_endpoint) {
-            // For encrypted endpoint, nonce should be embedded in JWT payload (extracted during decryption)
-            // This is handled in handle_encrypted_request() method
-            $nonce_verified = $this->verify_nonce_from_encrypted_payload($request);
-            if (!$nonce_verified) {
-                $this->logger->warning('Nonce verification failed for encrypted endpoint from IP: ' . $client_ip);
-                
-                $this->event_logger->log_event(array(
-                    'event_name' => 'nonce_verification_failed',
-                    'event_status' => 'error',
-                    'reason' => 'Nonce verification failed for encrypted endpoint',
-                    'payload' => $request->get_body(),
-                    'headers' => $request->get_headers(),
-                    'ip_address' => $client_ip,
-                    'user_agent' => $request->get_header('user-agent'),
-                    'url' => $request->get_header('origin'),
-                    'referrer' => $request->get_header('referer'),
-                    'endpoint_type' => 'encrypted',
-                    'timestamp' => current_time('mysql')
-                ));
-                
-                return new \WP_Error(
-                    'rest_cookie_invalid_nonce',
-                    'Cookie controle mislukt',
-                    array(
-                        'status' => 403,
-                        'fresh_nonce' => wp_create_nonce('wp_rest')
-                    )
-                );
-            }
-        } else {
-            // Standard endpoint - check nonce from header
-            $nonce = $request->get_header('X-WP-Nonce');
-            if (!empty($nonce)) {
-                if (!wp_verify_nonce($nonce, 'wp_rest')) {
-                    $this->logger->warning('Nonce verification failed for IP: ' . $client_ip . ', generating fresh nonce');
-                    
-                    $this->event_logger->log_event(array(
-                        'event_name' => 'nonce_verification_failed',
-                        'event_status' => 'error',
-                        'reason' => 'Nonce verification failed for standard endpoint',
-                        'payload' => $request->get_body(),
-                        'headers' => $request->get_headers(),
-                        'ip_address' => $client_ip,
-                        'user_agent' => $request->get_header('user-agent'),
-                        'url' => $request->get_header('origin'),
-                        'referrer' => $request->get_header('referer'),
-                        'endpoint_type' => 'standard',
-                        'nonce_provided' => !empty($nonce),
-                        'timestamp' => current_time('mysql')
-                    ));
-                    
-                    // Return error with fresh nonce for JavaScript retry
-                    return new \WP_Error(
-                        'rest_cookie_invalid_nonce',
-                        'Cookie controle mislukt',
-                        array(
-                            'status' => 403,
-                            'freshNonce' => wp_create_nonce('wp_rest')
-                        )
-                    );
-                }
-            }
-        }
-        
         // Check if this session has already passed heavy validation
         $session_validated = isset($_SESSION[$this->validation_session_key]) && $_SESSION[$this->validation_session_key] === true;
 
@@ -1586,7 +1515,7 @@ class GA4_Server_Side_Tagging_Endpoint
             );
 
             // Add Worker API key authentication header
-            $worker_api_key = \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::retrieve_encrypted_key('ga4_worker_api_key');
+            $worker_api_key = \GA4_Encryption_Util::retrieve_encrypted_key('ga4_worker_api_key');
             if (!empty($worker_api_key)) {
                 $headers['Authorization'] = 'Bearer ' . $worker_api_key;
             }
@@ -1660,7 +1589,7 @@ class GA4_Server_Side_Tagging_Endpoint
             );
 
             // Add Worker API key authentication header
-            $worker_api_key = \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::retrieve_encrypted_key('ga4_worker_api_key');
+            $worker_api_key = \GA4_Encryption_Util::retrieve_encrypted_key('ga4_worker_api_key');
             if (!empty($worker_api_key)) {
                 $headers['Authorization'] = 'Bearer ' . $worker_api_key;
             }
@@ -1885,62 +1814,6 @@ class GA4_Server_Side_Tagging_Endpoint
             
             return false;
         } catch ( \Exception $e ) {
-            return false;
-        }
-    }
-
-    /**
-     * Verify WordPress nonce from encrypted JWT payload
-     *
-     * @since    1.0.0
-     * @param    \WP_REST_Request    $request    The request object.
-     * @return   bool                          Whether the nonce is valid.
-     */
-    private function verify_nonce_from_encrypted_payload($request)
-    {
-        try {
-            $request_body = $request->get_json_params();
-            
-            // Check for time-based JWT encryption first
-            if (isset($request_body['time_jwt']) && !empty($request_body['time_jwt'])) {
-           
-                // Decrypt the JWT to get the original payload
-                $decrypted_data = GA4_Encryption_Util::verify_time_based_jwt($request_body['time_jwt']);
-                
-                if ($decrypted_data === false) {
-                    $this->logger->warning('JWT verification failed for encrypted endpoint nonce check');
-                    return false;
-                }
-                
-                // Check if nonce is embedded in the decrypted payload
-                if (isset($decrypted_data['_wpnonce']) && !empty($decrypted_data['_wpnonce'])) {
-                    $embedded_nonce = $decrypted_data['_wpnonce'];
-        
-                    // Verify the embedded nonce
-                    $nonceVerificationResult = wp_verify_nonce($embedded_nonce, 'wp_rest');
-                    if (!$nonceVerificationResult) {
-                          $this->logger->warning(json_encode(array(
-                            'nonce_preview' => substr($embedded_nonce, 0, 10) . '...',
-                            'expected_action' => 'wp_rest'
-                        )), 'Embedded nonce verification failed in encrypted payload');
-                        return false;
-                    } else {
-                        return true;
-                    }
-                } else {
-                    $this->logger->warning(json_encode(array(
-                        'decrypted_keys' => is_array($decrypted_data) ? array_keys($decrypted_data) : 'not_array',
-                        'FULL_DECRYPTED_PAYLOAD_NO_NONCE' => $decrypted_data // Log complete payload when nonce missing
-                    )), 'No nonce found in encrypted payload');
-                    return false;
-                }
-            }
-            
-            $this->logger->warning('No time_jwt found in encrypted endpoint request');
-            return false;
-            
-        } catch (\Exception $e) {
-            $this->logger->error('Error verifying nonce from encrypted payload: ' . $e->getMessage());
             return false;
         }
     }

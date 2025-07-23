@@ -61,7 +61,7 @@
 
       // Log initialization
       this.log(
-        "%c GA4 Server-Side Tagging initialized v3",
+        "%c GA4 Server-Side Tagging initialized v1",
         "background: #4CAF50; color: white; font-size: 16px; font-weight: bold; padding: 8px 12px; border-radius: 4px;"
       );
     },
@@ -2864,12 +2864,7 @@
             'Content-Type': 'application/json',
             'X-Simple-request': 'true'
           };
-          
-          // Add X-WP-Nonce header if we have a nonce (for wp_rest_endpoint method)
-          const currentNonce = window.ga4ServerSideTagging?.nonce || this.config.nonce;
-          if (currentNonce) {
-            headers['X-WP-Nonce'] = currentNonce;
-          }
+    
 
           // Use fetch with proper headers for Cloudflare Worker
           fetch(this.config.cloudflareWorkerUrl, {
@@ -2949,7 +2944,6 @@
             "Referer": window.location.href,
             "Accept": "application/json, text/plain, */*",
             "Accept-Language": navigator.language || "en-US",
-            "X-WP-Nonce": window.ga4ServerSideTagging?.nonce || this.config.nonce || ""
           };
 
           fetch(endpoint, {
@@ -3200,11 +3194,7 @@
           'X-Simple-request': 'true'
         };
         
-        // Add X-WP-Nonce header if we have a nonce (for wp_rest_endpoint method)
-        const currentNonce = window.ga4ServerSideTagging?.nonce || this.config.nonce;
-        if (currentNonce) {
-          headers['X-WP-Nonce'] = currentNonce;
-        }
+   
 
         // Use sendBeacon for direct_to_cf as it's the fastest option
         const requestBody = JSON.stringify({

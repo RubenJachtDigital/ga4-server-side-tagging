@@ -169,7 +169,6 @@ class GA4_Server_Side_Tagging_Public
             'anonymizeIp' => (bool) get_option('ga4_anonymize_ip', true),
             'ga4TrackLoggedInUsers' => (bool) get_option('ga4_track_logged_in_users', true),
             'apiEndpoint' => rest_url('ga4-server-side-tagging/v1'),
-            'nonce' => wp_create_nonce('wp_rest'),
             'isEcommerceEnabled' => (bool) get_option('ga4_ecommerce_tracking', true),
             'yithRaqFormId' => get_option('ga4_yith_raq_form_id', ''),
             'conversionFormIds' => get_option('ga4_conversion_form_ids', ''),
@@ -271,56 +270,6 @@ class GA4_Server_Side_Tagging_Public
             'ga4ServerSideTagging',
             $script_data
         );
-
-        // Add inline script to refresh nonce via AJAX (cache-proof implementation)
-        $inline_nonce_script = '
-        (function() {
-            if (window.ga4ServerSideTagging) {
-                // Function to refresh nonce via AJAX
-                function refreshNonce() {
-                    var xhr = new XMLHttpRequest();
-                    xhr.open("POST", "' . admin_url('admin-ajax.php') . '", true);
-                    xhr.setRequestHeader("Content-Type", "application/x-www-form-urlencoded");
-                    
-                    xhr.onreadystatechange = function() {
-                        if (xhr.readyState === 4 && xhr.status === 200) {
-                            try {
-                                var response = JSON.parse(xhr.responseText);
-                                if (response.success && response.data.nonce) {
-                                    var oldNonce = window.ga4ServerSideTagging.nonce;
-                                    window.ga4ServerSideTagging.nonce = response.data.nonce;
-                                    window.ga4ServerSideTagging.nonceTimestamp = response.data.timestamp;
-                                    
-                                    // Debug logging to track nonce refresh
-                                    if (window.ga4ServerSideTagging.debugMode) {
-                                        console.log("[GA4 Nonce Refresh] Nonce updated via AJAX", {
-                                            oldNonce: oldNonce ? oldNonce.substring(0, 10) + "..." : "none",
-                                            newNonce: response.data.nonce.substring(0, 10) + "...",
-                                            timestamp: response.data.timestamp,
-                                            pageUrl: window.location.href
-                                        });
-                                    }
-                                } else {
-                                    console.error("[GA4 Nonce Refresh] Failed to refresh nonce:", response);
-                                }
-                            } catch (e) {
-                                console.error("[GA4 Nonce Refresh] Error parsing response:", e);
-                            }
-                        }
-                    };
-                    
-                    xhr.send("action=ga4_refresh_nonce");
-                }
-                
-                // Refresh nonce immediately on page load
-                refreshNonce();
-                
-                // Store refresh function globally for manual calls if needed
-                window.ga4ServerSideTagging.refreshNonce = refreshNonce;
-            }
-        })();
-        ';
-        wp_add_inline_script('ga4-server-side-tagging-public', $inline_nonce_script, 'after');
 
         // NOTE: Consent manager initialization is now handled by the main tracking script
         // to ensure proper tracking instance reference is passed
@@ -952,26 +901,5 @@ class GA4_Server_Side_Tagging_Public
      * 
      * @since 1.0.0
      */
-    public function ajax_refresh_nonce()
-    {
-        try {
-            // Generate fresh nonce
-            $fresh_nonce = wp_create_nonce('wp_rest');
-            
-            // Return JSON response with fresh nonce
-            wp_send_json_success(array(
-                'nonce' => $fresh_nonce,
-                'timestamp' => time(),
-                'message' => 'Nonce refreshed successfully'
-            ));
-            
-        } catch (\Exception $e) {
-            $this->logger->error('Failed to refresh nonce: ' . $e->getMessage());
-            wp_send_json_error(array(
-                'message' => 'Failed to refresh nonce',
-                'error' => $e->getMessage()
-            ));
-        }
-    }
-
+ 
 }

@@ -2210,11 +2210,7 @@
               // SECURITY: We don't add nonce to URL for sendBeacon as it's unsafe (logs/cache exposure)
               // Instead, encrypted endpoints use session-based validation
               const beaconUrl = endpoint;
-               // Add X-WP-Nonce header if we have a nonce (for wp_rest_endpoint method)
-              const currentNonce = window.ga4ServerSideTagging?.nonce || config.nonce;
-              if (currentNonce) {
-                    payload._wpnonce = currentNonce;
-              }
+             
               
               // For encrypted endpoints, encrypt the payload before sending
               if (shouldEncrypt && isEncryptedEndpoint) {
@@ -2295,55 +2291,11 @@
           return response;
         } catch (fetchError) {
           // Check if it's a nonce error and retry with fresh nonce
-          if (fetchError.message && fetchError.message.includes('rest_cookie_invalid_nonce')) {
-            GA4Utils.helpers.log(logPrefix + " Nonce expired, attempting retry with fresh nonce and new JWT", {
+          if (fetchError.message) {
+            GA4Utils.helpers.log(logPrefix + fetchError.message, {
               originalError: fetchError.message,
               endpoint: endpoint
             });
-            
-            try {
-              // Extract fresh nonce from error response if available
-              const errorData = JSON.parse(fetchError.message.split(': ')[1]);
-              if (errorData.data && errorData.data.fresh_nonce) {
-                // Update the global nonce
-                if (window.ga4ServerSideTagging) {
-                  const oldNonce = window.ga4ServerSideTagging.nonce;
-                  window.ga4ServerSideTagging.nonce = errorData.data.fresh_nonce;
-                  
-                  GA4Utils.helpers.log(logPrefix + " Updated global nonce", {
-                    oldNonce: oldNonce,
-                    newNonce: errorData.data.fresh_nonce
-                  });
-                }
-                
-                // For encrypted endpoints, we need to recreate the payload with fresh nonce
-                if (isWordPressEndpoint && shouldEncrypt && isEncryptedEndpoint) {
-                  GA4Utils.helpers.log(logPrefix + " Recreating encrypted payload with fresh nonce for retry");
-                  
-                  // The original payload needs to be re-encrypted with the new nonce
-                  // This requires access to the original unencrypted payload
-                  // Since we can't easily extract it, let's use a different approach:
-                  // Signal that a nonce refresh is needed and let the caller handle it
-                  const nonceError = new Error('NONCE_REFRESH_REQUIRED');
-                  nonceError.freshNonce = errorData.data.fresh_nonce;
-                  throw nonceError;
-                } else {
-                  // For non-encrypted requests, retry with updated global nonce
-                  GA4Utils.helpers.log(logPrefix + " Retrying non-encrypted request with fresh nonce from server response");
-                  const retryResponse = await this.sendPayloadFetch(endpoint, payload, config, logPrefix);
-                  return retryResponse;
-                }
-              }
-            } catch (retryError) {
-              // If it's our special nonce refresh signal, re-throw it
-              if (retryError.message === 'NONCE_REFRESH_REQUIRED') {
-                throw retryError;
-              }
-              
-              GA4Utils.helpers.log(logPrefix + " Retry with fresh nonce failed", {
-                retryError: retryError.message
-              });
-            }
           }
           
           // If not a nonce error or retry failed, throw original error
@@ -2389,7 +2341,6 @@
         // Add nonce for WordPress REST API endpoints and handle encryption
         if (config && config.apiEndpoint && endpoint.startsWith(config.apiEndpoint)) {
           // Use refreshed nonce if available, fallback to original config nonce
-          headers["X-WP-Nonce"] = window.ga4ServerSideTagging?.nonce || config.nonce || "";
           
           // Check if this is the send-event endpoint and encryption is enabled
           // Encrypt when using wp_rest_endpoint method with encryption enabled OR when using encrypted endpoint
@@ -2457,7 +2408,6 @@
           "Sending Fetch request to: " + endpoint,
           {
             encrypted: !!headers["X-Encrypted"],
-            hasNonce: !!headers["X-WP-Nonce"]
           },
           config,
           logPrefix
@@ -2557,16 +2507,6 @@
         // Check if endpoint uses HTTPS (security requirement)
         if (!endpoint.startsWith('https://')) {
           return { valid: false, reason: "insecure_endpoint_protocol" };
-        }
-
-
-        // Validate WordPress API endpoint
-        var isWordPressAPI = config && config.apiEndpoint && endpoint.startsWith(config.apiEndpoint);
-        if (isWordPressAPI) {
-          // Check nonce is present for WordPress API
-          if (!config.nonce) {
-            return { valid: false, reason: "missing_wordpress_auth" };
-          }
         }
 
         // Check payload is valid JSON-serializable object

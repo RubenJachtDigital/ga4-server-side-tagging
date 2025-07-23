@@ -299,7 +299,7 @@ class GA4_Cronjob_Manager
             }
 
             return false;
-        } catch (Exception $e) {
+        } catch (\Exception $e) {
             if ($this->logger) {
                 $this->logger->error("Event decryption failed: " . $e->getMessage());
             }
@@ -350,7 +350,7 @@ class GA4_Cronjob_Manager
                         'encrypted' => true,
                         'jwt' => $encrypted_payload
                     );
-                } catch (Exception $e) {
+                } catch (\Exception $e) {
                     if ($this->logger) {
                         $this->logger->error("Failed to encrypt batch payload with permanent key: " . $e->getMessage());
                     }
@@ -366,7 +366,7 @@ class GA4_Cronjob_Manager
         );
 
         // Add Worker API key authentication header
-        $worker_api_key = \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::retrieve_encrypted_key('ga4_worker_api_key');
+        $worker_api_key = \GA4_Encryption_Util::retrieve_encrypted_key('ga4_worker_api_key');
         if (!empty($worker_api_key)) {
             $headers['Authorization'] = 'Bearer ' . $worker_api_key;
         }
