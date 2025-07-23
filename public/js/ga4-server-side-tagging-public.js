@@ -2579,7 +2579,7 @@
           this.log("⚡ Direct to Cloudflare reliable transmission");
           await this.sendEventToCloudflareReliable(data, isCritical);
         } else if (transmissionMethod === 'wp_rest_endpoint') {
-          this.log("🛡️ WP Bot Check before sending to CF reliable transmission (balanced)");
+          this.log("🛡️ wp_rest_endpoint reliable transmission");
           await this.sendEventViaWordPressReliable(data, false, isCritical);
         } else {
           this.log("🔒 Secure WordPress to Cloudflare reliable transmission (always encrypted)");

@@ -336,7 +336,17 @@ $current_page = floor($offset / $limit) + 1;
                                             data-referrer="<?php echo esc_attr($event->referrer ?? ''); ?>"
                                             data-user-id="<?php echo esc_attr($event->user_id ?? ''); ?>"
                                             data-session-id="<?php echo esc_attr($event->session_id ?? ''); ?>"
-                                            data-consent-given="<?php echo esc_attr(is_null($event->consent_given) ? '' : ($event->consent_given ? 'true' : 'false')); ?>"
+                                            data-consent-given="<?php 
+                                                // Handle both boolean and integer values from database
+                                                if (is_null($event->consent_given)) {
+                                                    echo esc_attr('');
+                                                } else {
+                                                    // Convert to boolean first, then to string
+                                                    $consent_bool = (bool) $event->consent_given;
+                                                    echo esc_attr($consent_bool ? 'true' : 'false');
+                                                }
+                                            ?>"
+                                            data-consent-debug="<?php echo esc_attr('Raw: ' . var_export($event->consent_given, true) . ' | Type: ' . gettype($event->consent_given)); ?>"
                                             data-bot-rules="<?php echo esc_attr($event->bot_detection_rules ?? ''); ?>"
                                             data-cf-response="<?php echo esc_attr($event->cloudflare_response ?? ''); ?>"
                                             data-processing-time="<?php echo esc_attr($event->processing_time_ms ?? ''); ?>"
@@ -412,9 +422,69 @@ jQuery(document).ready(function($) {
         if (data.sessionId) {
             content += '<div><strong>Session:</strong> <code style="word-break: break-all;">' + htmlEscape(data.sessionId.substring(0, 20)) + '...</code></div>';
         }
-        var consentDisplay = data.consentGiven === 'true' ? '<span style="color: #28a745;">✅ Granted</span>' : 
-                           data.consentGiven === 'false' ? '<span style="color: #dc3545;">❌ Denied</span>' : 
+        // Try to get detailed consent info from payload first
+        var consentDetails = extractConsentFromPayload(data.payload);
+        var consentStatus = null;
+        
+        // If we have consent details from payload, determine status from that
+        if (consentDetails) {
+            if (consentDetails.consent_mode) {
+                // Legacy format
+                consentStatus = consentDetails.consent_mode === 'GRANTED';
+            } else if (consentDetails.ad_user_data && consentDetails.ad_personalization) {
+                // Modern format - both must be granted
+                consentStatus = (consentDetails.ad_user_data === 'GRANTED' && consentDetails.ad_personalization === 'GRANTED');
+            } else if (consentDetails.ad_user_data) {
+                // Only ad_user_data present
+                consentStatus = consentDetails.ad_user_data === 'GRANTED';
+            } else if (consentDetails.ad_personalization) {
+                // Only ad_personalization present  
+                consentStatus = consentDetails.ad_personalization === 'GRANTED';
+            }
+        }
+        
+        // Fallback to database field if payload parsing didn't work
+        if (consentStatus === null) {
+            // Handle various formats from database
+            if (data.consentGiven === 'true' || data.consentGiven === '1' || data.consentGiven === 1 || data.consentGiven === true) {
+                consentStatus = true;
+            } else if (data.consentGiven === 'false' || data.consentGiven === '0' || data.consentGiven === 0 || data.consentGiven === false) {
+                consentStatus = false;
+            }
+        }
+        
+        // Debug logging
+        console.log('Consent Debug:', {
+            'data.consentGiven': data.consentGiven,
+            'data.consentDebug': data.consentDebug,
+            'consentDetails': consentDetails,
+            'consentStatus from payload': consentStatus,
+            'final consentStatus': consentStatus
+        });
+        
+        // Generate display based on determined status
+        var consentDisplay = consentStatus === true ? '<span style="color: #28a745;">✅ Granted</span>' : 
+                           consentStatus === false ? '<span style="color: #dc3545;">❌ Denied</span>' : 
                            '<span style="color: #6c757d;">❓ Unknown</span>';
+        
+        // Add detailed consent summary if available
+        if (consentDetails) {
+            var consentSummary = '';
+            if (consentDetails.ad_user_data) {
+                consentSummary += 'Ad Data: ' + consentDetails.ad_user_data + ' ';
+            }
+            if (consentDetails.ad_personalization) {
+                consentSummary += 'Personalization: ' + consentDetails.ad_personalization + ' ';
+            }
+            if (consentDetails.consent_reason) {
+                consentSummary += '(' + consentDetails.consent_reason + ')';
+            }
+            
+            if (consentSummary) {
+                consentDisplay += '<br><small style="color: #666; font-size: 10px;">' + htmlEscape(consentSummary) + '</small>';
+            }
+        }
+        
         content += '<div><strong>Consent:</strong> ' + consentDisplay + '</div>';
         content += '</div>';
         if (data.url) {
@@ -433,11 +503,20 @@ jQuery(document).ready(function($) {
             content += '</div>';
         }
 
+        // Consent Information (extract from payload)
+        var consentData = extractConsentFromPayload(data.payload);
+        if (consentData) {
+            content += '<div style="background: #e8f5e8; border: 1px solid #4caf50; border-radius: 4px; padding: 15px; margin-bottom: 15px;">';
+            content += '<h3 style="margin: 0 0 10px 0; color: #2e7d2e; font-size: 14px;">🍪 Consent Information</h3>';
+            content += '<pre style="background: #fff; padding: 10px; border: 1px solid #dee2e6; border-radius: 3px; white-space: pre-wrap; word-wrap: break-word; max-height: 150px; overflow-y: auto; font-size: 11px; margin: 0; line-height: 1.4;">' + formatJson(JSON.stringify(consentData)) + '</pre>';
+            content += '</div>';
+        }
+
         // Payload
         if (data.payload) {
             content += '<div style="background: #f7fafc; border: 1px solid #a0aec0; border-radius: 4px; padding: 15px; margin-bottom: 15px;">';
-            content += '<h3 style="margin: 0 0 10px 0; color: #4a5568; font-size: 14px;">📦 Event Payload</h3>';
-            content += '<pre style="background: #fff; padding: 10px; border: 1px solid #dee2e6; border-radius: 3px; white-space: pre-wrap; word-wrap: break-word; max-height: 250px; overflow-y: auto; font-size: 11px; margin: 0;">' + formatJson(data.payload) + '</pre>';
+            content += '<h3 style="margin: 0 0 10px 0; color: #4a5568; font-size: 14px;">📦 Complete Request Payload</h3>';
+            content += '<pre style="background: #fff; padding: 10px; border: 1px solid #dee2e6; border-radius: 3px; white-space: pre-wrap; word-wrap: break-word; max-height: 250px; overflow-y: auto; font-size: 11px; margin: 0; line-height: 1.4;">' + formatJson(data.payload) + '</pre>';
             content += '</div>';
         }
 
@@ -453,7 +532,7 @@ jQuery(document).ready(function($) {
         if (data.headers) {
             content += '<div style="background: #f0f4f8; border: 1px solid #90cdf4; border-radius: 4px; padding: 15px; margin-bottom: 15px;">';
             content += '<h3 style="margin: 0 0 10px 0; color: #2b6cb0; font-size: 14px;">📋 Request Headers</h3>';
-            content += '<pre style="background: #fff; padding: 10px; border: 1px solid #dee2e6; border-radius: 3px; white-space: pre-wrap; word-wrap: break-word; max-height: 200px; overflow-y: auto; font-size: 11px; margin: 0;">' + formatJson(data.headers) + '</pre>';
+            content += '<pre style="background: #fff; padding: 10px; border: 1px solid #dee2e6; border-radius: 3px; white-space: pre-wrap; word-wrap: break-word; max-height: 200px; overflow-y: auto; font-size: 11px; margin: 0; line-height: 1.4;">' + formatJson(data.headers) + '</pre>';
             content += '</div>';
         }
 
@@ -504,12 +583,46 @@ jQuery(document).ready(function($) {
 
     function formatJson(jsonString) {
         if (!jsonString) return '';
+        
+        // If it's already an object, stringify it
+        if (typeof jsonString === 'object') {
+            try {
+                return JSON.stringify(jsonString, null, 2);
+            } catch (e) {
+                return htmlEscape(String(jsonString));
+            }
+        }
+        
+        // If it's a JSON string, parse and format it
         try {
             var obj = JSON.parse(jsonString);
             return JSON.stringify(obj, null, 2);
         } catch (e) {
-            return htmlEscape(jsonString);
+            // If it's not valid JSON, try to display it nicely anyway
+            var cleaned = htmlEscape(jsonString);
+            
+            // If it looks like query params or form data, format it
+            if (cleaned.includes('&') && cleaned.includes('=')) {
+                return cleaned.replace(/&/g, '\n&').replace(/=/g, ' = ');
+            }
+            
+            return cleaned;
         }
+    }
+
+    function extractConsentFromPayload(payloadString) {
+        if (!payloadString) return null;
+        
+        try {
+            var payload = JSON.parse(payloadString);
+            if (payload && payload.consent) {
+                return payload.consent;
+            }
+        } catch (e) {
+            // If parsing fails, return null
+        }
+        
+        return null;
     }
 });
 </script>

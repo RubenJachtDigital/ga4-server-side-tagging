@@ -681,25 +681,8 @@ class GA4_Server_Side_Tagging_Endpoint
         $client_ip = $this->get_client_ip($request);
         
         try {
-            // Check for Worker API key authentication (bypasses bot detection)
-            $auth_header = $request->get_header('authorization');
-            $is_authenticated = false;
-            
-            if ($auth_header && strpos($auth_header, 'Bearer ') === 0) {
-                $provided_token = substr($auth_header, 7); // Remove "Bearer " prefix
-                $worker_api_key = \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::retrieve_encrypted_key('ga4_worker_api_key');
-                
-                if (!empty($worker_api_key) && $provided_token === $worker_api_key) {
-                    $is_authenticated = true;
-                    $this->logger->info("Authenticated request from send-events endpoint - bypassing bot detection", json_encode(array(
-                        'ip' => $client_ip,
-                        'user_agent' => $request->get_header('user-agent')
-                    )));
-                }
-            }
-            
-            // Only perform bot detection if not authenticated
-            if (!$is_authenticated && $this->is_bot_request($request)) {
+            // Perform bot detection for all requests (no authentication bypass for client requests)
+            if ($this->is_bot_request($request)) {
                 // Log comprehensive bot detection details
                 $this->event_logger->log_event(array(
                     'event_name' => 'unknown_request',
@@ -838,23 +821,22 @@ class GA4_Server_Side_Tagging_Endpoint
             }
 
             // WordPress-side bot detection (mirrors Cloudflare Worker logic)
-            if (!$is_authenticated) {
-                $bot_detection_result = $this->detect_bot_from_event_data($request, $request_data);
-                if ($bot_detection_result['is_bot']) {
+            $bot_detection_result = $this->detect_bot_from_event_data($request, $request_data);
+            if ($bot_detection_result['is_bot']) {
                     // Log each event as bot detected
                     foreach ($request_data['events'] as $event) {
                         $this->event_logger->log_event(array(
                             'event_name' => $event['name'] ?? 'unknown',
                             'event_status' => 'bot_detected',
                             'reason' => 'WordPress-side bot detection: Score ' . $bot_detection_result['score'] . '/100',
-                            'payload' => json_encode($event),
+                            'payload' => $request->get_body(),
                             'headers' => $request->get_headers(),
                             'ip_address' => $client_ip,
                             'user_agent' => $request->get_header('user-agent'),
                             'url' => $request->get_header('origin'),
                             'referrer' => $request->get_header('referer'),
                             'session_id' => $session_id,
-                            'consent_given' => isset($request_data['consent']['consent_mode']) ? ($request_data['consent']['consent_mode'] === 'GRANTED') : null,
+                            'consent_given' => $this->extract_consent_status($request_data),
                             'bot_detection_rules' => array_merge($this->get_bot_detection_details($request), $bot_detection_result)
                         ));
                     }
@@ -877,11 +859,10 @@ class GA4_Server_Side_Tagging_Endpoint
                     ), 200);
                 }
                 
-                // Clean botData from all events after bot detection (before database storage)
-                foreach ($request_data['events'] as $index => $event) {
-                    if (isset($event['params']['botData'])) {
-                        unset($request_data['events'][$index]['params']['botData']);
-                    }
+            // Clean botData from all events after bot detection (before database storage)
+            foreach ($request_data['events'] as $index => $event) {
+                if (isset($event['params']['botData'])) {
+                    unset($request_data['events'][$index]['params']['botData']);
                 }
             }
 
@@ -897,7 +878,7 @@ class GA4_Server_Side_Tagging_Endpoint
                 if ($wp_cron_disabled) {
                     $this->logger->info('WP-Cron is disabled (DISABLE_WP_CRON=true), using direct sending instead of queue');
                 }
-                return $this->send_events_directly($request_data, $start_time, $session_id);
+                return $this->send_events_directly($request_data, $start_time, $session_id, $request);
             }
             
             // Queue events for batch processing instead of sending directly
@@ -956,14 +937,14 @@ class GA4_Server_Side_Tagging_Endpoint
                         'event_name' => $event['name'] ?? 'unknown',
                         'event_status' => 'allowed',
                         'reason' => 'Successfully queued for batch processing',
-                        'payload' => json_encode($event),
+                        'payload' => $request->get_body(),
                         'headers' => $request->get_headers(),
                         'ip_address' => $client_ip,
                         'user_agent' => $request->get_header('user-agent'),
                         'url' => $request->get_header('origin'),
                         'referrer' => $request->get_header('referer'),
                         'session_id' => $session_id,
-                        'consent_given' => isset($request_data['consent']['consent_mode']) ? ($request_data['consent']['consent_mode'] === 'GRANTED') : null,
+                        'consent_given' => $this->extract_consent_status($request_data),
                         'batch_size' => count($request_data['events']),
                         'transmission_method' => 'queued_batch'
                     ));
@@ -975,14 +956,14 @@ class GA4_Server_Side_Tagging_Endpoint
                         'event_name' => $event['name'] ?? 'unknown',
                         'event_status' => 'error',
                         'reason' => 'Failed to queue event for processing',
-                        'payload' => json_encode($event),
+                        'payload' => $request->get_body(),
                         'headers' => $request->get_headers(),
                         'ip_address' => $client_ip,
                         'user_agent' => $request->get_header('user-agent'),
                         'url' => $request->get_header('origin'),
                         'referrer' => $request->get_header('referer'),
                         'session_id' => $session_id,
-                        'consent_given' => isset($request_data['consent']['consent_mode']) ? ($request_data['consent']['consent_mode'] === 'GRANTED') : null,
+                        'consent_given' => $this->extract_consent_status($request_data),
                         'batch_size' => count($request_data['events']),
                         'transmission_method' => 'queued_batch'
                     ));
@@ -1018,9 +999,10 @@ class GA4_Server_Side_Tagging_Endpoint
      * @param    array  $request_data  The request data
      * @param    float  $start_time    The start time for performance measurement
      * @param    string $session_id    The session ID
+     * @param    \WP_REST_Request $request The original request object for logging
      * @return   \WP_REST_Response     The response
      */
-    private function send_events_directly($request_data, $start_time, $session_id)
+    private function send_events_directly($request_data, $start_time, $session_id, $request)
     {
         $event_count = count($request_data['events']);
 
@@ -1059,10 +1041,10 @@ class GA4_Server_Side_Tagging_Endpoint
                         'event_name' => $event['name'] ?? 'unknown',
                         'event_status' => 'allowed',
                         'reason' => 'Successfully sent directly to Cloudflare Worker (debug mode)',
-                        'payload' => json_encode($event),
+                        'payload' => $request->get_body(),
                         'ip_address' => $client_ip,
                         'session_id' => $session_id,
-                        'consent_given' => isset($request_data['consent']['consent_mode']) ? ($request_data['consent']['consent_mode'] === 'GRANTED') : null,
+                        'consent_given' => $this->extract_consent_status($request_data),
                         'cloudflare_response' => isset($result['worker_response']) ? $result['worker_response'] : 'Success',
                         'processing_time_ms' => $processing_time,
                         'batch_size' => count($request_data['events']),
@@ -1088,10 +1070,10 @@ class GA4_Server_Side_Tagging_Endpoint
                         'event_name' => $event['name'] ?? 'unknown',
                         'event_status' => 'error',
                         'reason' => 'Failed to send to Cloudflare Worker: ' . $result['error'],
-                        'payload' => json_encode($event),
+                        'payload' => $request->get_body(),
                         'ip_address' => $client_ip,
                         'session_id' => $session_id,
-                        'consent_given' => isset($request_data['consent']['consent_mode']) ? ($request_data['consent']['consent_mode'] === 'GRANTED') : null,
+                        'consent_given' => $this->extract_consent_status($request_data),
                         'cloudflare_response' => $result['error'],
                         'processing_time_ms' => $processing_time,
                         'batch_size' => count($request_data['events']),
@@ -1119,10 +1101,10 @@ class GA4_Server_Side_Tagging_Endpoint
                     'event_name' => $event['name'] ?? 'unknown',
                     'event_status' => 'allowed',
                     'reason' => 'Sent async to Cloudflare Worker (fire-and-forget)',
-                    'payload' => json_encode($event),
+                    'payload' => $request->get_body(),
                     'ip_address' => $client_ip,
                     'session_id' => $session_id,
-                    'consent_given' => isset($request_data['consent']['consent_mode']) ? ($request_data['consent']['consent_mode'] === 'GRANTED') : null,
+                    'consent_given' => $this->extract_consent_status($request_data),
                     'cloudflare_response' => 'Async request - no response',
                     'processing_time_ms' => $processing_time,
                     'batch_size' => count($request_data['events']),
@@ -2098,6 +2080,68 @@ class GA4_Server_Side_Tagging_Endpoint
             'score' => $score,
             'indicators' => $indicators
         );
+    }
+
+    /**
+     * Extract consent status from request data
+     *
+     * @since    2.1.0
+     * @param    array    $request_data    The request data containing consent info.
+     * @return   bool|null                Boolean consent status or null if unknown.
+     */
+    private function extract_consent_status($request_data)
+    {
+        // Debug logging
+        $this->logger->info('Extracting consent status from request_data', json_encode(array(
+            'has_consent_key' => isset($request_data['consent']),
+            'consent_data' => isset($request_data['consent']) ? $request_data['consent'] : 'not_set',
+            'request_data_keys' => array_keys($request_data)
+        )));
+        
+        if (!isset($request_data['consent']) || !is_array($request_data['consent'])) {
+            $this->logger->info('No consent data found or not array', json_encode($request_data['consent'] ?? 'not_set'));
+            return null;
+        }
+        
+        $consent = $request_data['consent'];
+        
+        // Check for legacy consent_mode field first
+        if (isset($consent['consent_mode'])) {
+            $result = $consent['consent_mode'] === 'GRANTED';
+            $this->logger->info('Using legacy consent_mode', json_encode(array('consent_mode' => $consent['consent_mode'], 'result' => $result)));
+            return $result;
+        }
+        
+        // Check modern consent fields (ad_user_data, ad_personalization)
+        $ad_user_data_granted = isset($consent['ad_user_data']) && $consent['ad_user_data'] === 'GRANTED';
+        $ad_personalization_granted = isset($consent['ad_personalization']) && $consent['ad_personalization'] === 'GRANTED';
+        
+        // If both fields are present, both must be granted for overall consent to be true
+        if (isset($consent['ad_user_data']) && isset($consent['ad_personalization'])) {
+            $result = $ad_user_data_granted && $ad_personalization_granted;
+            $this->logger->info('Using both modern consent fields', json_encode(array(
+                'ad_user_data' => $consent['ad_user_data'],
+                'ad_personalization' => $consent['ad_personalization'],
+                'result' => $result
+            )));
+            return $result;
+        }
+        
+        // If only one field is present, use that
+        if (isset($consent['ad_user_data'])) {
+            $result = $ad_user_data_granted;
+            $this->logger->info('Using ad_user_data only', json_encode(array('ad_user_data' => $consent['ad_user_data'], 'result' => $result)));
+            return $result;
+        }
+        
+        if (isset($consent['ad_personalization'])) {
+            $result = $ad_personalization_granted;
+            $this->logger->info('Using ad_personalization only', json_encode(array('ad_personalization' => $consent['ad_personalization'], 'result' => $result)));
+            return $result;
+        }
+        
+        $this->logger->info('No valid consent fields found', json_encode($consent));
+        return null;
     }
 
     /**
