@@ -193,10 +193,6 @@ class GA4_Cronjob_Manager
             return;
         }
 
-        if ($this->logger) {
-            $this->logger->debug("Processing " . count($events) . " events");
-        }
-
         // Group events for batch processing
         $batch_events = array();
         $event_ids = array();

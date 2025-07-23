@@ -137,6 +137,21 @@ class GA4_Server_Side_Tagging_Endpoint
             $nonce_verified = $this->verify_nonce_from_encrypted_payload($request);
             if (!$nonce_verified) {
                 $this->logger->warning('Nonce verification failed for encrypted endpoint from IP: ' . $client_ip);
+                
+                $this->event_logger->log_event(array(
+                    'event_name' => 'nonce_verification_failed',
+                    'event_status' => 'error',
+                    'reason' => 'Nonce verification failed for encrypted endpoint',
+                    'payload' => $request->get_body(),
+                    'headers' => $request->get_headers(),
+                    'ip_address' => $client_ip,
+                    'user_agent' => $request->get_header('user-agent'),
+                    'url' => $request->get_header('origin'),
+                    'referrer' => $request->get_header('referer'),
+                    'endpoint_type' => 'encrypted',
+                    'timestamp' => current_time('mysql')
+                ));
+                
                 return new \WP_Error(
                     'rest_cookie_invalid_nonce',
                     'Cookie controle mislukt',
@@ -152,6 +167,21 @@ class GA4_Server_Side_Tagging_Endpoint
             if (!empty($nonce)) {
                 if (!wp_verify_nonce($nonce, 'wp_rest')) {
                     $this->logger->warning('Nonce verification failed for IP: ' . $client_ip . ', generating fresh nonce');
+                    
+                    $this->event_logger->log_event(array(
+                        'event_name' => 'nonce_verification_failed',
+                        'event_status' => 'error',
+                        'reason' => 'Nonce verification failed for standard endpoint',
+                        'payload' => $request->get_body(),
+                        'headers' => $request->get_headers(),
+                        'ip_address' => $client_ip,
+                        'user_agent' => $request->get_header('user-agent'),
+                        'url' => $request->get_header('origin'),
+                        'referrer' => $request->get_header('referer'),
+                        'endpoint_type' => 'standard',
+                        'nonce_provided' => !empty($nonce),
+                        'timestamp' => current_time('mysql')
+                    ));
                     
                     // Return error with fresh nonce for JavaScript retry
                     return new \WP_Error(
@@ -649,7 +679,21 @@ class GA4_Server_Side_Tagging_Endpoint
         
         // Additional validation: Ensure request contains encrypted JWT data
         if (!isset($original_body['time_jwt']) || empty($original_body['time_jwt'])) {
-            $this->logger->warning('Encrypted endpoint accessed without encrypted payload from IP: ' . $this->get_client_ip($request));
+            $client_ip = $this->get_client_ip($request);
+            $this->logger->warning('Encrypted endpoint accessed without encrypted payload from IP: ' . $client_ip);
+            
+            $this->event_logger->log_event(array(
+                'event_name' => 'endpoint_access_violation',
+                'event_status' => 'error',
+                'reason' => 'Encrypted endpoint accessed without encrypted payload',
+                'payload' => $request->get_body(),
+                'headers' => $request->get_headers(),
+                'ip_address' => $client_ip,
+                'user_agent' => $request->get_header('user-agent'),
+                'url' => $request->get_header('origin'),
+                'referrer' => $request->get_header('referer')
+            ));
+            
             return new \WP_REST_Response(
                 array('error' => 'Invalid request format for encrypted endpoint'),
                 400
@@ -741,6 +785,20 @@ class GA4_Server_Side_Tagging_Endpoint
             // Validate batch request structure
             if (empty($request_data)) {
                 $this->logger->error("Empty request data received");
+                
+                $this->event_logger->log_event(array(
+                    'event_name' => 'data_validation_error',
+                    'event_status' => 'error',
+                    'reason' => 'Empty request data received',
+                    'payload' => $request->get_body(),
+                    'headers' => $request->get_headers(),
+                    'ip_address' => $client_ip,
+                    'user_agent' => $request->get_header('user-agent'),
+                    'url' => $request->get_header('origin'),
+                    'referrer' => $request->get_header('referer'),
+                    'session_id' => $session_id
+                ));
+                
                 return new \WP_REST_Response(array('error' => 'Invalid request data'), 400);
             }
 
@@ -748,16 +806,57 @@ class GA4_Server_Side_Tagging_Endpoint
             if (isset($request_data['events']) && is_array($request_data['events'])) {
                 // Unified batch structure - validate it
                 if (empty($request_data['events'])) {
+                    $this->event_logger->log_event(array(
+                        'event_name' => 'data_validation_error',
+                        'event_status' => 'error',
+                        'reason' => 'Empty events array received',
+                        'payload' => $request->get_body(),
+                        'headers' => $request->get_headers(),
+                        'ip_address' => $client_ip,
+                        'user_agent' => $request->get_header('user-agent'),
+                        'url' => $request->get_header('origin'),
+                        'referrer' => $request->get_header('referer'),
+                        'session_id' => $session_id
+                    ));
+                    
                     return new \WP_REST_Response(array('error' => 'Empty events array'), 400);
                 }
                 
                 // Validate each event in the batch
                 foreach ($request_data['events'] as $index => $event) {
                     if (!is_array($event)) {
+                        $this->event_logger->log_event(array(
+                            'event_name' => 'data_validation_error',
+                            'event_status' => 'error',
+                            'reason' => "Event at index {$index} is not an array",
+                            'payload' => $request->get_body(),
+                            'headers' => $request->get_headers(),
+                            'ip_address' => $client_ip,
+                            'user_agent' => $request->get_header('user-agent'),
+                            'url' => $request->get_header('origin'),
+                            'referrer' => $request->get_header('referer'),
+                            'session_id' => $session_id,
+                            'event_index' => $index
+                        ));
+                        
                         return new \WP_REST_Response(array('error' => "Event at index {$index} is not an array"), 400);
                     }
                     
                     if (!isset($event['name']) || empty($event['name'])) {
+                        $this->event_logger->log_event(array(
+                            'event_name' => 'data_validation_error',
+                            'event_status' => 'error',
+                            'reason' => "Missing event name at index {$index}",
+                            'payload' => $request->get_body(),
+                            'headers' => $request->get_headers(),
+                            'ip_address' => $client_ip,
+                            'user_agent' => $request->get_header('user-agent'),
+                            'url' => $request->get_header('origin'),
+                            'referrer' => $request->get_header('referer'),
+                            'session_id' => $session_id,
+                            'event_index' => $index
+                        ));
+                        
                         return new \WP_REST_Response(array('error' => "Missing event name at index {$index}"), 400);
                     }
                     
@@ -801,6 +900,19 @@ class GA4_Server_Side_Tagging_Endpoint
                 
                 
             } else {
+                $this->event_logger->log_event(array(
+                    'event_name' => 'data_validation_error',
+                    'event_status' => 'error',
+                    'reason' => 'Missing events array or single event data',
+                    'payload' => $request->get_body(),
+                    'headers' => $request->get_headers(),
+                    'ip_address' => $client_ip,
+                    'user_agent' => $request->get_header('user-agent'),
+                    'url' => $request->get_header('origin'),
+                    'referrer' => $request->get_header('referer'),
+                    'session_id' => $session_id
+                ));
+                
                 return new \WP_REST_Response(array('error' => 'Missing events array or single event data'), 400);
             }
 
@@ -982,6 +1094,22 @@ class GA4_Server_Side_Tagging_Endpoint
         } catch (\Exception $e) {
             $processing_time = round((microtime(true) - $start_time) * 1000, 2);
             $this->logger->error("Failed to process batch events request for session: {$session_id} after {$processing_time}ms: " . $e->getMessage());
+            
+            $this->event_logger->log_event(array(
+                'event_name' => 'system_error',
+                'event_status' => 'error',
+                'reason' => 'Processing exception: ' . $e->getMessage(),
+                'payload' => $request->get_body(),
+                'headers' => $request->get_headers(),
+                'ip_address' => $client_ip,
+                'user_agent' => $request->get_header('user-agent'),
+                'url' => $request->get_header('origin'),
+                'referrer' => $request->get_header('referer'),
+                'session_id' => $session_id,
+                'processing_time' => $processing_time,
+                'exception_trace' => $e->getTraceAsString()
+            ));
+            
             return new \WP_REST_Response(array('error' => 'Processing error'), 500);
         }
     }
@@ -1006,6 +1134,21 @@ class GA4_Server_Side_Tagging_Endpoint
         $encryption_key = GA4_Encryption_Util::retrieve_encrypted_key('ga4_jwt_encryption_key') ?: '';
         
         if (empty($cloudflare_url)) {
+            $client_ip = $this->get_client_ip($request);
+            
+            $this->event_logger->log_event(array(
+                'event_name' => 'configuration_error',
+                'event_status' => 'error',
+                'reason' => 'Cloudflare Worker URL not configured',
+                'payload' => $request->get_body(),
+                'headers' => $request->get_headers(),
+                'ip_address' => $client_ip,
+                'user_agent' => $request->get_header('user-agent'),
+                'url' => $request->get_header('origin'),
+                'referrer' => $request->get_header('referer'),
+                'session_id' => $session_id
+            ));
+            
             return new \WP_REST_Response(array('error' => 'Cloudflare Worker URL not configured'), 500);
         }
 
@@ -1566,6 +1709,19 @@ class GA4_Server_Side_Tagging_Endpoint
             ));
 
             if (is_wp_error($response)) {
+                $this->logger->error("HTTP request failed in debug mode: " . $response->get_error_message());
+                
+                $this->event_logger->log_event(array(
+                    'event_name' => 'system_error',
+                    'event_status' => 'error',
+                    'reason' => 'HTTP request failed in debug mode: ' . $response->get_error_message(),
+                    'error_code' => $response->get_error_code(),
+                    'context' => 'cloudflare_debug_communication',
+                    'url' => $cloudflare_url,
+                    'payload' => json_encode($body),
+                    'timestamp' => current_time('mysql')
+                ));
+                
                 return array('success' => false, 'error' => $response->get_error_message());
             }
 
@@ -1744,13 +1900,6 @@ class GA4_Server_Side_Tagging_Endpoint
     {
         try {
             $request_body = $request->get_json_params();
-            
-            // Debug: Log the raw request body
-            $this->logger->info(json_encode(array(
-                'has_time_jwt' => isset($request_body['time_jwt']),
-                'time_jwt_length' => isset($request_body['time_jwt']) ? strlen($request_body['time_jwt']) : 0,
-                'request_body_keys' => array_keys($request_body)
-            )), '[JWT Debug] Raw request body received:');
             
             // Check for time-based JWT encryption first
             if (isset($request_body['time_jwt']) && !empty($request_body['time_jwt'])) {

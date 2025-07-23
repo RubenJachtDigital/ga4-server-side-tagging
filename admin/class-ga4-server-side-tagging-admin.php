@@ -1159,6 +1159,20 @@ class GA4_Server_Side_Tagging_Admin
         ));
 
         if (is_wp_error($response)) {
+            // Log GA4 connection test failure for monitoring
+            if (class_exists('GA4_Event_Logger')) {
+                $event_logger = new GA4_Event_Logger();
+                $event_logger->log_event(array(
+                    'event_name' => 'connection_test_failed',
+                    'event_status' => 'error',
+                    'reason' => 'GA4 connection test failed: ' . $response->get_error_message(),
+                    'error_code' => $response->get_error_code(),
+                    'context' => 'ga4_connection_test',
+                    'url' => $url,
+                    'timestamp' => current_time('mysql')
+                ));
+            }
+            
             return array(
                 'success' => false,
                 'message' => 'Error: ' . $response->get_error_message(),
@@ -1232,6 +1246,20 @@ class GA4_Server_Side_Tagging_Admin
             $cloudflare_result['tested'] = true;
 
             if (is_wp_error($cloudflare_response)) {
+                // Log Cloudflare Worker connection test failure for monitoring
+                if (class_exists('GA4_Event_Logger')) {
+                    $event_logger = new GA4_Event_Logger();
+                    $event_logger->log_event(array(
+                        'event_name' => 'connection_test_failed',
+                        'event_status' => 'error',
+                        'reason' => 'Cloudflare Worker connection test failed: ' . $cloudflare_response->get_error_message(),
+                        'error_code' => $cloudflare_response->get_error_code(),
+                        'context' => 'cloudflare_worker_connection_test',
+                        'url' => $cloudflare_worker_url,
+                        'timestamp' => current_time('mysql')
+                    ));
+                }
+                
                 $cloudflare_result['message'] = 'Error: ' . $cloudflare_response->get_error_message();
             } else {
                 $cloudflare_response_code = wp_remote_retrieve_response_code($cloudflare_response);
