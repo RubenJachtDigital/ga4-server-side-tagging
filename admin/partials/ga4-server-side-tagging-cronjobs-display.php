@@ -315,7 +315,7 @@ $current_page = floor($offset / $limit) + 1;
                 </tr>
                 <tr>
                     <td><strong><?php echo esc_html__('Batch Size:', 'ga4-server-side-tagging'); ?></strong></td>
-                    <td><?php echo esc_html__('Up to', 'ga4-server-side-tagging'); ?> <?php echo number_format(get_option('ga4_cronjob_batch_size', 1000)); ?> <?php echo esc_html__('events per batch', 'ga4-server-side-tagging'); ?></td>
+                    <td><?php echo esc_html__('Up to', 'ga4-server-side-tagging'); ?> 1000 <?php echo esc_html__('events per batch', 'ga4-server-side-tagging'); ?></td>
                 </tr>
                 <tr>
                     <td><strong><?php echo esc_html__('WordPress Cron:', 'ga4-server-side-tagging'); ?></strong></td>

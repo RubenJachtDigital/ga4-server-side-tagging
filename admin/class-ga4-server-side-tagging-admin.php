@@ -506,31 +506,6 @@ class GA4_Server_Side_Tagging_Admin
             )
         );
 
-        // Cronjob Settings
-        register_setting(
-            'ga4_server_side_tagging_settings',
-            'ga4_cronjob_enabled',
-            array(
-                'type' => 'boolean',
-                'description' => 'Enable cronjob batch processing (disable to use direct sending)',
-                'sanitize_callback' => array($this, 'sanitize_checkbox'),
-                'show_in_rest' => false,
-                'default' => true,
-            )
-        );
-
-        register_setting(
-            'ga4_server_side_tagging_settings',
-            'ga4_cronjob_batch_size',
-            array(
-                'type' => 'integer',
-                'description' => 'Maximum number of events to process per batch',
-                'sanitize_callback' => array($this, 'sanitize_batch_size'),
-                'show_in_rest' => false,
-                'default' => 10000,
-            )
-        );
-
         register_setting(
             'ga4_server_side_tagging_settings',
             'ga4_cronjob_cleanup_days',

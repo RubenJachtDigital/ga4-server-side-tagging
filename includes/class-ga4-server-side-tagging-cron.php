@@ -96,10 +96,8 @@ class GA4_Server_Side_Tagging_Cron
      */
     public function maybe_schedule_crons()
     {
-        // Only schedule if cron processing is enabled
-        if (get_option('ga4_cronjob_enabled', true)) {
-            $this->schedule_cron_jobs();
-        }
+        $this->schedule_cron_jobs();
+
     }
 
     /**

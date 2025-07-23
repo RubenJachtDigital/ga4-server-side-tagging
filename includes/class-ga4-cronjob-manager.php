@@ -181,7 +181,7 @@ class GA4_Cronjob_Manager
         global $wpdb;
 
         // Get batch size setting
-        $batch_size = get_option('ga4_cronjob_batch_size', 1000);
+        $batch_size = 1000;
         
         // Get pending events
         $events = $wpdb->get_results($wpdb->prepare(
