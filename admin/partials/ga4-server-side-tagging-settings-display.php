@@ -20,6 +20,7 @@ $consent_deny_selector = get_option('ga4_consent_deny_selector', '.iubenda-cs-re
 $consent_default_timeout = get_option('ga4_consent_default_timeout', 0);
 $consent_timeout_action = get_option('ga4_consent_timeout_action', 'deny');
 $transmission_method = get_option('ga4_transmission_method', 'direct_to_cf');
+$disable_cf_proxy = get_option('ga4_disable_cf_proxy', false);
 $cloudflare_worker_url = get_option('ga4_cloudflare_worker_url', '');
 $jwt_encryption_enabled = get_option('ga4_jwt_encryption_enabled', false);
 $jwt_encryption_key = \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::retrieve_encrypted_key('ga4_jwt_encryption_key');
@@ -216,7 +217,17 @@ $disable_all_ip = get_option('ga4_disable_all_ip', false);
                                 </p>
                             </td>
                         </tr>
-                        <tr>
+                        <tr id="disable_cf_proxy_row" style="<?php echo $transmission_method === 'wp_rest_endpoint' ? '' : 'display: none;'; ?>">
+                            <th scope="row">Disable Cloudflare Proxy</th>
+                            <td>
+                                <label for="ga4_disable_cf_proxy">
+                                    <input type="checkbox" id="ga4_disable_cf_proxy" name="ga4_disable_cf_proxy" <?php checked($disable_cf_proxy); ?> />
+                                    Send directly to Google Analytics (bypass Cloudflare Worker)
+                                </label>
+                                <p class="description">When enabled, events will be sent directly to Google Analytics instead of through your Cloudflare Worker. Only encryption settings will be shown below.</p>
+                            </td>
+                        </tr>
+                        <tr id="cloudflare_worker_url_row" style="<?php echo ($transmission_method === 'wp_rest_endpoint' && $disable_cf_proxy) ? 'display: none;' : ''; ?>">
                             <th scope="row">
                                 <label for="ga4_cloudflare_worker_url">Cloudflare Worker URL</label>
                             </th>
@@ -230,7 +241,7 @@ $disable_all_ip = get_option('ga4_disable_all_ip', false);
                     </table>
 
                     <!-- Worker API Key Settings -->
-                    <div id="worker_api_settings" style="<?php echo $transmission_method === 'wp_rest_endpoint' ? '' : 'display: none;'; ?>">
+                    <div id="worker_api_settings" style="<?php echo ($transmission_method === 'wp_rest_endpoint' && !$disable_cf_proxy) ? '' : 'display: none;'; ?>">
                         <table class="form-table">
                             <tr>
                                 <th scope="row">
@@ -547,13 +558,34 @@ jQuery(document).ready(function($) {
     // Toggle encryption settings and worker API settings based on transmission method
     $('#ga4_transmission_method').change(function() {
         if ($(this).val() === 'wp_rest_endpoint') {
-            $('#worker_api_settings').show();
+            $('#disable_cf_proxy_row').show();
             $('#encryption_settings').show();
+            toggleCloudflareFields();
         } else {
+            $('#disable_cf_proxy_row').hide();
             $('#worker_api_settings').hide();
             $('#encryption_settings').hide();
+            $('#cloudflare_worker_url_row').show();
         }
     });
+
+    // Toggle Cloudflare-related fields based on disable CF proxy checkbox
+    $('#ga4_disable_cf_proxy').change(function() {
+        toggleCloudflareFields();
+    });
+
+    function toggleCloudflareFields() {
+        var isWpRestEndpoint = $('#ga4_transmission_method').val() === 'wp_rest_endpoint';
+        var disableCfProxy = $('#ga4_disable_cf_proxy').is(':checked');
+        
+        if (isWpRestEndpoint && disableCfProxy) {
+            $('#cloudflare_worker_url_row').hide();
+            $('#worker_api_settings').hide();
+        } else if (isWpRestEndpoint) {
+            $('#cloudflare_worker_url_row').show();
+            $('#worker_api_settings').show();
+        }
+    }
 
     // Toggle encryption key row based on JWT encryption checkbox
     $('#ga4_jwt_encryption_enabled').change(function() {

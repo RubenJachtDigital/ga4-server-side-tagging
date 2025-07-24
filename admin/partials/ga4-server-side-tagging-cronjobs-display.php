@@ -9,6 +9,89 @@
  * @subpackage GA4_Server_Side_Tagging/admin/partials
  */
 
+// Helper function to decrypt encrypted data
+function decrypt_event_data($encrypted_data) {
+    if (empty($encrypted_data)) {
+        return array('data' => '', 'was_encrypted' => false);
+    }
+    
+    // Check if the data is a JWT token (starts with eyJ which is base64 for {"typ":"JWT"})
+    if (strpos($encrypted_data, 'eyJ') === 0 && strpos($encrypted_data, '.') !== false) {
+        // This looks like a direct JWT token
+        return decrypt_jwt_token($encrypted_data);
+    }
+    
+    $parsed_data = json_decode($encrypted_data, true);
+    
+    // Check if it's a JSON object with jwt field
+    if (is_array($parsed_data) && isset($parsed_data['jwt'])) {
+        return decrypt_jwt_token($parsed_data['jwt']);
+    }
+    
+    // Not encrypted, return as formatted JSON if it's valid JSON
+    if (is_array($parsed_data)) {
+        return array(
+            'data' => wp_json_encode($parsed_data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES),
+            'was_encrypted' => false
+        );
+    }
+    
+    // Return as-is if not valid JSON
+    return array(
+        'data' => $encrypted_data,
+        'was_encrypted' => false
+    );
+}
+
+// Helper function to decrypt JWT tokens (same method as event monitor)
+function decrypt_jwt_token($jwt_token) {
+    if (empty($jwt_token)) {
+        return array('data' => '', 'was_encrypted' => false);
+    }
+    
+    // Check if the encryption util class exists
+    if (!class_exists('\GA4ServerSideTagging\Utilities\GA4_Encryption_Util')) {
+        return array('data' => $jwt_token, 'was_encrypted' => false);
+    }
+
+    try {
+        $encryption_enabled = get_option('ga4_jwt_encryption_enabled', false);
+        
+        if (!$encryption_enabled) {
+            return array('data' => $jwt_token, 'was_encrypted' => false);
+        }
+        
+        $encryption_key = \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::retrieve_encrypted_key('ga4_jwt_encryption_key');
+        if (!$encryption_key) {
+            return array('data' => $jwt_token, 'was_encrypted' => false);
+        }
+
+        // Try to decrypt with permanent key (same as event monitor)
+        $decrypted = \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::decrypt($jwt_token, $encryption_key);
+        if ($decrypted !== false) {
+            // Successfully decrypted - format as JSON if it's valid JSON
+            $formatted_data = $decrypted;
+            $json_data = json_decode($decrypted, true);
+            if (json_last_error() === JSON_ERROR_NONE) {
+                $formatted_data = wp_json_encode($json_data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+            }
+            
+            return array(
+                'data' => $formatted_data,
+                'was_encrypted' => true
+            );
+        }
+
+        // If decryption failed, return original (might not be encrypted)
+        return array('data' => $jwt_token, 'was_encrypted' => false);
+
+    } catch (\Exception $e) {
+        // Log decryption failure but don't break the display process
+        error_log('GA4 Cronjob Display: Failed to decrypt JWT token for display - ' . $e->getMessage());
+        return array('data' => $jwt_token, 'was_encrypted' => false);
+    }
+}
+
 // Handle manual trigger action
 if (isset($_POST['trigger_cronjob']) && wp_verify_nonce($_POST['_wpnonce'], 'ga4_trigger_cronjob')) {
     $this->cronjob_manager->trigger_manual_processing();
@@ -290,7 +373,31 @@ $current_page = floor($offset / $limit) + 1;
                                             data-processed="<?php echo esc_attr($event->processed_at ?: ''); ?>"
                                             data-retry-count="<?php echo esc_attr($event->retry_count); ?>"
                                             data-error="<?php echo esc_attr($event->error_message ?: ''); ?>"
-                                            data-event-data="<?php echo esc_attr($event->event_data ?: ''); ?>"
+                                            data-event-data="<?php 
+                                                $event_data_result = decrypt_event_data($event->event_data ?: '');
+                                                echo esc_attr($event_data_result['data']);
+                                            ?>"
+                                            data-event-data-encrypted="<?php 
+                                                $event_data_result = decrypt_event_data($event->event_data ?: '');
+                                                echo esc_attr($event_data_result['was_encrypted'] ? '1' : '0');
+                                            ?>"
+                                            data-final-payload="<?php 
+                                                $payload_result = decrypt_event_data($event->final_payload ?: '');
+                                                echo esc_attr($payload_result['data']);
+                                            ?>"
+                                            data-final-headers="<?php 
+                                                $headers_result = decrypt_event_data($event->final_headers ?: '');
+                                                echo esc_attr($headers_result['data']);
+                                            ?>"
+                                            data-payload-encrypted="<?php 
+                                                $payload_result = decrypt_event_data($event->final_payload ?: '');
+                                                echo esc_attr($payload_result['was_encrypted'] ? '1' : '0');
+                                            ?>"
+                                            data-headers-encrypted="<?php 
+                                                $headers_result = decrypt_event_data($event->final_headers ?: '');
+                                                echo esc_attr($headers_result['was_encrypted'] ? '1' : '0');
+                                            ?>"
+                                            data-is-encrypted="<?php echo esc_attr($event->is_encrypted ? '1' : '0'); ?>"
                                             style="font-size: 10px; padding: 3px 8px;">
                                         <?php echo esc_html__('View', 'ga4-server-side-tagging'); ?>
                                     </button>
@@ -405,9 +512,51 @@ jQuery(document).ready(function($) {
         if (data.eventData) {
             content += '<div style="background: #f7fafc; border: 1px solid #a0aec0; border-radius: 4px; padding: 15px; margin-bottom: 15px;">';
             content += '<h3 style="margin: 0 0 10px 0; color: #4a5568; font-size: 14px;">📦 Event Data</h3>';
+            
+            // Show encryption status if event data was encrypted
+            if (data.eventDataEncrypted === '1') {
+                content += '<div style="background: #d4edda; border: 1px solid #c3e6cb; border-radius: 3px; padding: 8px; margin-bottom: 10px; font-size: 12px; color: #155724;">';
+                content += '<strong>🔓 Decrypted Event Data:</strong> This event data was encrypted with JWT and has been decrypted for display.';
+                content += '</div>';
+            }
+            
             content += '<pre style="background: #fff; padding: 10px; border: 1px solid #dee2e6; border-radius: 3px; white-space: pre-wrap; word-wrap: break-word; max-height: 300px; overflow-y: auto; font-size: 11px; margin: 0; line-height: 1.4;">' + formatJson(data.eventData) + '</pre>';
             content += '</div>';
         }
+
+        // Show Final Headers earlier if available (move it up to show with event data)
+        if (data.finalHeaders) {
+            content += '<div style="background: #f0f8f0; border: 1px solid #28a745; border-radius: 4px; padding: 15px; margin-bottom: 15px;">';
+            content += '<h3 style="margin: 0 0 10px 0; color: #28a745; font-size: 14px;">📡 Request Headers (Final)</h3>';
+            
+            // Show encryption status if headers were encrypted
+            if (data.headersEncrypted === '1') {
+                content += '<div style="background: #d4edda; border: 1px solid #c3e6cb; border-radius: 3px; padding: 8px; margin-bottom: 10px; font-size: 12px; color: #155724;">';
+                content += '<strong>🔓 Decrypted Headers:</strong> These headers were encrypted with JWT and have been decrypted for display.';
+                content += '</div>';
+            }
+            
+            content += '<p style="color: #666; font-size: 12px; margin: 0 0 10px 0;">These are the HTTP headers that were sent to external services (GA4/Cloudflare).</p>';
+            content += '<pre style="background: #fff; padding: 10px; border: 1px solid #28a745; border-radius: 3px; white-space: pre-wrap; word-wrap: break-word; max-height: 200px; overflow-y: auto; font-size: 11px; margin: 0; line-height: 1.4;">' + formatJson(data.finalHeaders) + '</pre>';
+            content += '</div>';
+        }
+
+        // Final Payload Section
+        if (data.finalPayload) {
+            content += '<div style="background: #f1f8ff; border: 1px solid #0073aa; border-radius: 4px; padding: 15px; margin-bottom: 15px;">';
+            content += '<h3 style="margin: 0 0 10px 0; color: #0073aa; font-size: 14px;">🚀 Final Payload Sent</h3>';
+            
+            // Show encryption status if payload was encrypted
+            if (data.payloadEncrypted === '1') {
+                content += '<div style="background: #d4edda; border: 1px solid #c3e6cb; border-radius: 3px; padding: 8px; margin-bottom: 10px; font-size: 12px; color: #155724;">';
+                content += '<strong>🔓 Decrypted Payload:</strong> This payload was encrypted with JWT and has been decrypted for display.';
+                content += '</div>';
+            }
+            
+            content += '<pre style="background: #fff; padding: 10px; border: 1px solid #0073aa; border-radius: 3px; white-space: pre-wrap; word-wrap: break-word; max-height: 300px; overflow-y: auto; font-size: 11px; margin: 0; line-height: 1.4;">' + formatJson(data.finalPayload) + '</pre>';
+            content += '</div>';
+        }
+
 
         $('#queue-details-content').html(content);
         $('#queue-details-modal').show();

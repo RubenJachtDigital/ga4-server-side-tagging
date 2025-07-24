@@ -934,9 +934,7 @@ class GA4_Server_Side_Tagging_Endpoint
                     'event' => $event,
                     'consent' => $request_data['consent'] ?? null,
                     'batch' => $request_data['batch'] ?? false,
-                    'timestamp' => time(),
-                    'session_id' => $session_id,
-                    'client_ip' => $client_ip
+                    'timestamp' => time()
                 );
                 
                 // Re-encrypt with permanent key if:

@@ -104,6 +104,8 @@ class GA4_Cronjob_Manager
             id mediumint(9) NOT NULL AUTO_INCREMENT,
             event_data longtext NOT NULL,
             is_encrypted tinyint(1) DEFAULT 0,
+            final_payload longtext NULL,
+            final_headers longtext NULL,
             created_at datetime DEFAULT CURRENT_TIMESTAMP,
             processed_at datetime NULL,
             status varchar(20) DEFAULT 'pending',
@@ -243,8 +245,17 @@ class GA4_Cronjob_Manager
             return;
         }
 
-        // Send batch to Cloudflare
-        $success = $this->send_batch_to_cloudflare($batch_events, $batch_consent);
+        // Check if Cloudflare proxy is disabled (only for WP REST Endpoint method)
+        $transmission_method = get_option('ga4_transmission_method', 'direct_to_cf');
+        $disable_cf_proxy = get_option('ga4_disable_cf_proxy', false);
+        
+        if ($transmission_method === 'wp_rest_endpoint' && $disable_cf_proxy) {
+            // Send events individually to GA4
+            $success = $this->send_events_to_ga4($events, $batch_events);
+        } else {
+            // Send batch to Cloudflare
+            $success = $this->send_batch_to_cloudflare($batch_events, $batch_consent, $events);
+        }
 
         if ($success) {
             // Mark all events as processed
@@ -315,7 +326,7 @@ class GA4_Cronjob_Manager
      * @param    array    $batch_consent   Consent data for the batch.
      * @return   boolean  True if successful, false otherwise.
      */
-    private function send_batch_to_cloudflare($batch_events, $batch_consent = null)
+    private function send_batch_to_cloudflare($batch_events, $batch_consent = null, $events = null)
     {
         $worker_url = get_option('ga4_cloudflare_worker_url');
 
@@ -371,6 +382,13 @@ class GA4_Cronjob_Manager
             $headers['Authorization'] = 'Bearer ' . $worker_api_key;
         }
 
+        // Store final payload and headers for each event if events are provided
+        if ($events) {
+            foreach ($events as $event) {
+                $this->update_event_final_data($event->id, $payload, $headers);
+            }
+        }
+
         // Send request to Cloudflare Worker
         $response = wp_remote_post($worker_url, array(
             'headers' => $headers,
@@ -397,6 +415,216 @@ class GA4_Cronjob_Manager
             }
             return false;
         }
+    }
+
+    /**
+     * Send events individually to Google Analytics (bypass Cloudflare)
+     *
+     * @since    3.0.0
+     * @param    array    $events         The original event objects from database.
+     * @param    array    $batch_events   The processed event data.
+     * @return   bool     True if all events sent successfully, false otherwise.
+     */
+    private function send_events_to_ga4($events, $batch_events)
+    {
+        $measurement_id = get_option('ga4_measurement_id', '');
+        $api_secret = get_option('ga4_api_secret', '');
+        
+        if (empty($measurement_id) || empty($api_secret)) {
+            if ($this->logger) {
+                $this->logger->error("Missing GA4 measurement ID or API secret for direct transmission");
+            }
+            return false;
+        }
+        
+        $success_count = 0;
+        $total_events = count($batch_events);
+        
+        // Send each event individually
+        foreach ($batch_events as $index => $event_data) {
+            $original_event = $events[$index];
+            
+            // Prepare individual event payload for GA4
+            $payload = array(
+                'client_id' => $event_data['client_id'] ?? $this->generate_client_id(),
+                'events' => array($event_data)
+            );
+            
+            // Add user_id if present
+            if (isset($event_data['user_id'])) {
+                $payload['user_id'] = $event_data['user_id'];
+            }
+            
+            // Add timestamp if present
+            if (isset($event_data['timestamp_micros'])) {
+                $payload['timestamp_micros'] = $event_data['timestamp_micros'];
+            }
+            
+            // Check if encryption is enabled
+            $final_payload = $payload;
+            $jwt_encryption_enabled = get_option('ga4_jwt_encryption_enabled', false);
+            if ($jwt_encryption_enabled) {
+                $encryption_key = GA4_Encryption_Util::retrieve_encrypted_key('ga4_jwt_encryption_key');
+                if ($encryption_key) {
+                    try {
+                        // Create encrypted JWT token
+                        $jwt_token = GA4_Encryption_Util::create_time_jwt_token(wp_json_encode($payload));
+                        $final_payload = array('jwt' => $jwt_token);
+                    } catch (\Exception $e) {
+                        if ($this->logger) {
+                            $this->logger->error("Failed to encrypt event payload: " . $e->getMessage());
+                        }
+                        // Continue with unencrypted payload
+                    }
+                }
+            }
+            
+            $result = $this->send_single_event_to_ga4($final_payload, $measurement_id, $api_secret);
+            
+            // Store final payload and headers for display purposes
+            $this->update_event_final_data($original_event->id, $final_payload, $result['headers']);
+            
+            if ($result['success']) {
+                $success_count++;
+            } else {
+                // Mark individual event as failed
+                $this->mark_event_failed($original_event->id, "Failed to send event to GA4");
+            }
+        }
+        
+        if ($this->logger) {
+            $this->logger->info("Sent $success_count/$total_events events directly to GA4");
+        }
+        
+        // Return true if all events were sent successfully
+        return $success_count === $total_events;
+    }
+    
+    /**
+     * Send a single event directly to Google Analytics
+     *
+     * @since    3.0.0
+     * @param    array    $payload        The event payload.
+     * @param    string   $measurement_id The GA4 measurement ID.
+     * @param    string   $api_secret     The GA4 API secret.
+     * @return   array    Array with 'success' boolean and 'headers' array.
+     */
+    private function send_single_event_to_ga4($payload, $measurement_id, $api_secret)
+    {
+        $url = 'https://www.google-analytics.com/mp/collect?measurement_id=' . $measurement_id . '&api_secret=' . $api_secret;
+        
+        $headers = array(
+            'Content-Type' => 'application/json',
+            'User-Agent' => 'GA4-Server-Side-Tagging-Direct/3.0.0'
+        );
+        
+        $response = wp_remote_post($url, array(
+            'headers' => $headers,
+            'body' => wp_json_encode($payload),
+            'timeout' => 10,
+            'sslverify' => true
+        ));
+        
+        $result = array(
+            'success' => false,
+            'headers' => $headers
+        );
+        
+        if (is_wp_error($response)) {
+            if ($this->logger) {
+                $this->logger->error("Failed to send event to GA4: " . $response->get_error_message());
+            }
+            return $result;
+        }
+        
+        $response_code = wp_remote_retrieve_response_code($response);
+        
+        if ($response_code >= 200 && $response_code < 300) {
+            $result['success'] = true;
+        } else {
+            if ($this->logger) {
+                $this->logger->error("GA4 returned error code $response_code");
+            }
+        }
+        
+        return $result;
+    }
+    
+    /**
+     * Generate a client ID for GA4
+     *
+     * @since    3.0.0
+     * @return   string   The generated client ID.
+     */
+    private function generate_client_id()
+    {
+        return sprintf(
+            '%04x%04x-%04x-%04x-%04x-%04x%04x%04x',
+            mt_rand(0, 0xffff),
+            mt_rand(0, 0xffff),
+            mt_rand(0, 0xffff),
+            mt_rand(0, 0x0fff) | 0x4000,
+            mt_rand(0, 0x3fff) | 0x8000,
+            mt_rand(0, 0xffff),
+            mt_rand(0, 0xffff),
+            mt_rand(0, 0xffff)
+        );
+    }
+
+    /**
+     * Update event's final payload and headers
+     *
+     * @since    3.0.0
+     * @param    int      $event_id       The event ID.
+     * @param    array    $final_payload  The final payload that was sent.
+     * @param    array    $final_headers  The final headers that were sent.
+     */
+    private function update_event_final_data($event_id, $final_payload, $final_headers = array())
+    {
+        global $wpdb;
+        
+        // Prepare headers for storage - encrypt if encryption is enabled
+        $stored_headers = $final_headers;
+        $jwt_encryption_enabled = get_option('ga4_jwt_encryption_enabled', false);
+        
+        if ($jwt_encryption_enabled && !empty($final_headers)) {
+            $encryption_key = GA4_Encryption_Util::retrieve_encrypted_key('ga4_jwt_encryption_key');
+            if ($encryption_key) {
+                try {
+                    // Encrypt headers like payload
+                    $encrypted_headers = GA4_Encryption_Util::create_permanent_jwt_token(wp_json_encode($final_headers), $encryption_key);
+                    $stored_headers = array('encrypted' => true, 'jwt' => $encrypted_headers);
+                } catch (\Exception $e) {
+                    if ($this->logger) {
+                        $this->logger->error("Failed to encrypt headers: " . $e->getMessage());
+                    }
+                    // Continue with unencrypted headers
+                }
+            }
+        }
+        
+        $wpdb->update(
+            $this->table_name,
+            array(
+                'final_payload' => wp_json_encode($final_payload),
+                'final_headers' => wp_json_encode($stored_headers)
+            ),
+            array('id' => $event_id),
+            array('%s', '%s'),
+            array('%d')
+        );
+    }
+
+    /**
+     * Update event's final payload (backward compatibility)
+     *
+     * @since    3.0.0
+     * @param    int      $event_id      The event ID.
+     * @param    array    $final_payload The final payload that was sent.
+     */
+    private function update_event_final_payload($event_id, $final_payload)
+    {
+        $this->update_event_final_data($event_id, $final_payload, array());
     }
 
     /**
@@ -567,7 +795,7 @@ class GA4_Cronjob_Manager
             $orderby = 'created_at DESC';
         }
 
-        $query = "SELECT id, status, created_at, processed_at, retry_count, error_message 
+        $query = "SELECT id, status, created_at, processed_at, retry_count, error_message, event_data, final_payload, final_headers, is_encrypted
                   FROM $this->table_name 
                   $where_sql 
                   ORDER BY $orderby 

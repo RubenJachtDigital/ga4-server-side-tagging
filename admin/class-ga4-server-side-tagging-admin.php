@@ -957,6 +957,9 @@ class GA4_Server_Side_Tagging_Admin
             update_option('ga4_transmission_method', $transmission_method);
         }
 
+        // Disable Cloudflare Proxy setting
+        update_option('ga4_disable_cf_proxy', isset($_POST['ga4_disable_cf_proxy']));
+
         // GDPR Consent settings
         update_option('ga4_consent_mode_enabled', isset($_POST['ga4_consent_mode_enabled']));
         update_option('ga4_use_iubenda', isset($_POST['ga4_use_iubenda']));
