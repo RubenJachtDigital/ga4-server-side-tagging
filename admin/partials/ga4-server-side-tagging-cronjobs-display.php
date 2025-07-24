@@ -301,6 +301,8 @@ $current_page = floor($offset / $limit) + 1;
                         <tr>
                             <th style="width: 60px;"><?php echo esc_html__('ID', 'ga4-server-side-tagging'); ?></th>
                             <th style="width: 100px;"><?php echo esc_html__('Status', 'ga4-server-side-tagging'); ?></th>
+                            <th style="width: 120px;"><?php echo esc_html__('Transmission', 'ga4-server-side-tagging'); ?></th>
+                            <th style="width: 100px;"><?php echo esc_html__('Encryption', 'ga4-server-side-tagging'); ?></th>
                             <th style="width: 140px;"><?php echo esc_html__('Created', 'ga4-server-side-tagging'); ?></th>
                             <th style="width: 140px;"><?php echo esc_html__('Processed', 'ga4-server-side-tagging'); ?></th>
                             <th style="width: 80px;"><?php echo esc_html__('Retries', 'ga4-server-side-tagging'); ?></th>
@@ -330,6 +332,44 @@ $current_page = floor($offset / $limit) + 1;
                                     <span style="color: <?php echo esc_attr($color); ?>; font-weight: bold; font-size: 11px;">
                                         <?php echo $icon; ?> <?php echo esc_html(ucfirst($event->status)); ?>
                                     </span>
+                                </td>
+                                <td>
+                                    <?php
+                                    $transmission_method = $event->transmission_method ?? 'cloudflare';
+                                    $method_colors = array(
+                                        'cloudflare' => '#f48120',
+                                        'ga4_direct' => '#4285f4'
+                                    );
+                                    $method_labels = array(
+                                        'cloudflare' => 'Cloudflare',
+                                        'ga4_direct' => 'GA4 Direct'
+                                    );
+                                    $method_color = $method_colors[$transmission_method] ?? '#6c757d';
+                                    $method_label = $method_labels[$transmission_method] ?? ucfirst($transmission_method);
+                                    ?>
+                                    <span style="color: <?php echo esc_attr($method_color); ?>; font-weight: bold; font-size: 11px;">
+                                        <?php echo esc_html($method_label); ?>
+                                    </span>
+                                </td>
+                                <td>
+                                    <?php
+                                    $originally_encrypted = $event->was_originally_encrypted ?? false;
+                                    $payload_encrypted = $event->final_payload_encrypted ?? false;
+                                    
+                                    if ($originally_encrypted) {
+                                        echo '<span style="color: #28a745; font-size: 10px;">🔒 In</span>';
+                                    } else {
+                                        echo '<span style="color: #6c757d; font-size: 10px;">🔓 In</span>';
+                                    }
+                                    
+                                    echo '<br>';
+                                    
+                                    if ($payload_encrypted) {
+                                        echo '<span style="color: #28a745; font-size: 10px;">🔒 Out</span>';
+                                    } else {
+                                        echo '<span style="color: #6c757d; font-size: 10px;">🔓 Out</span>';
+                                    }
+                                    ?>
                                 </td>
                                 <td style="font-size: 11px;">
                                     <?php 

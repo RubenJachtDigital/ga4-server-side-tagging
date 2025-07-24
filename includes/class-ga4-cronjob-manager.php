@@ -106,6 +106,10 @@ class GA4_Cronjob_Manager
             is_encrypted tinyint(1) DEFAULT 0,
             final_payload longtext NULL,
             final_headers longtext NULL,
+            original_headers longtext NULL,
+            transmission_method varchar(50) DEFAULT 'cloudflare',
+            was_originally_encrypted tinyint(1) DEFAULT 0,
+            final_payload_encrypted tinyint(1) DEFAULT 0,
             created_at datetime DEFAULT CURRENT_TIMESTAMP,
             processed_at datetime NULL,
             status varchar(20) DEFAULT 'pending',
@@ -113,7 +117,8 @@ class GA4_Cronjob_Manager
             error_message text NULL,
             PRIMARY KEY (id),
             KEY status (status),
-            KEY created_at (created_at)
+            KEY created_at (created_at),
+            KEY transmission_method (transmission_method)
         ) $charset_collate;";
 
         require_once(ABSPATH . 'wp-admin/includes/upgrade.php');
@@ -144,11 +149,13 @@ class GA4_Cronjob_Manager
      * Queue an event for batch processing
      *
      * @since    2.0.0
-     * @param    array     $event_data    The event data to queue.
-     * @param    boolean   $is_encrypted  Whether the event data is encrypted.
+     * @param    array     $event_data              The event data to queue.
+     * @param    boolean   $is_encrypted            Whether the event data is encrypted.
+     * @param    array     $original_headers        Original request headers.
+     * @param    boolean   $was_originally_encrypted Whether the original request was encrypted.
      * @return   boolean   True if queued successfully, false otherwise.
      */
-    public function queue_event($event_data, $is_encrypted = false)
+    public function queue_event($event_data, $is_encrypted = false, $original_headers = array(), $was_originally_encrypted = false)
     {
         global $wpdb;
 
@@ -157,9 +164,11 @@ class GA4_Cronjob_Manager
             array(
                 'event_data' => is_array($event_data) ? wp_json_encode($event_data) : $event_data,
                 'is_encrypted' => $is_encrypted ? 1 : 0,
+                'original_headers' => wp_json_encode($original_headers),
+                'was_originally_encrypted' => $was_originally_encrypted ? 1 : 0,
                 'status' => 'pending'
             ),
-            array('%s', '%d', '%s')
+            array('%s', '%d', '%s', '%d', '%s')
         );
 
         if ($result === false) {
@@ -385,7 +394,9 @@ class GA4_Cronjob_Manager
         // Store final payload and headers for each event if events are provided
         if ($events) {
             foreach ($events as $event) {
-                $this->update_event_final_data($event->id, $payload, $headers);
+                // Check if payload was encrypted for Cloudflare
+                $payload_encrypted = (isset($payload['encrypted']) && $payload['encrypted'] === true);
+                $this->update_event_final_data($event->id, $payload, $headers, 'cloudflare', $event->was_originally_encrypted, $payload_encrypted);
             }
         }
 
@@ -460,29 +471,20 @@ class GA4_Cronjob_Manager
                 $payload['timestamp_micros'] = $event_data['timestamp_micros'];
             }
             
-            // Check if encryption is enabled
+            // GA4 payload should NEVER be encrypted when sending directly to Google Analytics
             $final_payload = $payload;
-            $jwt_encryption_enabled = get_option('ga4_jwt_encryption_enabled', false);
-            if ($jwt_encryption_enabled) {
-                $encryption_key = GA4_Encryption_Util::retrieve_encrypted_key('ga4_jwt_encryption_key');
-                if ($encryption_key) {
-                    try {
-                        // Create encrypted JWT token
-                        $jwt_token = GA4_Encryption_Util::create_time_jwt_token(wp_json_encode($payload));
-                        $final_payload = array('jwt' => $jwt_token);
-                    } catch (\Exception $e) {
-                        if ($this->logger) {
-                            $this->logger->error("Failed to encrypt event payload: " . $e->getMessage());
-                        }
-                        // Continue with unencrypted payload
-                    }
-                }
+            $payload_encrypted = false;
+            
+            // Get original headers from the queued event
+            $original_headers = array();
+            if (!empty($original_event->original_headers)) {
+                $original_headers = json_decode($original_event->original_headers, true) ?: array();
             }
             
-            $result = $this->send_single_event_to_ga4($final_payload, $measurement_id, $api_secret);
+            $result = $this->send_single_event_to_ga4($final_payload, $measurement_id, $api_secret, $original_headers);
             
             // Store final payload and headers for display purposes
-            $this->update_event_final_data($original_event->id, $final_payload, $result['headers']);
+            $this->update_event_final_data($original_event->id, $final_payload, $result['headers'], 'ga4_direct', $original_event->was_originally_encrypted, $payload_encrypted);
             
             if ($result['success']) {
                 $success_count++;
@@ -507,16 +509,26 @@ class GA4_Cronjob_Manager
      * @param    array    $payload        The event payload.
      * @param    string   $measurement_id The GA4 measurement ID.
      * @param    string   $api_secret     The GA4 API secret.
+     * @param    array    $original_headers Original request headers.
      * @return   array    Array with 'success' boolean and 'headers' array.
      */
-    private function send_single_event_to_ga4($payload, $measurement_id, $api_secret)
+    private function send_single_event_to_ga4($payload, $measurement_id, $api_secret, $original_headers = array())
     {
         $url = 'https://www.google-analytics.com/mp/collect?measurement_id=' . $measurement_id . '&api_secret=' . $api_secret;
         
+        // Start with default headers
         $headers = array(
             'Content-Type' => 'application/json',
             'User-Agent' => 'GA4-Server-Side-Tagging-Direct/3.0.0'
         );
+        
+        // Add relevant original headers for better tracking
+        $relevant_headers = array('User-Agent', 'Accept-Language', 'Accept', 'Referer');
+        foreach ($relevant_headers as $header_name) {
+            if (isset($original_headers[$header_name])) {
+                $headers[$header_name] = $original_headers[$header_name];
+            }
+        }
         
         $response = wp_remote_post($url, array(
             'headers' => $headers,
@@ -575,11 +587,14 @@ class GA4_Cronjob_Manager
      * Update event's final payload and headers
      *
      * @since    3.0.0
-     * @param    int      $event_id       The event ID.
-     * @param    array    $final_payload  The final payload that was sent.
-     * @param    array    $final_headers  The final headers that were sent.
+     * @param    int      $event_id                The event ID.
+     * @param    array    $final_payload           The final payload that was sent.
+     * @param    array    $final_headers           The final headers that were sent.
+     * @param    string   $transmission_method     The transmission method used.
+     * @param    boolean  $was_originally_encrypted Whether the original request was encrypted.
+     * @param    boolean  $final_payload_encrypted Whether the final payload was encrypted.
      */
-    private function update_event_final_data($event_id, $final_payload, $final_headers = array())
+    private function update_event_final_data($event_id, $final_payload, $final_headers = array(), $transmission_method = 'cloudflare', $was_originally_encrypted = false, $final_payload_encrypted = false)
     {
         global $wpdb;
         
@@ -607,10 +622,13 @@ class GA4_Cronjob_Manager
             $this->table_name,
             array(
                 'final_payload' => wp_json_encode($final_payload),
-                'final_headers' => wp_json_encode($stored_headers)
+                'final_headers' => wp_json_encode($stored_headers),
+                'transmission_method' => $transmission_method,
+                'was_originally_encrypted' => $was_originally_encrypted ? 1 : 0,
+                'final_payload_encrypted' => $final_payload_encrypted ? 1 : 0
             ),
             array('id' => $event_id),
-            array('%s', '%s'),
+            array('%s', '%s', '%s', '%d', '%d'),
             array('%d')
         );
     }
@@ -795,7 +813,7 @@ class GA4_Cronjob_Manager
             $orderby = 'created_at DESC';
         }
 
-        $query = "SELECT id, status, created_at, processed_at, retry_count, error_message, event_data, final_payload, final_headers, is_encrypted
+        $query = "SELECT id, status, created_at, processed_at, retry_count, error_message, event_data, final_payload, final_headers, original_headers, transmission_method, was_originally_encrypted, final_payload_encrypted, is_encrypted
                   FROM $this->table_name 
                   $where_sql 
                   ORDER BY $orderby 

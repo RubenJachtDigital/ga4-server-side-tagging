@@ -959,8 +959,14 @@ class GA4_Server_Side_Tagging_Endpoint
                     }
                 }
                 
+                // Get original request headers
+                $original_headers = array();
+                foreach ($request->get_headers() as $key => $value) {
+                    $original_headers[$key] = is_array($value) ? implode(', ', $value) : $value;
+                }
+                
                 // Queue the event
-                $queued = $this->cronjob_manager->queue_event($event_data, $should_encrypt);
+                $queued = $this->cronjob_manager->queue_event($event_data, $should_encrypt, $original_headers, $was_originally_encrypted);
                 
                 if ($queued) {
                     $queued_events++;
