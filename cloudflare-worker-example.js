@@ -1964,7 +1964,7 @@ async function handleGA4Event(payload, request) {
     'x_real_ip': 'X-Real-IP'
   };
   
-  // Process and map headers from WordPress
+  // Process and map headers from WordPress payload first
   for (const [wpKey, httpHeader] of Object.entries(headerMapping)) {
     if (originalHeaders[wpKey]) {
       ga4RequestHeaders[httpHeader] = originalHeaders[wpKey];
@@ -1976,6 +1976,32 @@ async function handleGA4Event(payload, request) {
   for (const headerName of directHeaderNames) {
     if (originalHeaders[headerName] && !ga4RequestHeaders[headerName]) {
       ga4RequestHeaders[headerName] = originalHeaders[headerName];
+    }
+  }
+  
+  // Fallback: If headers aren't defined in payload, use headers from Cloudflare request
+  const essentialHeaders = ['User-Agent', 'Accept-Language', 'Accept', 'Referer'];
+  for (const headerName of essentialHeaders) {
+    if (!ga4RequestHeaders[headerName]) {
+      const cfHeaderValue = request.headers.get(headerName);
+      if (cfHeaderValue) {
+        ga4RequestHeaders[headerName] = cfHeaderValue;
+      }
+    }
+  }
+  
+  // Special handling for IP headers - prefer Cloudflare's IP detection
+  if (!ga4RequestHeaders['X-Forwarded-For']) {
+    const cfConnectingIP = request.headers.get('CF-Connecting-IP');
+    const xForwardedFor = request.headers.get('X-Forwarded-For');
+    const xRealIP = request.headers.get('X-Real-IP');
+    
+    if (cfConnectingIP) {
+      ga4RequestHeaders['X-Forwarded-For'] = cfConnectingIP;
+    } else if (xForwardedFor) {
+      ga4RequestHeaders['X-Forwarded-For'] = xForwardedFor;
+    } else if (xRealIP) {
+      ga4RequestHeaders['X-Forwarded-For'] = xRealIP;
     }
   }
   
