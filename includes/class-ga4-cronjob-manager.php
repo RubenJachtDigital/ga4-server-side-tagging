@@ -256,14 +256,6 @@ class GA4_Cronjob_Manager
             return;
         }
 
-        // Debug log batch consent extraction
-        if (get_option('ga4_server_side_tagging_debug_mode')) {
-            if ($batch_consent) {
-                $this->logger->log('INFO', 'Batch consent extracted successfully: ' . json_encode($batch_consent));
-            } else {
-                $this->logger->log('INFO', 'No batch consent found, processed ' . count($batch_events) . ' events');
-            }
-        }
         
         // Simple check: if disable CF proxy is enabled, use direct GA4
         $disable_cf_proxy = get_option('ga4_disable_cf_proxy', false);
@@ -491,16 +483,6 @@ class GA4_Cronjob_Manager
         $success_count = 0;
         $total_events = count($batch_events);
         
-        // Debug log what we're about to process
-        if (get_option('ga4_server_side_tagging_debug_mode')) {
-            $this->logger->log('INFO', 'Processing ' . count($batch_events) . ' events for direct GA4 transmission');
-            if ($batch_consent) {
-                $this->logger->log('INFO', 'Using batch consent: ' . json_encode($batch_consent));
-            } else {
-                $this->logger->log('INFO', 'No batch consent available for direct GA4 transmission');
-            }
-        }
-        
         // Send each event individually
         foreach ($batch_events as $index => $event_data) {
             $original_event = $events[$index];
@@ -600,19 +582,6 @@ class GA4_Cronjob_Manager
             }
         }
         
-        // Debug logging to understand consent data extraction
-        if (get_option('ga4_server_side_tagging_debug_mode')) {
-            if ($consent_data) {
-                $this->logger->log('INFO', 'Direct GA4: Found consent data: ' . json_encode($consent_data));
-            } else {
-                $this->logger->log('INFO', 'Direct GA4: No consent data found. Event data keys: ' . json_encode(array_keys($event_data)));
-                $original_event_data = json_decode($original_event->event_data, true);
-                if ($original_event_data) {
-                    $this->logger->log('INFO', 'Direct GA4: Original event data keys: ' . json_encode(array_keys($original_event_data)));
-                }
-            }
-        }
-        
         // Always include consent data at top level since it's available and important for GA4
         if ($consent_data) {
             // Include ONLY the 2 allowed consent fields (ad_user_data and ad_personalization)
@@ -697,12 +666,6 @@ class GA4_Cronjob_Manager
             
             $ad_personalization = isset($consent_data['ad_personalization']) ? $consent_data['ad_personalization'] : 'DENIED';
             $ad_user_data = isset($consent_data['ad_user_data']) ? $consent_data['ad_user_data'] : 'DENIED';
-            
-            // Debug log the consent data we're using
-            if (get_option('ga4_server_side_tagging_debug_mode')) {
-                $this->logger->log('INFO', "Direct GA4: Creating consent string - ad_personalization: {$ad_personalization}, ad_user_data: {$ad_user_data}, reason: {$consent_reason}");
-                $this->logger->log('INFO', 'Direct GA4: Full consent data: ' . json_encode($consent_data));
-            }
             
             $ga4_payload['events'][0]['params']['consent'] = "ad_personalization: {$ad_personalization}. ad_user_data: {$ad_user_data}. reason: {$consent_reason}";
         } else {

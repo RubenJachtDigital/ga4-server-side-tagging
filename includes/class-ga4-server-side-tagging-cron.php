@@ -168,10 +168,7 @@ class GA4_Server_Side_Tagging_Cron
                 $this->update_performance_metrics($result['events_processed'], $processing_time);
                 
             } else if ($result['success'] && $result['events_processed'] === 0) {
-                // No events to process - this is normal, only log in debug mode
-                if (get_option('ga4_server_side_tagging_debug_mode', false)) {
-                    $this->logger->info('Cron job completed - no events in queue');
-                }
+            
             } else {
                 $this->logger->error('Cron job failed to process events: ' . $result['error']);
             }
