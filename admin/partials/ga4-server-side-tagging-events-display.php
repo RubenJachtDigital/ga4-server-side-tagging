@@ -21,9 +21,16 @@ $event_logger = new GA4_Event_Logger();
 // Handle cleanup action
 if (isset($_POST['cleanup_logs']) && wp_verify_nonce($_POST['_wpnonce'], 'ga4_cleanup_logs')) {
     $days = intval($_POST['cleanup_days']) ?: 30;
+    
+    // Save the cleanup days setting for Event Monitor
+    update_option('ga4_event_logs_cleanup_days', $days);
+    
     $cleaned = $event_logger->cleanup_old_logs($days);
     echo '<div class="notice notice-success is-dismissible"><p>Cleaned up ' . $cleaned . ' event logs older than ' . $days . ' days.</p></div>';
 }
+
+// Get the saved cleanup days setting for Event Monitor (default: 30 days)
+$event_logs_cleanup_days = get_option('ga4_event_logs_cleanup_days', 30);
 
 // Get filter parameters
 $filter_status = isset($_GET['filter_status']) ? sanitize_text_field($_GET['filter_status']) : '';
@@ -85,8 +92,8 @@ $current_page = floor($offset / $limit) + 1;
                 <tr>
                     <td><strong style="color: #dc3545;"><?php echo esc_html__('Denied Events:', 'ga4-server-side-tagging'); ?></strong></td>
                     <td><?php echo number_format($stats['denied']); ?></td>
-                    <td><strong><?php echo esc_html__('Avg Processing:', 'ga4-server-side-tagging'); ?></strong></td>
-                    <td><?php echo $stats['avg_processing_time'] . 'ms'; ?></td>
+                    <td></td>
+                    <td></td>
                 </tr>
                 <tr>
                     <td><strong style="color: #ffc107;"><?php echo esc_html__('Bot Detected:', 'ga4-server-side-tagging'); ?></strong></td>
@@ -176,7 +183,7 @@ $current_page = floor($offset / $limit) + 1;
         <form method="post" style="display: inline-block;">
             <?php wp_nonce_field('ga4_cleanup_logs'); ?>
             <label for="cleanup_days"><?php echo esc_html__('Clean up logs older than:', 'ga4-server-side-tagging'); ?></label>
-            <input type="number" id="cleanup_days" name="cleanup_days" value="30" min="1" max="365" style="width: 60px;">
+            <input type="number" id="cleanup_days" name="cleanup_days" value="<?php echo esc_attr($event_logs_cleanup_days); ?>" min="1" max="365" style="width: 60px;">
             <span><?php echo esc_html__('days', 'ga4-server-side-tagging'); ?></span>
             <input type="submit" name="cleanup_logs" class="button" value="<?php echo esc_attr__('Cleanup Old Logs', 'ga4-server-side-tagging'); ?>"
                    onclick="return confirm('<?php echo esc_js(__('Are you sure you want to delete old event logs?', 'ga4-server-side-tagging')); ?>');">
@@ -252,7 +259,6 @@ $current_page = floor($offset / $limit) + 1;
                             <th style="width: 100px;"><?php echo esc_html__('Status', 'ga4-server-side-tagging'); ?></th>
                             <th><?php echo esc_html__('Reason', 'ga4-server-side-tagging'); ?></th>
                             <th style="width: 120px;"><?php echo esc_html__('IP Address', 'ga4-server-side-tagging'); ?></th>
-                            <th style="width: 80px;"><?php echo esc_html__('Processing', 'ga4-server-side-tagging'); ?></th>
                             <th style="width: 140px;"><?php echo esc_html__('Created At', 'ga4-server-side-tagging'); ?></th>
                             <th style="width: 80px;"><?php echo esc_html__('Details', 'ga4-server-side-tagging'); ?></th>
                         </tr>
@@ -305,16 +311,6 @@ $current_page = floor($offset / $limit) + 1;
                                         </small>
                                     <?php endif; ?>
                                 </td>
-                                <td>
-                                    <?php if ($event->processing_time_ms): ?>
-                                        <span style="font-size: 11px;"><?php echo number_format($event->processing_time_ms, 1); ?>ms</span>
-                                    <?php else: ?>
-                                        <span style="color: #999;">-</span>
-                                    <?php endif; ?>
-                                    <?php if ($event->transmission_method): ?>
-                                        <br><small style="color: #666;"><?php echo esc_html($event->transmission_method); ?></small>
-                                    <?php endif; ?>
-                                </td>
                                 <td style="font-size: 11px;">
                                     <?php 
                                     $date = new DateTime($event->created_at);
@@ -349,7 +345,6 @@ $current_page = floor($offset / $limit) + 1;
                                             data-consent-debug="<?php echo esc_attr('Raw: ' . var_export($event->consent_given, true) . ' | Type: ' . gettype($event->consent_given)); ?>"
                                             data-bot-rules="<?php echo esc_attr($event->bot_detection_rules ?? ''); ?>"
                                             data-cf-response="<?php echo esc_attr($event->cloudflare_response ?? ''); ?>"
-                                            data-processing-time="<?php echo esc_attr($event->processing_time_ms ?? ''); ?>"
                                             data-batch-size="<?php echo esc_attr($event->batch_size ?? ''); ?>"
                                             data-transmission="<?php echo esc_attr($event->transmission_method ?? ''); ?>"
                                             data-created-at="<?php echo esc_attr($event->created_at); ?>"
@@ -396,9 +391,6 @@ jQuery(document).ready(function($) {
         content += '<div><strong>Event:</strong> <code>' + htmlEscape(data.eventName) + '</code></div>';
         content += '<div><strong>Status:</strong> ' + getStatusDisplay(data.eventStatus) + '</div>';
         content += '<div><strong>Date:</strong> ' + htmlEscape(data.createdAt) + '</div>';
-        if (data.processingTime) {
-            content += '<div><strong>Processing:</strong> ' + data.processingTime + 'ms</div>';
-        }
         if (data.batchSize > 1) {
             content += '<div><strong>Batch Size:</strong> ' + data.batchSize + ' events</div>';
         }

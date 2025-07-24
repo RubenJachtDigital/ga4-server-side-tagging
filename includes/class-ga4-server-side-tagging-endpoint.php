@@ -616,7 +616,7 @@ class GA4_Server_Side_Tagging_Endpoint
                 'event_status' => 'error',
                 'reason' => 'Encrypted endpoint accessed without encrypted payload',
                 'payload' => $request->get_body(),
-                'headers' => $request->get_headers(),
+                'headers' => $this->get_essential_headers($request),
                 'ip_address' => $client_ip,
                 'user_agent' => $request->get_header('user-agent'),
                 'url' => $request->get_header('origin'),
@@ -655,7 +655,7 @@ class GA4_Server_Side_Tagging_Endpoint
                     'event_status' => 'bot_detected',
                     'reason' => 'Multi-factor bot detection triggered',
                     'payload' => $request->get_body(),
-                    'headers' => $request->get_headers(),
+                    'headers' => $this->get_essential_headers($request),
                     'ip_address' => $client_ip,
                     'user_agent' => $request->get_header('user-agent'),
                     'url' => $request->get_header('origin'),
@@ -687,7 +687,7 @@ class GA4_Server_Side_Tagging_Endpoint
                     'event_status' => 'denied',
                     'reason' => 'Rate limit exceeded: ' . $rate_limit_check['retry_after'] . 's retry',
                     'payload' => substr($request->get_body(), 0, 1000) . '...', // Truncate large payloads
-                    'headers' => $request->get_headers(),
+                    'headers' => $this->get_essential_headers($request),
                     'ip_address' => $client_ip,
                     'user_agent' => $request->get_header('user-agent'),
                     'url' => $request->get_header('origin'),
@@ -720,7 +720,7 @@ class GA4_Server_Side_Tagging_Endpoint
                     'event_status' => 'error',
                     'reason' => 'Empty request data received',
                     'payload' => $request->get_body(),
-                    'headers' => $request->get_headers(),
+                    'headers' => $this->get_essential_headers($request),
                     'ip_address' => $client_ip,
                     'user_agent' => $request->get_header('user-agent'),
                     'url' => $request->get_header('origin'),
@@ -740,7 +740,7 @@ class GA4_Server_Side_Tagging_Endpoint
                         'event_status' => 'error',
                         'reason' => 'Empty events array received',
                         'payload' => $request->get_body(),
-                        'headers' => $request->get_headers(),
+                        'headers' => $this->get_essential_headers($request),
                         'ip_address' => $client_ip,
                         'user_agent' => $request->get_header('user-agent'),
                         'url' => $request->get_header('origin'),
@@ -759,7 +759,7 @@ class GA4_Server_Side_Tagging_Endpoint
                             'event_status' => 'error',
                             'reason' => "Event at index {$index} is not an array",
                             'payload' => $request->get_body(),
-                            'headers' => $request->get_headers(),
+                            'headers' => $this->get_essential_headers($request),
                             'ip_address' => $client_ip,
                             'user_agent' => $request->get_header('user-agent'),
                             'url' => $request->get_header('origin'),
@@ -777,7 +777,7 @@ class GA4_Server_Side_Tagging_Endpoint
                             'event_status' => 'error',
                             'reason' => "Missing event name at index {$index}",
                             'payload' => $request->get_body(),
-                            'headers' => $request->get_headers(),
+                            'headers' => $this->get_essential_headers($request),
                             'ip_address' => $client_ip,
                             'user_agent' => $request->get_header('user-agent'),
                             'url' => $request->get_header('origin'),
@@ -834,7 +834,7 @@ class GA4_Server_Side_Tagging_Endpoint
                     'event_status' => 'error',
                     'reason' => 'Missing events array or single event data',
                     'payload' => $request->get_body(),
-                    'headers' => $request->get_headers(),
+                    'headers' => $this->get_essential_headers($request),
                     'ip_address' => $client_ip,
                     'user_agent' => $request->get_header('user-agent'),
                     'url' => $request->get_header('origin'),
@@ -864,7 +864,7 @@ class GA4_Server_Side_Tagging_Endpoint
                             'event_status' => 'bot_detected',
                             'reason' => 'WordPress-side bot detection: Score ' . $bot_detection_result['score'] . '/100',
                             'payload' => json_encode($request_data, JSON_PRETTY_PRINT),
-                            'headers' => $request->get_headers(),
+                            'headers' => $this->get_essential_headers($request),
                             'ip_address' => $client_ip,
                             'user_agent' => $request->get_header('user-agent'),
                             'url' => $request->get_header('origin'),
@@ -887,7 +887,6 @@ class GA4_Server_Side_Tagging_Endpoint
                     return new \WP_REST_Response(array(
                         'success' => true,
                         'events_processed' => count($request_data['events']),
-                        'processing_time_ms' => round((microtime(true) - $start_time) * 1000, 2),
                         'filtered' => true,
                         'message' => 'Events processed successfully'
                     ), 200);
@@ -937,11 +936,9 @@ class GA4_Server_Side_Tagging_Endpoint
                     'timestamp' => time()
                 );
                 
-                // Re-encrypt with permanent key if:
-                // 1. The original request was encrypted (time-based JWT or regular JWT) AND
-                // 2. Permanent encryption is enabled in settings
+                // Encrypt payload for database storage if encryption is enabled
                 $should_encrypt = false;
-                if ($was_originally_encrypted && $encryption_enabled) {
+                if ($encryption_enabled) {
                     $encryption_key = GA4_Encryption_Util::retrieve_encrypted_key('ga4_jwt_encryption_key');
                     if (!empty($encryption_key)) {
                         try {
@@ -951,7 +948,7 @@ class GA4_Server_Side_Tagging_Endpoint
                             $event_data = $encrypted_data;
                             
                         } catch (\Exception $e) {
-                            $this->logger->warning("Failed to re-encrypt event for queuing with permanent key: " . $e->getMessage());
+                            $this->logger->warning("Failed to encrypt event for queuing with permanent key: " . $e->getMessage());
                             // Continue with unencrypted data
                         }
                     } else {
@@ -959,19 +956,8 @@ class GA4_Server_Side_Tagging_Endpoint
                     }
                 }
                 
-                // Get original request headers - filter only essential ones
-                $original_headers = array();
-                $essential_headers = array(
-                    'user_agent', 'accept_language', 'accept', 'referer', 
-                    'x_forwarded_for', 'x_real_ip'
-                );
-                
-                foreach ($request->get_headers() as $key => $value) {
-                    $header_key = strtolower(str_replace('-', '_', $key));
-                    if (in_array($header_key, $essential_headers)) {
-                        $original_headers[$key] = is_array($value) ? implode(', ', $value) : $value;
-                    }
-                }
+                // Get original request headers - filter only essential ones for lightweight storage
+                $original_headers = $this->get_essential_headers($request);
                 
                 // Queue the event
                 $queued = $this->cronjob_manager->queue_event($event_data, $should_encrypt, $original_headers, $was_originally_encrypted);
@@ -985,7 +971,7 @@ class GA4_Server_Side_Tagging_Endpoint
                         'event_status' => 'allowed',
                         'reason' => 'Successfully queued for batch processing',
                         'payload' => json_encode($request_data, JSON_PRETTY_PRINT),
-                        'headers' => $request->get_headers(),
+                        'headers' => $this->get_essential_headers($request),
                         'ip_address' => $client_ip,
                         'user_agent' => $request->get_header('user-agent'),
                         'url' => $request->get_header('origin'),
@@ -1004,7 +990,7 @@ class GA4_Server_Side_Tagging_Endpoint
                         'event_status' => 'error',
                         'reason' => 'Failed to queue event for processing',
                         'payload' => json_encode($request_data, JSON_PRETTY_PRINT),
-                        'headers' => $request->get_headers(),
+                        'headers' => $this->get_essential_headers($request),
                         'ip_address' => $client_ip,
                         'user_agent' => $request->get_header('user-agent'),
                         'url' => $request->get_header('origin'),
@@ -1028,7 +1014,6 @@ class GA4_Server_Side_Tagging_Endpoint
                 'success' => true,
                 'events_queued' => $queued_events,
                 'events_failed' => $failed_events,
-                'processing_time_ms' => $processing_time,
                 'message' => 'Events queued for batch processing every 5 minutes'
             ), 200);
 
@@ -1041,13 +1026,12 @@ class GA4_Server_Side_Tagging_Endpoint
                 'event_status' => 'error',
                 'reason' => 'Processing exception: ' . $e->getMessage(),
                 'payload' => $request->get_body(),
-                'headers' => $request->get_headers(),
+                'headers' => $this->get_essential_headers($request),
                 'ip_address' => $client_ip,
                 'user_agent' => $request->get_header('user-agent'),
                 'url' => $request->get_header('origin'),
                 'referrer' => $request->get_header('referer'),
                 'session_id' => $session_id,
-                'processing_time' => $processing_time,
                 'exception_trace' => $e->getTraceAsString()
             ));
             
@@ -1082,7 +1066,7 @@ class GA4_Server_Side_Tagging_Endpoint
                 'event_status' => 'error',
                 'reason' => 'Cloudflare Worker URL not configured',
                 'payload' => $request->get_body(),
-                'headers' => $request->get_headers(),
+                'headers' => $this->get_essential_headers($request),
                 'ip_address' => $client_ip,
                 'user_agent' => $request->get_header('user-agent'),
                 'url' => $request->get_header('origin'),
@@ -1124,8 +1108,7 @@ class GA4_Server_Side_Tagging_Endpoint
                         'session_id' => $session_id,
                         'consent_given' => $this->extract_consent_status($request_data),
                         'cloudflare_response' => isset($result['worker_response']) ? $result['worker_response'] : 'Success',
-                        'processing_time_ms' => $processing_time,
-                        'batch_size' => count($request_data['events']),
+                                'batch_size' => count($request_data['events']),
                         'transmission_method' => 'direct_cloudflare_debug'
                     ));
                 }
@@ -1133,8 +1116,7 @@ class GA4_Server_Side_Tagging_Endpoint
                 $response_data = array(
                     'success' => true, 
                     'events_processed' => $event_count,
-                    'processing_time_ms' => $processing_time,
-                    'mode' => 'direct_sending'
+                        'mode' => 'direct_sending'
                 );
                 if (isset($result['worker_response'])) {
                     $response_data['worker_response'] = $result['worker_response'];
@@ -1153,8 +1135,7 @@ class GA4_Server_Side_Tagging_Endpoint
                         'session_id' => $session_id,
                         'consent_given' => $this->extract_consent_status($request_data),
                         'cloudflare_response' => $result['error'],
-                        'processing_time_ms' => $processing_time,
-                        'batch_size' => count($request_data['events']),
+                                'batch_size' => count($request_data['events']),
                         'transmission_method' => 'direct_cloudflare_debug'
                     ));
                 }
@@ -1184,8 +1165,7 @@ class GA4_Server_Side_Tagging_Endpoint
                     'session_id' => $session_id,
                     'consent_given' => $this->extract_consent_status($request_data),
                     'cloudflare_response' => 'Async request - no response',
-                    'processing_time_ms' => $processing_time,
-                    'batch_size' => count($request_data['events']),
+                        'batch_size' => count($request_data['events']),
                     'transmission_method' => 'direct_cloudflare_async'
                 ));
             }
@@ -1193,7 +1173,6 @@ class GA4_Server_Side_Tagging_Endpoint
             return new \WP_REST_Response(array(
                 'success' => true, 
                 'events_processed' => $event_count,
-                'processing_time_ms' => $processing_time,
                 'mode' => 'direct_sending'
             ), 200);
         }
@@ -2151,6 +2130,31 @@ class GA4_Server_Side_Tagging_Endpoint
         
         $this->logger->info('No valid consent fields found', json_encode($consent));
         return null;
+    }
+
+    /**
+     * Filter request headers to only include essential ones for lightweight logging
+     *
+     * @since    3.0.0
+     * @param    \WP_REST_Request    $request    The request object.
+     * @return   array                          Filtered headers array.
+     */
+    private function get_essential_headers($request)
+    {
+        $essential_headers = array(
+            'user_agent', 'accept_language', 'referer', 
+            'x_forwarded_for', 'x_real_ip'
+        );
+        
+        $filtered_headers = array();
+        foreach ($request->get_headers() as $key => $value) {
+            $header_key = strtolower(str_replace('-', '_', $key));
+            if (in_array($header_key, $essential_headers)) {
+                $filtered_headers[$header_key] = is_array($value) ? implode(', ', $value) : $value;
+            }
+        }
+        
+        return $filtered_headers;
     }
 
     /**

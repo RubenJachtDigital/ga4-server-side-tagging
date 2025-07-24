@@ -106,9 +106,16 @@ if (isset($_POST['trigger_cronjob']) && wp_verify_nonce($_POST['_wpnonce'], 'ga4
 // Handle cleanup action
 if (isset($_POST['cleanup_events']) && wp_verify_nonce($_POST['_wpnonce'], 'ga4_cleanup_events')) {
     $days = intval($_POST['cleanup_days']) ?: 7;
+    
+    // Save the cleanup days setting for Event Queue
+    update_option('ga4_event_queue_cleanup_days', $days);
+    
     $cleaned = $this->cronjob_manager->cleanup_old_events($days);
     echo '<div class="notice notice-success is-dismissible"><p>Cleaned up ' . $cleaned . ' old events.</p></div>';
 }
+
+// Get the saved cleanup days setting for Event Queue (default: 7 days)
+$event_queue_cleanup_days = get_option('ga4_event_queue_cleanup_days', 7);
 
 // Get queue statistics
 $stats = $this->cronjob_manager->get_queue_stats();
@@ -188,7 +195,7 @@ $current_page = floor($offset / $limit) + 1;
         <form method="post" style="display: inline-block;">
             <?php wp_nonce_field('ga4_cleanup_events'); ?>
             <label for="cleanup_days"><?php echo esc_html__('Clean up events older than:', 'ga4-server-side-tagging'); ?></label>
-            <input type="number" id="cleanup_days" name="cleanup_days" value="7" min="1" max="365" style="width: 60px;">
+            <input type="number" id="cleanup_days" name="cleanup_days" value="<?php echo esc_attr($event_queue_cleanup_days); ?>" min="1" max="365" style="width: 60px;">
             <span><?php echo esc_html__('days', 'ga4-server-side-tagging'); ?></span>
             <input type="submit" name="cleanup_events" class="button" value="<?php echo esc_attr__('Cleanup Old Events', 'ga4-server-side-tagging'); ?>"
                    onclick="return confirm('<?php echo esc_js(__('Are you sure you want to delete old events?', 'ga4-server-side-tagging')); ?>');">
