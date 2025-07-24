@@ -159,6 +159,10 @@ class GA4_Cronjob_Manager
     {
         global $wpdb;
 
+        // Determine the intended transmission method when queuing
+        $disable_cf_proxy = get_option('ga4_disable_cf_proxy', false);
+        $intended_transmission_method = $disable_cf_proxy ? 'ga4_direct' : 'cloudflare';
+
         $result = $wpdb->insert(
             $this->table_name,
             array(
@@ -166,9 +170,10 @@ class GA4_Cronjob_Manager
                 'is_encrypted' => $is_encrypted ? 1 : 0,
                 'original_headers' => wp_json_encode($original_headers),
                 'was_originally_encrypted' => $was_originally_encrypted ? 1 : 0,
+                'transmission_method' => $intended_transmission_method,
                 'status' => 'pending'
             ),
-            array('%s', '%d', '%s', '%d', '%s')
+            array('%s', '%d', '%s', '%d', '%s', '%s')
         );
 
         if ($result === false) {
@@ -254,16 +259,23 @@ class GA4_Cronjob_Manager
             return;
         }
 
-        // Check if Cloudflare proxy is disabled (only for WP REST Endpoint method)
-        $transmission_method = get_option('ga4_transmission_method', 'direct_to_cf');
+        // Simple check: if disable CF proxy is enabled, use direct GA4
         $disable_cf_proxy = get_option('ga4_disable_cf_proxy', false);
         
-        if ($transmission_method === 'wp_rest_endpoint' && $disable_cf_proxy) {
-            // Send events individually to GA4
+        if ($disable_cf_proxy) {
+            // Send events individually to GA4 (bypass Cloudflare) - NO FALLBACK
+            if ($this->logger) {
+                $this->logger->info("Using direct GA4 transmission (bypassing Cloudflare)");
+            }
             $success = $this->send_events_to_ga4($events, $batch_events);
+            $transmission_error_message = "Failed to send events directly to Google Analytics";
         } else {
-            // Send batch to Cloudflare
+            // Send batch to Cloudflare - NO FALLBACK
+            if ($this->logger) {
+                $this->logger->info("Using Cloudflare transmission");
+            }
             $success = $this->send_batch_to_cloudflare($batch_events, $batch_consent, $events);
+            $transmission_error_message = "Failed to send events to Cloudflare Worker";
         }
 
         if ($success) {
@@ -277,9 +289,13 @@ class GA4_Cronjob_Manager
             );
 
         } else {
-            // Mark events as failed or retry
+            // Mark events as failed with specific error message for chosen transmission method
             foreach ($event_ids as $event_id) {
-                $this->mark_event_failed($event_id, "Failed to send batch to Cloudflare");
+                $this->mark_event_failed($event_id, $transmission_error_message);
+            }
+            
+            if ($this->logger) {
+                $this->logger->error($transmission_error_message . " - " . count($event_ids) . " events marked as failed");
             }
         }
     }
@@ -479,6 +495,13 @@ class GA4_Cronjob_Manager
             $original_headers = array();
             if (!empty($original_event->original_headers)) {
                 $original_headers = json_decode($original_event->original_headers, true) ?: array();
+                if ($this->logger) {
+                    $this->logger->debug("Retrieved original headers for event {$original_event->id}: " . wp_json_encode(array_keys($original_headers)));
+                }
+            } else {
+                if ($this->logger) {
+                    $this->logger->debug("No original headers found for event {$original_event->id}");
+                }
             }
             
             $result = $this->send_single_event_to_ga4($final_payload, $measurement_id, $api_secret, $original_headers);
@@ -489,13 +512,17 @@ class GA4_Cronjob_Manager
             if ($result['success']) {
                 $success_count++;
             } else {
-                // Mark individual event as failed
-                $this->mark_event_failed($original_event->id, "Failed to send event to GA4");
+                // Mark individual event as failed with specific GA4 error message
+                $error_message = "Direct GA4 transmission failed";
+                if (isset($result['error_details'])) {
+                    $error_message .= ": " . $result['error_details'];
+                }
+                $this->mark_event_failed($original_event->id, $error_message);
             }
         }
         
         if ($this->logger) {
-            $this->logger->info("Sent $success_count/$total_events events directly to GA4");
+            $this->logger->info("Direct GA4 transmission completed: Sent $success_count/$total_events events individually to Google Analytics (bypassing Cloudflare)");
         }
         
         // Return true if all events were sent successfully
@@ -522,12 +549,26 @@ class GA4_Cronjob_Manager
             'User-Agent' => 'GA4-Server-Side-Tagging-Direct/3.0.0'
         );
         
-        // Add relevant original headers for better tracking
-        $relevant_headers = array('User-Agent', 'Accept-Language', 'Accept', 'Referer');
-        foreach ($relevant_headers as $header_name) {
-            if (isset($original_headers[$header_name])) {
-                $headers[$header_name] = $original_headers[$header_name];
+        // Map original headers to proper format (headers are stored with underscores)
+        $header_mapping = array(
+            'user_agent' => 'User-Agent',
+            'accept_language' => 'Accept-Language', 
+            'accept' => 'Accept',
+            'referer' => 'Referer',
+            'accept_encoding' => 'Accept-Encoding',
+            'x_forwarded_for' => 'X-Forwarded-For',
+            'x_real_ip' => 'X-Real-IP'
+        );
+        
+        foreach ($header_mapping as $stored_key => $header_name) {
+            if (isset($original_headers[$stored_key]) && !empty($original_headers[$stored_key])) {
+                $headers[$header_name] = $original_headers[$stored_key];
             }
+        }
+        
+        // Log headers being used for debugging
+        if ($this->logger) {
+            $this->logger->debug("Direct GA4 transmission using headers: " . wp_json_encode($headers));
         }
         
         $response = wp_remote_post($url, array(
@@ -539,23 +580,28 @@ class GA4_Cronjob_Manager
         
         $result = array(
             'success' => false,
-            'headers' => $headers
+            'headers' => $headers,
+            'error_details' => null
         );
         
         if (is_wp_error($response)) {
+            $error_message = $response->get_error_message();
+            $result['error_details'] = "WordPress HTTP Error: " . $error_message;
             if ($this->logger) {
-                $this->logger->error("Failed to send event to GA4: " . $response->get_error_message());
+                $this->logger->error("Failed to send event to GA4: " . $error_message);
             }
             return $result;
         }
         
         $response_code = wp_remote_retrieve_response_code($response);
+        $response_body = wp_remote_retrieve_body($response);
         
         if ($response_code >= 200 && $response_code < 300) {
             $result['success'] = true;
         } else {
+            $result['error_details'] = "HTTP $response_code" . (!empty($response_body) ? ": " . $response_body : "");
             if ($this->logger) {
-                $this->logger->error("GA4 returned error code $response_code");
+                $this->logger->error("GA4 returned error code $response_code: " . $response_body);
             }
         }
         

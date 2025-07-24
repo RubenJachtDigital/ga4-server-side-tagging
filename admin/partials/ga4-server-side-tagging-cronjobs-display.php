@@ -66,6 +66,12 @@ function decrypt_jwt_token($jwt_token) {
             return array('data' => $jwt_token, 'was_encrypted' => false);
         }
 
+        // First check if this looks like a JWT token (has 3 parts separated by dots)
+        if (substr_count($jwt_token, '.') !== 2) {
+            // Not a JWT format, might be regular JSON or other data
+            return array('data' => $jwt_token, 'was_encrypted' => false);
+        }
+        
         // Try to decrypt with permanent key (same as event monitor)
         $decrypted = \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::decrypt($jwt_token, $encryption_key);
         if ($decrypted !== false) {
@@ -86,8 +92,7 @@ function decrypt_jwt_token($jwt_token) {
         return array('data' => $jwt_token, 'was_encrypted' => false);
 
     } catch (\Exception $e) {
-        // Log decryption failure but don't break the display process
-        error_log('GA4 Cronjob Display: Failed to decrypt JWT token for display - ' . $e->getMessage());
+        // Silently handle decryption failures to avoid log spam
         return array('data' => $jwt_token, 'was_encrypted' => false);
     }
 }
