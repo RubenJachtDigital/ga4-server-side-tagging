@@ -471,24 +471,10 @@ class GA4_Cronjob_Manager
         foreach ($batch_events as $index => $event_data) {
             $original_event = $events[$index];
             
-            // Prepare individual event payload for GA4
-            $payload = array(
-                'client_id' => $event_data['client_id'] ?? $this->generate_client_id(),
-                'events' => array($event_data)
-            );
-            
-            // Add user_id if present
-            if (isset($event_data['user_id'])) {
-                $payload['user_id'] = $event_data['user_id'];
-            }
-            
-            // Add timestamp if present
-            if (isset($event_data['timestamp_micros'])) {
-                $payload['timestamp_micros'] = $event_data['timestamp_micros'];
-            }
+            // Transform event data to match Google Analytics expected format
+            $final_payload = $this->transform_event_for_ga4($event_data, $events[$index]);
             
             // GA4 payload should NEVER be encrypted when sending directly to Google Analytics
-            $final_payload = $payload;
             $payload_encrypted = false;
             
             // Get original headers from the queued event
@@ -527,6 +513,437 @@ class GA4_Cronjob_Manager
         
         // Return true if all events were sent successfully
         return $success_count === $total_events;
+    }
+    
+    /**
+     * Transform event data to Google Analytics expected format
+     *
+     * @since    3.0.0
+     * @param    array    $event_data       The processed event data.
+     * @param    object   $original_event   The original queued event object.
+     * @return   array    Transformed GA4 payload.
+     */
+    private function transform_event_for_ga4($event_data, $original_event)
+    {
+        // Start with basic GA4 payload structure
+        $ga4_payload = array(
+            'client_id' => $event_data['client_id'] ?? $this->generate_client_id(),
+            'events' => array(
+                array(
+                    'name' => $event_data['name'],
+                    'params' => $event_data['params'] ?? array()
+                )
+            )
+        );
+        
+        // Extract and move client_id from params to top level
+        if (isset($event_data['params']['client_id'])) {
+            $ga4_payload['client_id'] = $event_data['params']['client_id'];
+            unset($ga4_payload['events'][0]['params']['client_id']);
+        }
+        
+        // Add user_id at top level if present (and move from params if found there)
+        if (isset($event_data['user_id'])) {
+            $ga4_payload['user_id'] = $event_data['user_id'];
+        } elseif (isset($event_data['params']['user_id'])) {
+            $ga4_payload['user_id'] = $event_data['params']['user_id'];
+            unset($ga4_payload['events'][0]['params']['user_id']);
+        }
+        
+        // Add timestamp_micros at top level if present  
+        if (isset($event_data['timestamp_micros'])) {
+            $ga4_payload['timestamp_micros'] = $event_data['timestamp_micros'];
+        }
+        
+        // Extract and add consent data at top level with privacy compliance
+        $consent_data = null;
+        if (isset($event_data['consent'])) {
+            $consent_data = $event_data['consent'];
+        } else {
+            // Try to get consent from original event data
+            $original_event_data = json_decode($original_event->event_data, true);
+            if (isset($original_event_data['consent'])) {
+                $consent_data = $original_event_data['consent'];
+            }
+        }
+        
+        // Always include consent data at top level since it's available and important for GA4
+        if ($consent_data) {
+            // Include ONLY the 2 allowed consent fields (ad_user_data and ad_personalization)
+            // Filter out any other fields like consent_reason which GA4 doesn't accept
+            $ga4_payload['consent'] = array();
+            
+            if (isset($consent_data['ad_user_data'])) {
+                $ga4_payload['consent']['ad_user_data'] = $consent_data['ad_user_data'];
+            }
+            
+            if (isset($consent_data['ad_personalization'])) {
+                $ga4_payload['consent']['ad_personalization'] = $consent_data['ad_personalization'];
+            }
+            
+            // Note: consent_reason and other consent fields are intentionally excluded
+            // as GA4 only accepts ad_user_data and ad_personalization in the consent object
+            
+            // If consent is denied, strip sensitive data for privacy compliance
+            $consent_denied = (
+                (isset($consent_data['ad_user_data']) && $consent_data['ad_user_data'] === 'DENIED') ||
+                (isset($consent_data['ad_personalization']) && $consent_data['ad_personalization'] === 'DENIED')
+            );
+            
+            if ($consent_denied) {
+                // Remove user_id for privacy compliance when consent denied
+                unset($ga4_payload['user_id']);
+                
+                // Remove sensitive identifying parameters
+                $sensitive_params = array('user_id', 'customer_id', 'login_status');
+                foreach ($sensitive_params as $param) {
+                    unset($ga4_payload['events'][0]['params'][$param]);
+                }
+                
+                // Anonymize IP address by not including precise location data
+                // Keep only general location (country/continent level)
+            }
+        } else {
+            // Default consent values if not available (conservative approach)
+            $ga4_payload['consent'] = array(
+                'ad_user_data' => 'DENIED',
+                'ad_personalization' => 'DENIED'
+            );
+            $consent_denied = true;
+        }
+        
+        // Extract location data from params and add at top level (respecting consent)
+        $user_location = $this->extract_location_data($ga4_payload['events'][0]['params'], $consent_denied ?? false);
+        if (!empty($user_location)) {
+            $ga4_payload['user_location'] = $user_location;
+        }
+        
+        // Extract device info from params and add at top level
+        $device_info = $this->extract_device_info($ga4_payload['events'][0]['params']);
+        if (!empty($device_info)) {
+            $ga4_payload['device'] = $device_info;
+        }
+        
+        // Extract user agent and add at top level (with privacy handling)
+        if (isset($ga4_payload['events'][0]['params']['user_agent'])) {
+            $user_agent = $ga4_payload['events'][0]['params']['user_agent'];
+            
+            // Option 1: Always use full user_agent (your preference)
+            // User-Agent is generally considered less sensitive than precise location/user_id
+            $ga4_payload['user_agent'] = $user_agent;
+            
+            // Option 2: Anonymize user_agent when consent denied (like Cloudflare worker)
+            // Uncomment the lines below if you want to match Cloudflare worker behavior:
+            /*
+            if ($consent_denied ?? false) {
+                $ga4_payload['user_agent'] = $this->anonymize_user_agent($user_agent);
+            } else {
+                $ga4_payload['user_agent'] = $user_agent;
+            }
+            */
+            
+            unset($ga4_payload['events'][0]['params']['user_agent']);
+        }
+        
+        // Clean up params by removing fields that have been moved to top level
+        $fields_to_remove = array(
+            // Geographic data (moved to user_location)
+            'geo_city', 'geo_country', 'geo_region', 'geo_continent', 
+            'geo_city_tz', 'geo_country_tz', 'geo_latitude', 'geo_longitude',
+            // Device data (moved to device)
+            'device_type', 'is_mobile', 'is_tablet', 'is_desktop', 
+            'browser_name', 'screen_resolution', 'os_name', 'device_model', 
+            'device_brand', 'viewport_width', 'viewport_height',
+            // User identification (moved to top level)
+            'user_id'
+        );
+        
+        foreach ($fields_to_remove as $field) {
+            unset($ga4_payload['events'][0]['params'][$field]);
+        }
+        
+        return $ga4_payload;
+    }
+    
+    /**
+     * Extract location data from event params
+     *
+     * @since    3.0.0
+     * @param    array    $params         Event parameters.
+     * @param    boolean  $consent_denied Whether consent was denied.
+     * @return   array    Location data for GA4.
+     */
+    private function extract_location_data(&$params, $consent_denied = false)
+    {
+        $user_location = array();
+        
+        // If consent denied, use timezone-based location data (less precise, privacy compliant)
+        if ($consent_denied) {
+            // Use timezone-based location data for privacy compliance
+            if (isset($params['timezone'])) {
+                $timezone = $params['timezone'];
+                $timezone_location = $this->get_location_from_timezone($timezone);
+                if ($timezone_location) {
+                    $user_location = array_merge($user_location, $timezone_location);
+                }
+            }
+            
+            // Fallback: use country from timezone data if available
+            if (empty($user_location) && isset($params['geo_country_tz'])) {
+                $country_name = $params['geo_country_tz'];
+                if ($country_name === 'Netherlands') {
+                    $user_location['country_id'] = 'NL';
+                } elseif ($country_name === 'Belgium') {
+                    $user_location['country_id'] = 'BE';
+                } else {
+                    $user_location['country_id'] = $country_name;
+                }
+            }
+            
+            // Include general continent data if available
+            if (isset($params['geo_continent'])) {
+                $continent = $params['geo_continent'];
+                if ($continent === 'Europe') {
+                    $user_location['continent_id'] = '150'; // Europe
+                    $user_location['subcontinent_id'] = '155'; // Western Europe
+                }
+            }
+        } else {
+            // Full location data when consent is granted
+            
+            // Extract city (precise location)
+            if (isset($params['geo_city'])) {
+                $user_location['city'] = $params['geo_city'];
+            } elseif (isset($params['geo_city_tz'])) {
+                $user_location['city'] = $params['geo_city_tz'];
+            }
+            
+            // Extract country - GA4 expects country_id (ISO country code)
+            if (isset($params['geo_country'])) {
+                $country_name = $params['geo_country'];
+                if ($country_name === 'The Netherlands') {
+                    $user_location['country_id'] = 'NL';
+                } elseif ($country_name === 'Belgium') {
+                    $user_location['country_id'] = 'BE';
+                } else {
+                    $user_location['country_id'] = $country_name; // Assume it's already ISO code
+                }
+            }
+            
+            // Extract continent and subcontinent IDs (GA4 uses numeric IDs)
+            if (isset($params['geo_continent'])) {
+                $continent = $params['geo_continent'];
+                if ($continent === 'Europe') {
+                    $user_location['continent_id'] = '150'; // Europe
+                    $user_location['subcontinent_id'] = '155'; // Western Europe
+                }
+            }
+        }
+        
+        return $user_location;
+    }
+    
+    /**
+     * Get location data from timezone (privacy-compliant, less precise)
+     *
+     * @since    3.0.0
+     * @param    string   $timezone    Timezone string (e.g., "Europe/Amsterdam").
+     * @return   array    Location data derived from timezone.
+     */
+    private function get_location_from_timezone($timezone)
+    {
+        $location = array();
+        
+        // Common European timezone mappings (privacy-compliant general locations)
+        $timezone_map = array(
+            // Netherlands
+            'Europe/Amsterdam' => array(
+                'country_id' => 'NL',
+                'continent_id' => '150',
+                'subcontinent_id' => '155'
+            ),
+            // Belgium  
+            'Europe/Brussels' => array(
+                'country_id' => 'BE',
+                'continent_id' => '150', 
+                'subcontinent_id' => '155'
+            ),
+            // Germany
+            'Europe/Berlin' => array(
+                'country_id' => 'DE',
+                'continent_id' => '150',
+                'subcontinent_id' => '155'
+            ),
+            // France
+            'Europe/Paris' => array(
+                'country_id' => 'FR',
+                'continent_id' => '150',
+                'subcontinent_id' => '155'
+            ),
+            // United Kingdom
+            'Europe/London' => array(
+                'country_id' => 'GB',
+                'continent_id' => '150',
+                'subcontinent_id' => '154' // Northern Europe
+            ),
+            // Spain
+            'Europe/Madrid' => array(
+                'country_id' => 'ES',
+                'continent_id' => '150',
+                'subcontinent_id' => '039' // Southern Europe
+            ),
+            // Italy
+            'Europe/Rome' => array(
+                'country_id' => 'IT',
+                'continent_id' => '150',
+                'subcontinent_id' => '039' // Southern Europe
+            ),
+            // United States
+            'America/New_York' => array(
+                'country_id' => 'US',
+                'continent_id' => '003', // North America
+                'subcontinent_id' => '021' // Northern America
+            ),
+            'America/Los_Angeles' => array(
+                'country_id' => 'US',
+                'continent_id' => '003',
+                'subcontinent_id' => '021'
+            ),
+            'America/Chicago' => array(
+                'country_id' => 'US',
+                'continent_id' => '003',
+                'subcontinent_id' => '021'
+            ),
+            // Canada
+            'America/Toronto' => array(
+                'country_id' => 'CA',
+                'continent_id' => '003',
+                'subcontinent_id' => '021'
+            )
+        );
+        
+        // Direct timezone match
+        if (isset($timezone_map[$timezone])) {
+            return $timezone_map[$timezone];
+        }
+        
+        // Fallback: extract from timezone format (e.g., "Europe/Amsterdam" -> Europe, NL)
+        if (strpos($timezone, '/') !== false) {
+            $parts = explode('/', $timezone);
+            $continent_name = $parts[0];
+            $city_name = $parts[1] ?? '';
+            
+            // Map continent names to IDs
+            $continent_mapping = array(
+                'Europe' => array('continent_id' => '150', 'subcontinent_id' => '155'),
+                'America' => array('continent_id' => '003', 'subcontinent_id' => '021'),
+                'Asia' => array('continent_id' => '142', 'subcontinent_id' => '030'),
+                'Africa' => array('continent_id' => '002', 'subcontinent_id' => '015'),
+                'Australia' => array('continent_id' => '009', 'subcontinent_id' => '053')
+            );
+            
+            if (isset($continent_mapping[$continent_name])) {
+                $location = $continent_mapping[$continent_name];
+                
+                // Try to infer country from major cities (privacy-compliant general mapping)
+                $city_country_map = array(
+                    'Amsterdam' => 'NL', 'Brussels' => 'BE', 'Berlin' => 'DE',
+                    'Paris' => 'FR', 'London' => 'GB', 'Madrid' => 'ES',
+                    'Rome' => 'IT', 'New_York' => 'US', 'Los_Angeles' => 'US',
+                    'Chicago' => 'US', 'Toronto' => 'CA'
+                );
+                
+                if (isset($city_country_map[$city_name])) {
+                    $location['country_id'] = $city_country_map[$city_name];
+                }
+            }
+        }
+        
+        return $location;
+    }
+    
+    /**
+     * Anonymize User-Agent string for privacy compliance (optional)
+     *
+     * @since    3.0.0
+     * @param    string   $user_agent    Original User-Agent string.
+     * @return   string   Anonymized User-Agent string.
+     */
+    private function anonymize_user_agent($user_agent)
+    {
+        if (empty($user_agent)) {
+            return '';
+        }
+        
+        // Replace version numbers with x.x (removes specific software versions)
+        $anonymized = preg_replace('/\d+\.\d+[\.\d]*/', 'x.x', $user_agent);
+        
+        // Replace system info in parentheses with (anonymous)
+        $anonymized = preg_replace('/\([^)]*\)/', '(anonymous)', $anonymized);
+        
+        // Truncate to 100 characters to prevent potential fingerprinting
+        $anonymized = substr($anonymized, 0, 100);
+        
+        return $anonymized;
+    }
+    
+    /**
+     * Extract device information from event params
+     *
+     * @since    3.0.0
+     * @param    array    $params    Event parameters.
+     * @return   array    Device data for GA4.
+     */
+    private function extract_device_info(&$params)
+    {
+        $device = array();
+        
+        // Extract device category (most important field according to GA4 docs)
+        if (isset($params['device_type'])) {
+            $device['category'] = $params['device_type']; // mobile, desktop, tablet
+        } elseif (isset($params['is_mobile']) && $params['is_mobile']) {
+            $device['category'] = 'mobile';
+        } elseif (isset($params['is_tablet']) && $params['is_tablet']) {
+            $device['category'] = 'tablet';
+        } elseif (isset($params['is_desktop']) && $params['is_desktop']) {
+            $device['category'] = 'desktop';
+        }
+        
+        // Extract language (important for localization)
+        if (isset($params['language'])) {
+            $device['language'] = $params['language'];
+        }
+        
+        // Extract screen resolution (useful for responsive design insights)
+        if (isset($params['screen_resolution'])) {
+            $device['screen_resolution'] = $params['screen_resolution'];
+        }
+        
+        // Extract browser information
+        if (isset($params['browser_name'])) {
+            $device['browser'] = $params['browser_name'];
+        }
+        
+        // Extract operating system information if available
+        if (isset($params['os_name'])) {
+            $device['operating_system'] = $params['os_name'];
+        }
+        
+        // Extract device model/brand if available (mainly for mobile)
+        if (isset($params['device_model'])) {
+            $device['mobile_model_name'] = $params['device_model'];
+        }
+        
+        if (isset($params['device_brand'])) {
+            $device['mobile_brand_name'] = $params['device_brand'];
+        }
+        
+        // Extract viewport dimensions if available
+        if (isset($params['viewport_width']) && isset($params['viewport_height'])) {
+            $device['viewport_size'] = $params['viewport_width'] . 'x' . $params['viewport_height'];
+        }
+        
+        return $device;
     }
     
     /**
