@@ -253,27 +253,27 @@ class GA4_Cronjob_Manager
         }
 
         if (empty($batch_events)) {
-            if ($this->logger) {
-                $this->logger->debug("No valid events to send after processing");
-            }
             return;
         }
 
+        // Debug log batch consent extraction
+        if (get_option('ga4_server_side_tagging_debug_mode')) {
+            if ($batch_consent) {
+                $this->logger->log('INFO', 'Batch consent extracted successfully: ' . json_encode($batch_consent));
+            } else {
+                $this->logger->log('INFO', 'No batch consent found, processed ' . count($batch_events) . ' events');
+            }
+        }
+        
         // Simple check: if disable CF proxy is enabled, use direct GA4
         $disable_cf_proxy = get_option('ga4_disable_cf_proxy', false);
         
         if ($disable_cf_proxy) {
             // Send events individually to GA4 (bypass Cloudflare) - NO FALLBACK
-            if ($this->logger) {
-                $this->logger->info("Using direct GA4 transmission (bypassing Cloudflare)");
-            }
-            $success = $this->send_events_to_ga4($events, $batch_events);
+            $success = $this->send_events_to_ga4($events, $batch_events, $batch_consent);
             $transmission_error_message = "Failed to send events directly to Google Analytics";
         } else {
-            // Send batch to Cloudflare - NO FALLBACK
-            if ($this->logger) {
-                $this->logger->info("Using Cloudflare transmission");
-            }
+        
             $success = $this->send_batch_to_cloudflare($batch_events, $batch_consent, $events);
             $transmission_error_message = "Failed to send events to Cloudflare Worker";
         }
@@ -364,7 +364,7 @@ class GA4_Cronjob_Manager
 
         // Prepare batch payload in the format CF Worker expects
         $payload = array(
-            'events' => $batch_events,
+            'events' => array(),  // Will be populated with events including headers
             'batch' => true,
             'timestamp' => time()
         );
@@ -372,6 +372,29 @@ class GA4_Cronjob_Manager
         // Add consent data if available
         if ($batch_consent) {
             $payload['consent'] = $batch_consent;
+        }
+        
+        // Add original headers to each event for Cloudflare worker to use
+        if ($events) {
+            foreach ($batch_events as $index => $event_data) {
+                $original_event = $events[$index];
+                
+                // Get original headers from the queued event
+                $original_headers = array();
+                if (!empty($original_event->original_headers)) {
+                    $original_headers = json_decode($original_event->original_headers, true) ?: array();
+                }
+                
+                // Create event payload with headers included
+                $event_with_headers = $event_data;
+                $event_with_headers['headers'] = $original_headers;
+                
+                
+                $payload['events'][] = $event_with_headers;
+            }
+        } else {
+            // Fallback: use events without headers if events array not available
+            $payload['events'] = $batch_events;
         }
 
         // Check if secured transmission is enabled
@@ -450,9 +473,10 @@ class GA4_Cronjob_Manager
      * @since    3.0.0
      * @param    array    $events         The original event objects from database.
      * @param    array    $batch_events   The processed event data.
+     * @param    array    $batch_consent  Batch-level consent data.
      * @return   bool     True if all events sent successfully, false otherwise.
      */
-    private function send_events_to_ga4($events, $batch_events)
+    private function send_events_to_ga4($events, $batch_events, $batch_consent = null)
     {
         $measurement_id = get_option('ga4_measurement_id', '');
         $api_secret = get_option('ga4_api_secret', '');
@@ -467,12 +491,22 @@ class GA4_Cronjob_Manager
         $success_count = 0;
         $total_events = count($batch_events);
         
+        // Debug log what we're about to process
+        if (get_option('ga4_server_side_tagging_debug_mode')) {
+            $this->logger->log('INFO', 'Processing ' . count($batch_events) . ' events for direct GA4 transmission');
+            if ($batch_consent) {
+                $this->logger->log('INFO', 'Using batch consent: ' . json_encode($batch_consent));
+            } else {
+                $this->logger->log('INFO', 'No batch consent available for direct GA4 transmission');
+            }
+        }
+        
         // Send each event individually
         foreach ($batch_events as $index => $event_data) {
             $original_event = $events[$index];
             
             // Transform event data to match Google Analytics expected format
-            $final_payload = $this->transform_event_for_ga4($event_data, $events[$index]);
+            $final_payload = $this->transform_event_for_ga4($event_data, $events[$index], $batch_consent);
             
             // GA4 payload should NEVER be encrypted when sending directly to Google Analytics
             $payload_encrypted = false;
@@ -481,9 +515,6 @@ class GA4_Cronjob_Manager
             $original_headers = array();
             if (!empty($original_event->original_headers)) {
                 $original_headers = json_decode($original_event->original_headers, true) ?: array();
-                if ($this->logger) {
-                    $this->logger->debug("Retrieved original headers for event {$original_event->id}: " . wp_json_encode(array_keys($original_headers)));
-                }
             } else {
                 if ($this->logger) {
                     $this->logger->debug("No original headers found for event {$original_event->id}");
@@ -507,10 +538,6 @@ class GA4_Cronjob_Manager
             }
         }
         
-        if ($this->logger) {
-            $this->logger->info("Direct GA4 transmission completed: Sent $success_count/$total_events events individually to Google Analytics (bypassing Cloudflare)");
-        }
-        
         // Return true if all events were sent successfully
         return $success_count === $total_events;
     }
@@ -521,9 +548,10 @@ class GA4_Cronjob_Manager
      * @since    3.0.0
      * @param    array    $event_data       The processed event data.
      * @param    object   $original_event   The original queued event object.
+     * @param    array    $batch_consent    Batch-level consent data.
      * @return   array    Transformed GA4 payload.
      */
-    private function transform_event_for_ga4($event_data, $original_event)
+    private function transform_event_for_ga4($event_data, $original_event, $batch_consent = null)
     {
         // Start with basic GA4 payload structure
         $ga4_payload = array(
@@ -557,13 +585,31 @@ class GA4_Cronjob_Manager
         
         // Extract and add consent data at top level with privacy compliance
         $consent_data = null;
-        if (isset($event_data['consent'])) {
+        
+        // First priority: use batch-level consent data (for batch events)
+        if ($batch_consent) {
+            $consent_data = $batch_consent;
+        } elseif (isset($event_data['consent'])) {
+            // Second priority: individual event consent
             $consent_data = $event_data['consent'];
         } else {
-            // Try to get consent from original event data
+            // Fallback: try to get consent from original event data
             $original_event_data = json_decode($original_event->event_data, true);
             if (isset($original_event_data['consent'])) {
                 $consent_data = $original_event_data['consent'];
+            }
+        }
+        
+        // Debug logging to understand consent data extraction
+        if (get_option('ga4_server_side_tagging_debug_mode')) {
+            if ($consent_data) {
+                $this->logger->log('INFO', 'Direct GA4: Found consent data: ' . json_encode($consent_data));
+            } else {
+                $this->logger->log('INFO', 'Direct GA4: No consent data found. Event data keys: ' . json_encode(array_keys($event_data)));
+                $original_event_data = json_decode($original_event->event_data, true);
+                if ($original_event_data) {
+                    $this->logger->log('INFO', 'Direct GA4: Original event data keys: ' . json_encode(array_keys($original_event_data)));
+                }
             }
         }
         
@@ -584,24 +630,18 @@ class GA4_Cronjob_Manager
             // Note: consent_reason and other consent fields are intentionally excluded
             // as GA4 only accepts ad_user_data and ad_personalization in the consent object
             
-            // If consent is denied, strip sensitive data for privacy compliance
-            $consent_denied = (
-                (isset($consent_data['ad_user_data']) && $consent_data['ad_user_data'] === 'DENIED') ||
-                (isset($consent_data['ad_personalization']) && $consent_data['ad_personalization'] === 'DENIED')
-            );
+            // Apply consent-based processing (similar to Cloudflare worker)
+            $ad_user_data_denied = (isset($consent_data['ad_user_data']) && $consent_data['ad_user_data'] === 'DENIED');
+            $ad_personalization_denied = (isset($consent_data['ad_personalization']) && $consent_data['ad_personalization'] === 'DENIED');
             
-            if ($consent_denied) {
-                // Remove user_id for privacy compliance when consent denied
-                unset($ga4_payload['user_id']);
-                
-                // Remove sensitive identifying parameters
-                $sensitive_params = array('user_id', 'customer_id', 'login_status');
-                foreach ($sensitive_params as $param) {
-                    unset($ga4_payload['events'][0]['params'][$param]);
-                }
-                
-                // Anonymize IP address by not including precise location data
-                // Keep only general location (country/continent level)
+            // Apply analytics consent denied rules (when ad_user_data is DENIED)
+            if ($ad_user_data_denied) {
+                $ga4_payload = $this->apply_analytics_consent_denied($ga4_payload);
+            }
+            
+            // Apply advertising consent denied rules (when ad_personalization is DENIED)
+            if ($ad_personalization_denied) {
+                $ga4_payload = $this->apply_advertising_consent_denied($ga4_payload);
             }
         } else {
             // Default consent values if not available (conservative approach)
@@ -643,6 +683,49 @@ class GA4_Cronjob_Manager
             */
             
             unset($ga4_payload['events'][0]['params']['user_agent']);
+        }
+        
+        // Add consent parameter to event params (similar to Cloudflare worker)
+        if ($consent_data) {
+            // Try multiple possible field names for consent reason
+            $consent_reason = 'button_click'; // default
+            if (isset($consent_data['consent_reason'])) {
+                $consent_reason = $consent_data['consent_reason'];
+            } elseif (isset($consent_data['reason'])) {
+                $consent_reason = $consent_data['reason'];
+            }
+            
+            $ad_personalization = isset($consent_data['ad_personalization']) ? $consent_data['ad_personalization'] : 'DENIED';
+            $ad_user_data = isset($consent_data['ad_user_data']) ? $consent_data['ad_user_data'] : 'DENIED';
+            
+            // Debug log the consent data we're using
+            if (get_option('ga4_server_side_tagging_debug_mode')) {
+                $this->logger->log('INFO', "Direct GA4: Creating consent string - ad_personalization: {$ad_personalization}, ad_user_data: {$ad_user_data}, reason: {$consent_reason}");
+                $this->logger->log('INFO', 'Direct GA4: Full consent data: ' . json_encode($consent_data));
+            }
+            
+            $ga4_payload['events'][0]['params']['consent'] = "ad_personalization: {$ad_personalization}. ad_user_data: {$ad_user_data}. reason: {$consent_reason}";
+        } else {
+            // Try to get consent from the original event data one more time (different path)
+            $original_event_data = json_decode($original_event->event_data, true);
+            if (isset($original_event_data['consent'])) {
+                $consent_data_fallback = $original_event_data['consent'];
+                
+                $consent_reason = 'button_click'; // default
+                if (isset($consent_data_fallback['consent_reason'])) {
+                    $consent_reason = $consent_data_fallback['consent_reason'];
+                } elseif (isset($consent_data_fallback['reason'])) {
+                    $consent_reason = $consent_data_fallback['reason'];
+                }
+                
+                $ad_personalization = isset($consent_data_fallback['ad_personalization']) ? $consent_data_fallback['ad_personalization'] : 'DENIED';
+                $ad_user_data = isset($consent_data_fallback['ad_user_data']) ? $consent_data_fallback['ad_user_data'] : 'DENIED';
+                
+                $ga4_payload['events'][0]['params']['consent'] = "ad_personalization: {$ad_personalization}. ad_user_data: {$ad_user_data}. reason: {$consent_reason}";
+            } else {
+                // Absolute fallback when no consent data available
+                $ga4_payload['events'][0]['params']['consent'] = "ad_personalization: DENIED. ad_user_data: DENIED. reason: unknown";
+            }
         }
         
         // Clean up params by removing fields that have been moved to top level
@@ -691,13 +774,11 @@ class GA4_Cronjob_Manager
             // Fallback: use country from timezone data if available
             if (empty($user_location) && isset($params['geo_country_tz'])) {
                 $country_name = $params['geo_country_tz'];
-                if ($country_name === 'Netherlands') {
-                    $user_location['country_id'] = 'NL';
-                } elseif ($country_name === 'Belgium') {
-                    $user_location['country_id'] = 'BE';
-                } else {
-                    $user_location['country_id'] = $country_name;
-                }
+                $user_location['country_id'] = $this->convert_country_name_to_iso($country_name);
+            } elseif (isset($params['geo_country'])) {
+                // Also check geo_country for consent-denied cases
+                $country_name = $params['geo_country'];
+                $user_location['country_id'] = $this->convert_country_name_to_iso($country_name);
             }
             
             // Include general continent data if available
@@ -721,13 +802,11 @@ class GA4_Cronjob_Manager
             // Extract country - GA4 expects country_id (ISO country code)
             if (isset($params['geo_country'])) {
                 $country_name = $params['geo_country'];
-                if ($country_name === 'The Netherlands') {
-                    $user_location['country_id'] = 'NL';
-                } elseif ($country_name === 'Belgium') {
-                    $user_location['country_id'] = 'BE';
-                } else {
-                    $user_location['country_id'] = $country_name; // Assume it's already ISO code
-                }
+                $user_location['country_id'] = $this->convert_country_name_to_iso($country_name);
+            } elseif (isset($params['geo_country_tz'])) {
+                // Fallback to timezone-based country
+                $country_name = $params['geo_country_tz'];
+                $user_location['country_id'] = $this->convert_country_name_to_iso($country_name);
             }
             
             // Extract continent and subcontinent IDs (GA4 uses numeric IDs)
@@ -981,11 +1060,6 @@ class GA4_Cronjob_Manager
             if (isset($original_headers[$stored_key]) && !empty($original_headers[$stored_key])) {
                 $headers[$header_name] = $original_headers[$stored_key];
             }
-        }
-        
-        // Log headers being used for debugging
-        if ($this->logger) {
-            $this->logger->debug("Direct GA4 transmission using headers: " . wp_json_encode($headers));
         }
         
         $response = wp_remote_post($url, array(
@@ -1289,5 +1363,194 @@ class GA4_Cronjob_Manager
             'events' => $events,
             'total' => intval($total_events)
         );
+    }
+    
+    /**
+     * Apply analytics consent denied rules (when ad_user_data is DENIED)
+     * Similar to applyAnalyticsConsentDenied in Cloudflare worker
+     *
+     * @since    3.0.0
+     * @param    array    $ga4_payload    The GA4 payload.
+     * @return   array    Modified payload.
+     */
+    private function apply_analytics_consent_denied($ga4_payload)
+    {
+        // Remove or anonymize personal identifiers
+        if (isset($ga4_payload['user_id'])) {
+            unset($ga4_payload['user_id']);
+        }
+        
+        // Use session-based client ID if available
+        if (isset($ga4_payload['client_id']) && strpos($ga4_payload['client_id'], 'session_') !== 0) {
+            // Keep session-based client IDs, anonymize persistent ones
+            $timestamp = time();
+            $ga4_payload['client_id'] = "session_{$timestamp}";
+        }
+        
+        // Remove precise location data from params
+        if (isset($ga4_payload['events'][0]['params'])) {
+            $location_params = array('geo_latitude', 'geo_longitude', 'geo_city', 'geo_region', 'geo_country');
+            foreach ($location_params as $param) {
+                unset($ga4_payload['events'][0]['params'][$param]);
+            }
+            // Keep only continent-level location (geo_continent should already be set if available)
+        }
+        
+        // Anonymize user agent if present
+        if (isset($ga4_payload['events'][0]['params']['user_agent'])) {
+            $ga4_payload['events'][0]['params']['user_agent'] = $this->anonymize_user_agent($ga4_payload['events'][0]['params']['user_agent']);
+        }
+        
+        return $ga4_payload;
+    }
+    
+    /**
+     * Apply advertising consent denied rules (when ad_personalization is DENIED)
+     * Similar to applyAdvertisingConsentDenied in Cloudflare worker
+     *
+     * @since    3.0.0
+     * @param    array    $ga4_payload    The GA4 payload.
+     * @return   array    Modified payload.
+     */
+    private function apply_advertising_consent_denied($ga4_payload)
+    {
+        if (!isset($ga4_payload['events'][0]['params'])) {
+            return $ga4_payload;
+        }
+        
+        $params = &$ga4_payload['events'][0]['params'];
+        
+        // Remove advertising attribution data
+        $ad_params = array('gclid', 'content', 'term', 'originalGclid', 'originalContent', 'originalTerm');
+        foreach ($ad_params as $param) {
+            unset($params[$param]);
+        }
+        
+        // Anonymize campaign data for paid traffic
+        if (isset($params['campaign']) && 
+            !in_array($params['campaign'], array('(organic)', '(direct)', '(not set)', '(referral)'))) {
+            $params['campaign'] = '(denied consent)';
+        }
+        
+        // Anonymize original campaign data for paid traffic
+        if (isset($params['originalCampaign']) && 
+            !in_array($params['originalCampaign'], array('(organic)', '(direct)', '(not set)', '(referral)'))) {
+            $params['originalCampaign'] = '(denied consent)';
+        }
+        
+        // Anonymize source/medium for paid traffic
+        $paid_mediums = array('cpc', 'ppc', 'paidsearch', 'display', 'banner', 'cpm');
+        if (isset($params['medium']) && in_array($params['medium'], $paid_mediums)) {
+            $params['source'] = '(denied consent)';
+            $params['medium'] = '(denied consent)';
+        }
+        
+        // Anonymize original source/medium for paid traffic
+        if (isset($params['originalMedium']) && in_array($params['originalMedium'], $paid_mediums)) {
+            $params['originalSource'] = '(denied consent)';
+            $params['originalMedium'] = '(denied consent)';
+        }
+        
+        // Anonymize traffic type if it reveals paid advertising
+        $paid_traffic_types = array('paid_search', 'paid_social', 'display', 'cpc');
+        if (isset($params['traffic_type']) && in_array($params['traffic_type'], $paid_traffic_types)) {
+            $params['traffic_type'] = '(denied consent)';
+        }
+        
+        // Anonymize original traffic type if it reveals paid advertising
+        if (isset($params['originalTrafficType']) && in_array($params['originalTrafficType'], $paid_traffic_types)) {
+            $params['originalTrafficType'] = '(denied consent)';
+        }
+        
+        return $ga4_payload;
+    }
+    
+    /**
+     * Convert country name to ISO country code for GA4
+     *
+     * @since    3.0.0
+     * @param    string   $country_name    Country name.
+     * @return   string   ISO country code.
+     */
+    private function convert_country_name_to_iso($country_name)
+    {
+        // Common country name to ISO code mappings
+        $country_mappings = array(
+            'The Netherlands' => 'NL',
+            'Netherlands' => 'NL',
+            'Belgium' => 'BE',
+            'Germany' => 'DE',
+            'France' => 'FR',
+            'United Kingdom' => 'GB',
+            'United States' => 'US',
+            'Canada' => 'CA',
+            'Australia' => 'AU',
+            'Japan' => 'JP',
+            'China' => 'CN',
+            'India' => 'IN',
+            'Brazil' => 'BR',
+            'Mexico' => 'MX',
+            'Italy' => 'IT',
+            'Spain' => 'ES',
+            'Poland' => 'PL',
+            'Sweden' => 'SE',
+            'Norway' => 'NO',
+            'Denmark' => 'DK',
+            'Finland' => 'FI',
+            'Switzerland' => 'CH',
+            'Austria' => 'AT',
+            'Czech Republic' => 'CZ',
+            'Hungary' => 'HU',
+            'Portugal' => 'PT',
+            'Ireland' => 'IE',
+            'Russia' => 'RU',
+            'Turkey' => 'TR',
+            'South Africa' => 'ZA',
+            'Argentina' => 'AR',
+            'Chile' => 'CL',
+            'Colombia' => 'CO',
+            'Peru' => 'PE',
+            'Venezuela' => 'VE',
+            'Thailand' => 'TH',
+            'Malaysia' => 'MY',
+            'Singapore' => 'SG',
+            'Philippines' => 'PH',
+            'Indonesia' => 'ID',
+            'Vietnam' => 'VN',
+            'South Korea' => 'KR',
+            'Taiwan' => 'TW',
+            'Hong Kong' => 'HK',
+            'New Zealand' => 'NZ',
+            'Israel' => 'IL',
+            'Egypt' => 'EG',
+            'Saudi Arabia' => 'SA',
+            'United Arab Emirates' => 'AE',
+            'Kuwait' => 'KW',
+            'Qatar' => 'QA',
+            'Bahrain' => 'BH',
+            'Oman' => 'OM',
+            'Jordan' => 'JO',
+            'Lebanon' => 'LB',
+            'Pakistan' => 'PK',
+            'Bangladesh' => 'BD',
+            'Sri Lanka' => 'LK',
+            'Nepal' => 'NP',
+            'Myanmar' => 'MM',
+            'Cambodia' => 'KH',
+            'Laos' => 'LA'
+        );
+        
+        // Check if we have a direct mapping
+        if (isset($country_mappings[$country_name])) {
+            return $country_mappings[$country_name];
+        }
+        
+        // If country name is already 2 characters (likely ISO code), return as-is
+        if (strlen($country_name) === 2 && ctype_alpha($country_name)) {
+            return strtoupper($country_name);
+        }
+        
+        // Fallback: return the original name (not ideal but better than nothing)
+        return $country_name;
     }
 }

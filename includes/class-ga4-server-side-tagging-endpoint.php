@@ -959,10 +959,18 @@ class GA4_Server_Side_Tagging_Endpoint
                     }
                 }
                 
-                // Get original request headers
+                // Get original request headers - filter only essential ones
                 $original_headers = array();
+                $essential_headers = array(
+                    'user_agent', 'accept_language', 'accept', 'referer', 
+                    'x_forwarded_for', 'x_real_ip'
+                );
+                
                 foreach ($request->get_headers() as $key => $value) {
-                    $original_headers[$key] = is_array($value) ? implode(', ', $value) : $value;
+                    $header_key = strtolower(str_replace('-', '_', $key));
+                    if (in_array($header_key, $essential_headers)) {
+                        $original_headers[$key] = is_array($value) ? implode(', ', $value) : $value;
+                    }
                 }
                 
                 // Queue the event

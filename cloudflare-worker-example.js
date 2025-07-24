@@ -1577,7 +1577,8 @@ async function handleBatchEvents(batchPayload, request) {
           name: event.name,
           params: event.params || {},
           consent: batchPayload.consent,
-          timestamp: event.timestamp || batchPayload.timestamp
+          timestamp: event.timestamp || batchPayload.timestamp,
+          headers: event.headers || batchPayload.headers || {}
         };
 
         // Add page context and enrich incomplete events with session data
@@ -1746,6 +1747,14 @@ async function handleBatchEvents(batchPayload, request) {
  * @param {Request} request
  */
 async function handleGA4Event(payload, request) {
+  // Extract original headers if provided by the WordPress plugin
+  const originalHeaders = payload.headers || {};
+  
+  // Remove headers from payload before processing (they shouldn't go to GA4)
+  if (payload.headers) {
+    delete payload.headers;
+  }
+  
   // Process the event data
   const processedData = processEventData(payload, request);
   let payloadDebug = false;
@@ -1940,14 +1949,47 @@ async function handleGA4Event(payload, request) {
   if(processedData.params.debug_mode == true){
       payloadDebug = true;
   }
-  // Send the event to GA4
+  // Build headers for GA4 request using original headers when available
+  const ga4RequestHeaders = {
+    "Content-Type": "application/json",
+  };
+  
+  // Map WordPress header keys to proper HTTP header names for GA4
+  const headerMapping = {
+    'user_agent': 'User-Agent',
+    'accept_language': 'Accept-Language', 
+    'accept': 'Accept',
+    'referer': 'Referer',
+    'x_forwarded_for': 'X-Forwarded-For',
+    'x_real_ip': 'X-Real-IP'
+  };
+  
+  // Process and map headers from WordPress
+  for (const [wpKey, httpHeader] of Object.entries(headerMapping)) {
+    if (originalHeaders[wpKey]) {
+      ga4RequestHeaders[httpHeader] = originalHeaders[wpKey];
+    }
+  }
+  
+  // Also check for direct header name matches (fallback)
+  const directHeaderNames = ['User-Agent', 'Accept-Language', 'Accept', 'Referer', 'X-Forwarded-For', 'X-Real-IP'];
+  for (const headerName of directHeaderNames) {
+    if (originalHeaders[headerName] && !ga4RequestHeaders[headerName]) {
+      ga4RequestHeaders[headerName] = originalHeaders[headerName];
+    }
+  }
+  
+  // Log final headers being sent to GA4
+  if (DEBUG_MODE) {
+    console.log('🚀 Headers being sent to GA4:', JSON.stringify(ga4RequestHeaders));
+  }
+  
+  // Send the event to GA4 with original headers
   const ga4Response = await fetch(
     `${GA4_ENDPOINT}?measurement_id=${GA4_MEASUREMENT_ID}&api_secret=${GA4_API_SECRET}`,
     {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
+      headers: ga4RequestHeaders,
       body: JSON.stringify(ga4Payload),
     }
   );
