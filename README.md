@@ -1,22 +1,22 @@
 # GA4 Server-Side Tagging Plugin
 
-A comprehensive WordPress plugin that provides server-side Google Analytics 4 (GA4) tracking with GDPR compliance, advanced bot detection, and Cloudflare Worker integration.
+A comprehensive WordPress plugin that provides server-side Google Analytics 4 (GA4) tracking with multiple transmission methods, GDPR compliance, advanced bot detection, and optional Cloudflare Worker integration.
 
 ## Overview
 
-This plugin enables server-side tracking for GA4, bypassing client-side ad blockers while maintaining full GDPR compliance. It features advanced bot detection, A/B testing capabilities, click tracking, and seamless integration with WooCommerce for e-commerce tracking.
+This plugin enables flexible server-side tracking for GA4 with three transmission methods: direct Cloudflare Worker integration (bypassing ad blockers), WordPress REST API with queuing system, or direct Google Analytics transmission. All methods maintain full GDPR compliance with advanced bot detection, A/B testing capabilities, click tracking, and seamless WooCommerce integration.
 
 ### Key Features
 
-- **=€ Server-Side Tracking**: Bypass ad blockers with Cloudflare Worker integration
-- **=á GDPR Compliant**: Built-in consent management with Iubenda support
+- **ðŸš€ Flexible Server-Side Tracking**: Three transmission methods including optional Cloudflare Worker integration
+- **=ï¿½ GDPR Compliant**: Built-in consent management with Iubenda support
 - **> Bot Detection**: Advanced bot filtering to ensure data quality
-- **>ê A/B Testing**: Built-in A/B testing framework with CSS-based variants
+- **>ï¿½ A/B Testing**: Built-in A/B testing framework with CSS-based variants
 - **=F Click Tracking**: Track custom events based on CSS selectors
-- **=Ò WooCommerce Ready**: Complete e-commerce tracking integration
-- **¡ High Performance**: Event queuing system with batch processing
+- **=ï¿½ WooCommerce Ready**: Complete e-commerce tracking integration
+- **ï¿½ High Performance**: Event queuing system with batch processing
 - **= Secure**: JWT encryption and API key authentication
-- **=Ê Comprehensive Logging**: Detailed event monitoring and debugging
+- **=ï¿½ Comprehensive Logging**: Detailed event monitoring and debugging
 
 ## Installation
 
@@ -33,7 +33,153 @@ This plugin enables server-side tracking for GA4, bypassing client-side ad block
 1. **Navigate to Settings**: Go to `GA4 Server-Side Tagging > Settings`
 2. **Configure GA4**: Enter your GA4 Measurement ID and API Secret
 3. **Set up GDPR**: Configure consent management (Iubenda or custom selectors)
-4. **Choose Transmission Method**: Direct to Cloudflare or WP REST Endpoint
+4. **Choose Transmission Method**: Direct to Cloudflare, WP REST Endpoint, or Direct to GA4
+
+## Transmission Methods & Data Flow
+
+### Overview
+
+The plugin offers three transmission methods for sending analytics data, each with different security, performance, and privacy characteristics:
+
+1. **Direct to Cloudflare** (Recommended) - Bypass WordPress entirely
+2. **WP REST Endpoint** - Queue through WordPress then send to Cloudflare  
+3. **Direct to GA4** - Send directly to Google Analytics (bypass Cloudflare)
+
+### Method 1: Direct to Cloudflare (direct_to_cf)
+
+**Best for**: Maximum performance, ad-blocker bypass, minimal server load
+
+**Data Flow**:
+```
+Browser JavaScript â†’ Cloudflare Worker â†’ Google Analytics
+```
+
+**Encryption**: 
+- Time-based JWT tokens (short-lived, 5-10 minute expiry)
+- Encrypted with rotating keys for maximum security
+- Headers are never encrypted (stored as plain text for efficiency)
+
+**Headers**: 
+- Essential headers (User-Agent, Accept-Language, Referer, IP) filtered and sent
+- Fallback to Cloudflare request headers if payload headers unavailable
+- No sensitive data (cookies, auth headers) transmitted
+
+**GDPR Compliance**:
+- Full consent processing in Cloudflare Worker
+- Advertising consent denied: Anonymizes paid traffic sources to "(denied consent)"
+- Analytics consent denied: Removes personal identifiers, precise location data
+
+### Method 2: WP REST Endpoint (wp_rest_endpoint)
+
+**Best for**: Full logging, debugging, complex processing, hybrid approach
+
+**Data Flow**:
+```
+Browser JavaScript â†’ WordPress REST API â†’ Event Queue â†’ Cloudflare Worker â†’ Google Analytics
+```
+
+**Encryption**:
+- Permanent JWT tokens (no expiry) for database storage
+- Event data encrypted with permanent keys
+- Headers stored separately (not encrypted for performance)
+- Final payload can be encrypted before sending to Cloudflare
+
+**Headers**:
+- Full header capture and filtering in WordPress
+- Essential headers (User-Agent, Accept-Language, Referer, X-Forwarded-For, X-Real-IP) preserved
+- Cookie headers and sensitive data filtered out before storage
+
+**Processing**:
+- Events queued in WordPress database
+- Background cron processing every 5 minutes  
+- Batch processing (up to 1000 events per batch)
+- Comprehensive logging and monitoring
+- Retry logic for failed events
+
+**GDPR Compliance**:
+- WordPress-side consent validation before queuing
+- Cloudflare Worker applies additional consent processing
+- Complete audit trail in WordPress event logs
+
+### Method 3: Direct to GA4 (Enable "Disable Cloudflare Proxy")
+
+**Best for**: Simple setup, no Cloudflare Worker needed, direct Google integration
+
+**Data Flow**:
+```
+Browser JavaScript â†’ WordPress REST API â†’ Event Queue â†’ Google Analytics
+```
+
+**Encryption**:
+- Data never encrypted when sending to GA4 (Google doesn't accept encrypted payloads)
+- Events stored encrypted in WordPress database
+- Headers stored as plain text for GA4 compatibility
+
+**Headers**:
+- WordPress captures and filters essential headers
+- Headers mapped to proper HTTP format for GA4 requests
+- Original website headers preserved and forwarded to Google
+
+**GA4 Payload Structure**:
+- Follows Google Analytics Measurement Protocol specification
+- Top-level fields: `client_id`, `user_id`, `consent`, `user_location`, `device`, `user_agent`
+- Event-level consent parameter: `"consent": "ad_personalization: GRANTED. ad_user_data: GRANTED. reason: button_click_immediate"`
+- Privacy-compliant location data with proper ISO country codes
+
+**GDPR Compliance**:
+- Same consent processing as Cloudflare Worker method
+- Direct application of consent rules in WordPress
+- Advertising consent denied: Traffic sources anonymized to "(denied consent)"
+- Analytics consent denied: Personal data stripped, location anonymized
+
+### Security & Privacy
+
+**JWT Encryption**:
+- Time-based JWTs: Short-lived tokens for direct transmission (Method 1)
+- Permanent JWTs: Long-term storage encryption for database (Methods 2 & 3)
+- Rotation-based encryption keys prevent replay attacks
+- Headers never encrypted (performance optimization)
+
+**Data Privacy**:
+- Essential headers only: User-Agent, Accept-Language, Referer, IP addresses
+- Cookie filtering: No session cookies, auth tokens, or tracking IDs transmitted
+- IP privacy: Uses Cloudflare's CF-Connecting-IP for accurate geolocation
+- Consent enforcement: Real-time consent validation before any processing
+
+**Bot Detection**:
+- User-Agent analysis for bot patterns
+- Request rate limiting per IP address
+- Header validation (missing Accept, Accept-Language indicates bots)
+- Behavioral analysis for suspicious patterns
+- All methods include bot filtering before data transmission
+
+### Performance Characteristics
+
+| Method | Page Load Impact | Server Load | Reliability | Ad-blocker Bypass |
+|--------|------------------|-------------|-------------|-------------------|
+| Direct to Cloudflare | Minimal | Very Low | Highest | Yes |
+| WP REST Endpoint | Low | Medium | High | Yes |
+| Direct to GA4 | Low | Medium | High | No |
+
+### Choosing the Right Method
+
+**Use Direct to Cloudflare when**:
+- Maximum performance is critical
+- High traffic websites  
+- Ad-blocker bypass is important
+- Minimal WordPress server load desired
+
+**Use WP REST Endpoint when**:
+- Detailed logging and monitoring needed
+- Complex event processing required
+- Debugging capabilities important
+- Hybrid approach with fallback options
+
+**Use Direct to GA4 when**:
+- Simple setup without Cloudflare Worker
+- Direct Google Analytics integration preferred
+- No additional infrastructure dependencies
+- Testing and development environments
 
 ### Cloudflare Worker Setup (Recommended)
 

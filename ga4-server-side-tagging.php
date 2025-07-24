@@ -10,7 +10,7 @@
  * @wordpress-plugin
  * Plugin Name:       GA4 Server-Side Tagging
  * Plugin URI:        https://jacht.digital/
- * Description:       Server-side tagging system for GA4 that is fully compatible with WordPress and WooCommerce, hosted on Cloudflare.
+ * Description:       Server-side tagging system for GA4 with multiple transmission methods, fully compatible with WordPress and WooCommerce.
  * Version:           3.0.0
  * Requires at least: 5.2
  * Requires PHP:      7.2
