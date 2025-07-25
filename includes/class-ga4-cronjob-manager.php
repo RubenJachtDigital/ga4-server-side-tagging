@@ -623,8 +623,11 @@ class GA4_Cronjob_Manager
             $ga4_payload['user_location'] = $user_location;
         }
         
-        // Extract device info from params and add at top level
-        $device_info = $this->extract_device_info($ga4_payload['events'][0]['params']);
+        // Get original headers for device extraction
+        $original_headers = $this->decrypt_headers_from_storage($original_event->original_headers);
+        
+        // Extract device info from params and headers (consent-aware)
+        $device_info = $this->extract_device_info($ga4_payload['events'][0]['params'], $consent_denied ?? false, $original_headers);
         if (!empty($device_info)) {
             $ga4_payload['device'] = $device_info;
         }
@@ -648,6 +651,13 @@ class GA4_Cronjob_Manager
             */
             
             unset($ga4_payload['events'][0]['params']['user_agent']);
+        }
+        
+        // Add IP override when consent is granted (analytics consent)
+        $ip_override = $this->extract_client_ip_from_headers($original_headers);
+        if (!empty($ip_override) && !($consent_denied ?? false)) {
+            // Only add IP when analytics consent is granted
+            $ga4_payload['ip_override'] = $ip_override;
         }
         
         // Add consent parameter to event params (similar to Cloudflare worker)
@@ -692,10 +702,12 @@ class GA4_Cronjob_Manager
             // Geographic data (moved to user_location)
             'geo_city', 'geo_country', 'geo_region', 'geo_continent', 
             'geo_city_tz', 'geo_country_tz', 'geo_latitude', 'geo_longitude',
-            // Device data (moved to device)
+            // Device data (moved to device object)
             'device_type', 'is_mobile', 'is_tablet', 'is_desktop', 
-            'browser_name', 'screen_resolution', 'os_name', 'device_model', 
-            'device_brand', 'viewport_width', 'viewport_height',
+            'browser_name', 'browser_version', 'screen_resolution', 'screen_width', 'screen_height',
+            'os_name', 'os_version', 'device_model', 'device_brand', 
+            'mobile_model_name', 'mobile_brand_name',
+            'viewport_width', 'viewport_height', 'language', 'accept_language',
             // User identification (moved to top level)
             'user_id'
         );
@@ -926,62 +938,489 @@ class GA4_Cronjob_Manager
     }
     
     /**
-     * Extract device information from event params
+     * Extract device information from event params and headers with consent-aware filtering
      *
      * @since    3.0.0
-     * @param    array    $params    Event parameters.
+     * @param    array    $params           Event parameters.
+     * @param    boolean  $consent_denied   Whether analytics consent was denied.
+     * @param    array    $headers          Original request headers.
      * @return   array    Device data for GA4.
      */
-    private function extract_device_info(&$params)
+    private function extract_device_info(&$params, $consent_denied = false, $headers = array())
     {
         $device = array();
         
-        // Extract device category (most important field according to GA4 docs)
+        // Parse User-Agent from headers if available
+        $user_agent_data = array();
+        if (!empty($headers['user_agent'])) {
+            $user_agent_data = $this->parse_user_agent($headers['user_agent']);
+        } elseif (!empty($params['user_agent'])) {
+            $user_agent_data = $this->parse_user_agent($params['user_agent']);
+        }
+        
+        // Always allowed device data (basic functionality, not personally identifiable)
+        
+        // Extract device category (most important field - always allowed)
         if (isset($params['device_type'])) {
-            $device['category'] = $params['device_type']; // mobile, desktop, tablet
+            $device['category'] = $this->normalize_device_category($params['device_type']);
         } elseif (isset($params['is_mobile']) && $params['is_mobile']) {
             $device['category'] = 'mobile';
         } elseif (isset($params['is_tablet']) && $params['is_tablet']) {
             $device['category'] = 'tablet';
         } elseif (isset($params['is_desktop']) && $params['is_desktop']) {
             $device['category'] = 'desktop';
+        } elseif (!empty($user_agent_data['device_type'])) {
+            // Fallback to User-Agent parsed device type
+            $device['category'] = $user_agent_data['device_type'];
         }
         
-        // Extract language (important for localization)
+        // Extract language (important for localization - always allowed)
         if (isset($params['language'])) {
-            $device['language'] = $params['language'];
+            $device['language'] = $this->normalize_language_code($params['language']);
+        } elseif (isset($params['accept_language'])) {
+            // Fallback to accept-language header
+            $device['language'] = $this->extract_primary_language($params['accept_language']);
+        } elseif (!empty($headers['accept_language'])) {
+            // Fallback to headers accept-language
+            $device['language'] = $this->extract_primary_language($headers['accept_language']);
         }
         
-        // Extract screen resolution (useful for responsive design insights)
-        if (isset($params['screen_resolution'])) {
-            $device['screen_resolution'] = $params['screen_resolution'];
-        }
-        
-        // Extract browser information
-        if (isset($params['browser_name'])) {
-            $device['browser'] = $params['browser_name'];
-        }
-        
-        // Extract operating system information if available
-        if (isset($params['os_name'])) {
-            $device['operating_system'] = $params['os_name'];
-        }
-        
-        // Extract device model/brand if available (mainly for mobile)
-        if (isset($params['device_model'])) {
-            $device['mobile_model_name'] = $params['device_model'];
-        }
-        
-        if (isset($params['device_brand'])) {
-            $device['mobile_brand_name'] = $params['device_brand'];
-        }
-        
-        // Extract viewport dimensions if available
-        if (isset($params['viewport_width']) && isset($params['viewport_height'])) {
-            $device['viewport_size'] = $params['viewport_width'] . 'x' . $params['viewport_height'];
+        // Consent-aware device data extraction
+        if (!$consent_denied) {
+            // Full device data when consent is granted
+            
+            // Screen resolution (useful for responsive design insights)
+            if (isset($params['screen_resolution'])) {
+                $device['screen_resolution'] = $this->normalize_screen_resolution($params['screen_resolution']);
+            } elseif (isset($params['screen_width']) && isset($params['screen_height'])) {
+                $device['screen_resolution'] = $params['screen_width'] . 'x' . $params['screen_height'];
+            }
+            
+            // Operating system information
+            if (isset($params['os_name'])) {
+                $device['operating_system'] = $this->normalize_os_name($params['os_name']);
+            } elseif (!empty($user_agent_data['os_name'])) {
+                $device['operating_system'] = $this->normalize_os_name($user_agent_data['os_name']);
+            }
+            
+            if (isset($params['os_version'])) {
+                $device['operating_system_version'] = $this->normalize_version($params['os_version']);
+            } elseif (!empty($user_agent_data['os_version'])) {
+                $device['operating_system_version'] = $this->normalize_version($user_agent_data['os_version']);
+            }
+            
+            // Browser information with version
+            if (isset($params['browser_name'])) {
+                $device['browser'] = $this->normalize_browser_name($params['browser_name']);
+            } elseif (!empty($user_agent_data['browser_name'])) {
+                $device['browser'] = $this->normalize_browser_name($user_agent_data['browser_name']);
+            }
+            
+            if (isset($params['browser_version'])) {
+                $device['browser_version'] = $this->normalize_version($params['browser_version']);
+            } elseif (!empty($user_agent_data['browser_version'])) {
+                $device['browser_version'] = $this->normalize_version($user_agent_data['browser_version']);
+            }
+            
+            // Device model and brand (mainly for mobile devices)
+            if (isset($params['device_model'])) {
+                $device['model'] = $this->normalize_device_model($params['device_model']);
+            }
+            
+            if (isset($params['device_brand'])) {
+                $device['brand'] = $this->normalize_device_brand($params['device_brand']);
+            }
+            
+            // Mobile-specific fields (legacy support)
+            if (isset($params['mobile_model_name'])) {
+                $device['model'] = $this->normalize_device_model($params['mobile_model_name']);
+            }
+            
+            if (isset($params['mobile_brand_name'])) {
+                $device['brand'] = $this->normalize_device_brand($params['mobile_brand_name']);
+            }
+            
+        } else {
+            // Consent denied - use generalized device data only
+            
+            // Generalized screen resolution categories instead of exact values
+            if (isset($params['screen_resolution'])) {
+                $device['screen_resolution'] = $this->generalize_screen_resolution($params['screen_resolution']);
+            } elseif (isset($params['screen_width']) && isset($params['screen_height'])) {
+                $resolution = $params['screen_width'] . 'x' . $params['screen_height'];
+                $device['screen_resolution'] = $this->generalize_screen_resolution($resolution);
+            }
+            
+            // Generalized OS information (major versions only)
+            if (isset($params['os_name'])) {
+                $device['operating_system'] = $this->generalize_os_name($params['os_name']);
+            } elseif (!empty($user_agent_data['os_name'])) {
+                $device['operating_system'] = $this->generalize_os_name($user_agent_data['os_name']);
+            }
+            
+            if (isset($params['os_version'])) {
+                $device['operating_system_version'] = $this->generalize_os_version($params['os_version']);
+            } elseif (!empty($user_agent_data['os_version'])) {
+                $device['operating_system_version'] = $this->generalize_os_version($user_agent_data['os_version']);
+            }
+            
+            // Generalized browser information (major versions only)
+            if (isset($params['browser_name'])) {
+                $device['browser'] = $this->generalize_browser_name($params['browser_name']);
+            } elseif (!empty($user_agent_data['browser_name'])) {
+                $device['browser'] = $this->generalize_browser_name($user_agent_data['browser_name']);
+            }
+            
+            if (isset($params['browser_version'])) {
+                $device['browser_version'] = $this->generalize_browser_version($params['browser_version']);
+            } elseif (!empty($user_agent_data['browser_version'])) {
+                $device['browser_version'] = $this->generalize_browser_version($user_agent_data['browser_version']);
+            }
+            
+            // No specific device model/brand when consent is denied
+            // These could be used for fingerprinting
         }
         
         return $device;
+    }
+    
+    /**
+     * Normalize device category to GA4 standard values
+     *
+     * @since    3.0.0
+     * @param    string   $category   Raw device category.
+     * @return   string   Normalized category.
+     */
+    private function normalize_device_category($category)
+    {
+        $category = strtolower(trim($category));
+        
+        // Map common variations to GA4 standard values
+        $category_map = array(
+            'phone' => 'mobile',
+            'smartphone' => 'mobile',
+            'mobile phone' => 'mobile',
+            'tablet' => 'tablet',
+            'desktop' => 'desktop',
+            'computer' => 'desktop',
+            'pc' => 'desktop',
+            'laptop' => 'desktop',
+            'smart tv' => 'smart tv',
+            'tv' => 'smart tv',
+            'smarttv' => 'smart tv',
+            'wearable' => 'wearable',
+            'watch' => 'wearable',
+            'smart watch' => 'wearable'
+        );
+        
+        return isset($category_map[$category]) ? $category_map[$category] : $category;
+    }
+    
+    /**
+     * Normalize language code to ISO 639-1 format
+     *
+     * @since    3.0.0
+     * @param    string   $language   Raw language string.
+     * @return   string   Normalized language code.
+     */
+    private function normalize_language_code($language)
+    {
+        if (empty($language)) {
+            return '';
+        }
+        
+        // Extract primary language from locale (e.g., "en-US" -> "en")
+        $language = strtolower(trim($language));
+        if (strpos($language, '-') !== false) {
+            return substr($language, 0, strpos($language, '-'));
+        }
+        
+        return $language;
+    }
+    
+    /**
+     * Extract primary language from Accept-Language header
+     *
+     * @since    3.0.0
+     * @param    string   $accept_language   Accept-Language header value.
+     * @return   string   Primary language code.
+     */
+    private function extract_primary_language($accept_language)
+    {
+        if (empty($accept_language)) {
+            return '';
+        }
+        
+        // Parse Accept-Language header (e.g., "en-US,en;q=0.9,es;q=0.8")
+        $languages = explode(',', $accept_language);
+        $primary_lang = trim($languages[0]);
+        
+        // Remove quality factor if present
+        if (strpos($primary_lang, ';') !== false) {
+            $primary_lang = substr($primary_lang, 0, strpos($primary_lang, ';'));
+        }
+        
+        return $this->normalize_language_code($primary_lang);
+    }
+    
+    /**
+     * Normalize screen resolution
+     *
+     * @since    3.0.0
+     * @param    string   $resolution   Raw resolution string.
+     * @return   string   Normalized resolution.
+     */
+    private function normalize_screen_resolution($resolution)
+    {
+        if (empty($resolution)) {
+            return '';
+        }
+        
+        // Ensure format is WIDTHxHEIGHT
+        $resolution = preg_replace('/[^\d\x]/', '', $resolution);
+        if (preg_match('/^(\d+)[x\*](\d+)$/', $resolution, $matches)) {
+            return $matches[1] . 'x' . $matches[2];
+        }
+        
+        return $resolution;
+    }
+    
+    /**
+     * Normalize OS name
+     *
+     * @since    3.0.0
+     * @param    string   $os_name   Raw OS name.
+     * @return   string   Normalized OS name.
+     */
+    private function normalize_os_name($os_name)
+    {
+        $os_name = trim($os_name);
+        
+        // Common OS name mappings
+        $os_map = array(
+            'Windows NT' => 'Windows',
+            'Win32' => 'Windows',
+            'Win64' => 'Windows',
+            'Mac OS' => 'macOS',
+            'Mac OS X' => 'macOS',
+            'MacOS' => 'macOS',
+            'iPhone OS' => 'iOS',
+            'iPad OS' => 'iPadOS',
+            'iPadOS' => 'iPadOS'
+        );
+        
+        foreach ($os_map as $pattern => $normalized) {
+            if (stripos($os_name, $pattern) !== false) {
+                return $normalized;
+            }
+        }
+        
+        return $os_name;
+    }
+    
+    /**
+     * Normalize browser name
+     *
+     * @since    3.0.0
+     * @param    string   $browser_name   Raw browser name.
+     * @return   string   Normalized browser name.
+     */
+    private function normalize_browser_name($browser_name)
+    {
+        $browser_name = trim($browser_name);
+        
+        // Common browser name mappings
+        $browser_map = array(
+            'Google Chrome' => 'Chrome',
+            'Mozilla Firefox' => 'Firefox',
+            'Internet Explorer' => 'Internet Explorer',
+            'Microsoft Edge' => 'Edge',
+            'Safari' => 'Safari',
+            'Opera' => 'Opera',
+            'Samsung Internet' => 'Samsung Internet'
+        );
+        
+        foreach ($browser_map as $pattern => $normalized) {
+            if (stripos($browser_name, $pattern) !== false) {
+                return $normalized;
+            }
+        }
+        
+        return $browser_name;
+    }
+    
+    /**
+     * Normalize version strings
+     *
+     * @since    3.0.0
+     * @param    string   $version   Raw version string.
+     * @return   string   Normalized version.
+     */
+    private function normalize_version($version)
+    {
+        if (empty($version)) {
+            return '';
+        }
+        
+        // Extract version numbers (e.g., "13.5.1" from "Version 13.5.1")
+        if (preg_match('/(\d+(?:\.\d+)*(?:\.\d+)?)/', $version, $matches)) {
+            return $matches[1];
+        }
+        
+        return $version;
+    }
+    
+    /**
+     * Normalize device model
+     *
+     * @since    3.0.0
+     * @param    string   $model   Raw device model.
+     * @return   string   Normalized model.
+     */
+    private function normalize_device_model($model)
+    {
+        return trim($model);
+    }
+    
+    /**
+     * Normalize device brand
+     *
+     * @since    3.0.0
+     * @param    string   $brand   Raw device brand.
+     * @return   string   Normalized brand.
+     */
+    private function normalize_device_brand($brand)
+    {
+        return trim($brand);
+    }
+    
+    /**
+     * Generalize screen resolution for privacy (consent denied)
+     *
+     * @since    3.0.0
+     * @param    string   $resolution   Exact resolution.
+     * @return   string   Generalized resolution category.
+     */
+    private function generalize_screen_resolution($resolution)
+    {
+        if (empty($resolution)) {
+            return '';
+        }
+        
+        // Extract width and height
+        if (preg_match('/^(\d+)[x\*](\d+)$/', $resolution, $matches)) {
+            $width = intval($matches[1]);
+            $height = intval($matches[2]);
+            
+            // Categorize by common resolution ranges
+            if ($width <= 768) {
+                return 'mobile'; // Mobile/small tablet
+            } elseif ($width <= 1024) {
+                return 'tablet'; // Tablet
+            } elseif ($width <= 1366) {
+                return 'laptop'; // Small laptop
+            } elseif ($width <= 1920) {
+                return 'desktop'; // Desktop/large laptop
+            } else {
+                return 'large'; // Large displays
+            }
+        }
+        
+        return 'unknown';
+    }
+    
+    /**
+     * Generalize OS name for privacy (consent denied)
+     *
+     * @since    3.0.0
+     * @param    string   $os_name   Specific OS name.
+     * @return   string   Generalized OS category.
+     */
+    private function generalize_os_name($os_name)
+    {
+        $os_name = strtolower($os_name);
+        
+        if (strpos($os_name, 'windows') !== false) {
+            return 'Windows';
+        } elseif (strpos($os_name, 'mac') !== false || strpos($os_name, 'darwin') !== false) {
+            return 'macOS';
+        } elseif (strpos($os_name, 'ios') !== false) {
+            return 'iOS';
+        } elseif (strpos($os_name, 'android') !== false) {
+            return 'Android';
+        } elseif (strpos($os_name, 'linux') !== false) {
+            return 'Linux';
+        }
+        
+        return 'Other';
+    }
+    
+    /**
+     * Generalize OS version for privacy (consent denied)
+     *
+     * @since    3.0.0
+     * @param    string   $os_version   Specific OS version.
+     * @return   string   Generalized version.
+     */
+    private function generalize_os_version($os_version)
+    {
+        if (empty($os_version)) {
+            return '';
+        }
+        
+        // Extract major version only (e.g., "13.5.1" -> "13")
+        if (preg_match('/^(\d+)/', $os_version, $matches)) {
+            return $matches[1];
+        }
+        
+        return '';
+    }
+    
+    /**
+     * Generalize browser name for privacy (consent denied)
+     *
+     * @since    3.0.0
+     * @param    string   $browser_name   Specific browser name.
+     * @return   string   Generalized browser category.
+     */
+    private function generalize_browser_name($browser_name)
+    {
+        $browser_name = strtolower($browser_name);
+        
+        if (strpos($browser_name, 'chrome') !== false) {
+            return 'Chrome';
+        } elseif (strpos($browser_name, 'firefox') !== false) {
+            return 'Firefox';
+        } elseif (strpos($browser_name, 'safari') !== false) {
+            return 'Safari';
+        } elseif (strpos($browser_name, 'edge') !== false) {
+            return 'Edge';
+        } elseif (strpos($browser_name, 'opera') !== false) {
+            return 'Opera';
+        }
+        
+        return 'Other';
+    }
+    
+    /**
+     * Generalize browser version for privacy (consent denied)
+     *
+     * @since    3.0.0
+     * @param    string   $browser_version   Specific browser version.
+     * @return   string   Generalized version.
+     */
+    private function generalize_browser_version($browser_version)
+    {
+        if (empty($browser_version)) {
+            return '';
+        }
+        
+        // Extract major version only (e.g., "136.0.7103.60" -> "136")
+        if (preg_match('/^(\d+)/', $browser_version, $matches)) {
+            return $matches[1];
+        }
+        
+        return '';
     }
     
     /**
@@ -1425,6 +1864,50 @@ class GA4_Cronjob_Manager
     }
     
     /**
+     * Extract client IP from stored headers
+     *
+     * @since    3.0.0
+     * @param    array    $headers    The headers array.
+     * @return   string             The client IP address or empty string.
+     */
+    private function extract_client_ip_from_headers($headers)
+    {
+        if (empty($headers) || !is_array($headers)) {
+            return '';
+        }
+        
+        // Check for IP from various headers (in order of preference)
+        $ip_header_mapping = array(
+            'cf_connecting_ip' => 'HTTP_CF_CONNECTING_IP',     // Cloudflare
+            'x_real_ip' => 'HTTP_X_REAL_IP',                  // Nginx proxy
+            'x_forwarded_for' => 'HTTP_X_FORWARDED_FOR',      // Load balancer
+            'x_forwarded' => 'HTTP_X_FORWARDED',              // Proxy
+            'x_cluster_client_ip' => 'HTTP_X_CLUSTER_CLIENT_IP', // Cluster
+            'forwarded_for' => 'HTTP_FORWARDED_FOR',          // Proxy
+            'forwarded' => 'HTTP_FORWARDED',                  // Proxy
+            'remote_addr' => 'REMOTE_ADDR'                    // Standard
+        );
+        
+        foreach ($ip_header_mapping as $stored_key => $header_name) {
+            if (isset($headers[$stored_key]) && !empty($headers[$stored_key])) {
+                $ip = $headers[$stored_key];
+                
+                // Handle comma-separated IPs (take first one)
+                if (strpos($ip, ',') !== false) {
+                    $ip = trim(explode(',', $ip)[0]);
+                }
+                
+                // Validate IP address
+                if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)) {
+                    return $ip;
+                }
+            }
+        }
+        
+        return '';
+    }
+    
+    /**
      * Convert country name to ISO country code for GA4
      *
      * @since    3.0.0
@@ -1627,5 +2110,125 @@ class GA4_Cronjob_Manager
             // Return original data if decryption fails
             return is_array($headers_data) ? $headers_data : array();
         }
+    }
+    
+    /**
+     * Parse User-Agent string to extract device information
+     *
+     * @since    3.0.0
+     * @param    string   $user_agent   User-Agent string.
+     * @return   array    Parsed device information.
+     */
+    private function parse_user_agent($user_agent)
+    {
+        if (empty($user_agent)) {
+            return array();
+        }
+        
+        $parsed = array();
+        
+        // Device type detection
+        $mobile_patterns = array(
+            '/Mobile|iPhone|iPod|Android|BlackBerry|Opera Mini|IEMobile|Windows Phone/i'
+        );
+        $tablet_patterns = array(
+            '/iPad|Tablet|Kindle|Silk|PlayBook/i'
+        );
+        
+        if (preg_match('/iPad/i', $user_agent)) {
+            $parsed['device_type'] = 'tablet';
+        } elseif (preg_match($tablet_patterns[0], $user_agent)) {
+            $parsed['device_type'] = 'tablet';
+        } elseif (preg_match($mobile_patterns[0], $user_agent)) {
+            $parsed['device_type'] = 'mobile';
+        } else {
+            $parsed['device_type'] = 'desktop';
+        }
+        
+        // Operating System detection
+        if (preg_match('/Windows NT (\d+\.\d+)/i', $user_agent, $matches)) {
+            $parsed['os_name'] = 'Windows';
+            $version_map = array(
+                '10.0' => '10',
+                '6.3' => '8.1',
+                '6.2' => '8',
+                '6.1' => '7',
+                '6.0' => 'Vista',
+                '5.1' => 'XP'
+            );
+            $parsed['os_version'] = isset($version_map[$matches[1]]) ? $version_map[$matches[1]] : $matches[1];
+        } elseif (preg_match('/Mac OS X (\d+[._]\d+)/i', $user_agent, $matches)) {
+            $parsed['os_name'] = 'macOS';
+            $parsed['os_version'] = str_replace('_', '.', $matches[1]);
+        } elseif (preg_match('/iPhone OS (\d+[._]\d+)/i', $user_agent, $matches)) {
+            $parsed['os_name'] = 'iOS';
+            $parsed['os_version'] = str_replace('_', '.', $matches[1]);
+        } elseif (preg_match('/Android (\d+\.\d+)/i', $user_agent, $matches)) {
+            $parsed['os_name'] = 'Android';
+            $parsed['os_version'] = $matches[1];
+        } elseif (preg_match('/Linux/i', $user_agent)) {
+            $parsed['os_name'] = 'Linux';
+        }
+        
+        // Browser detection
+        if (preg_match('/Chrome\/(\d+\.\d+)/i', $user_agent, $matches)) {
+            // Check if it's actually Edge using Chrome engine
+            if (preg_match('/Edg\/(\d+\.\d+)/i', $user_agent, $edge_matches)) {
+                $parsed['browser_name'] = 'Edge';
+                $parsed['browser_version'] = $edge_matches[1];
+            } else {
+                $parsed['browser_name'] = 'Chrome';
+                $parsed['browser_version'] = $matches[1];
+            }
+        } elseif (preg_match('/Firefox\/(\d+\.\d+)/i', $user_agent, $matches)) {
+            $parsed['browser_name'] = 'Firefox';
+            $parsed['browser_version'] = $matches[1];
+        } elseif (preg_match('/Safari\/[\d.]+/i', $user_agent) && !preg_match('/Chrome/i', $user_agent)) {
+            $parsed['browser_name'] = 'Safari';
+            if (preg_match('/Version\/(\d+\.\d+)/i', $user_agent, $matches)) {
+                $parsed['browser_version'] = $matches[1];
+            }
+        } elseif (preg_match('/Opera[\/\s](\d+\.\d+)/i', $user_agent, $matches)) {
+            $parsed['browser_name'] = 'Opera';
+            $parsed['browser_version'] = $matches[1];
+        } elseif (preg_match('/MSIE (\d+\.\d+)/i', $user_agent, $matches)) {
+            $parsed['browser_name'] = 'Internet Explorer';
+            $parsed['browser_version'] = $matches[1];
+        } elseif (preg_match('/Trident.*rv:(\d+\.\d+)/i', $user_agent, $matches)) {
+            $parsed['browser_name'] = 'Internet Explorer';
+            $parsed['browser_version'] = $matches[1];
+        }
+        
+        // Mobile device model detection (basic patterns)
+        if ($parsed['device_type'] === 'mobile' || $parsed['device_type'] === 'tablet') {
+            // iPhone detection
+            if (preg_match('/iPhone/i', $user_agent)) {
+                $parsed['device_brand'] = 'Apple';
+                if (preg_match('/iPhone(\d+,\d+)/i', $user_agent, $matches)) {
+                    $parsed['device_model'] = 'iPhone ' . $matches[1];
+                } else {
+                    $parsed['device_model'] = 'iPhone';
+                }
+            }
+            // iPad detection
+            elseif (preg_match('/iPad/i', $user_agent)) {
+                $parsed['device_brand'] = 'Apple';
+                $parsed['device_model'] = 'iPad';
+            }
+            // Samsung detection
+            elseif (preg_match('/Samsung/i', $user_agent)) {
+                $parsed['device_brand'] = 'Samsung';
+                if (preg_match('/SM-([A-Z0-9]+)/i', $user_agent, $matches)) {
+                    $parsed['device_model'] = 'SM-' . $matches[1];
+                }
+            }
+            // Google Pixel detection
+            elseif (preg_match('/Pixel (\d+)/i', $user_agent, $matches)) {
+                $parsed['device_brand'] = 'Google';
+                $parsed['device_model'] = 'Pixel ' . $matches[1];
+            }
+        }
+        
+        return $parsed;
     }
 }
