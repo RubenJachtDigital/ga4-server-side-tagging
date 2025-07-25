@@ -36,6 +36,7 @@ define( 'GA4_SERVER_SIDE_TAGGING_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
 require_once GA4_SERVER_SIDE_TAGGING_PLUGIN_DIR . 'includes/class-ga4-server-side-tagging.php';
 require_once GA4_SERVER_SIDE_TAGGING_PLUGIN_DIR . 'includes/class-ga4-server-side-tagging-loader.php';
 require_once GA4_SERVER_SIDE_TAGGING_PLUGIN_DIR . 'includes/class-ga4-server-side-tagging-logger.php';
+require_once GA4_SERVER_SIDE_TAGGING_PLUGIN_DIR . 'includes/class-ga4-payload-transformer.php';
 
 // Use the namespaced classes
 use GA4ServerSideTagging\Core\GA4_Server_Side_Tagging;

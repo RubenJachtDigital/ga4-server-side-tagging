@@ -1280,3 +1280,4 @@ class GA4_Payload_Transformer
         
         return $anonymized;
     }
+}

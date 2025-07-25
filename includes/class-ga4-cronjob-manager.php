@@ -838,4 +838,3 @@ class GA4_Cronjob_Manager
         );
     }
 }
-}
