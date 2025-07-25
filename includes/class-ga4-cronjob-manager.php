@@ -163,12 +163,15 @@ class GA4_Cronjob_Manager
         $disable_cf_proxy = get_option('ga4_disable_cf_proxy', false);
         $intended_transmission_method = $disable_cf_proxy ? 'ga4_direct' : 'cloudflare';
 
+        // Encrypt original_headers if encryption is enabled
+        $encrypted_headers = $this->encrypt_headers_for_storage($original_headers);
+
         $result = $wpdb->insert(
             $this->table_name,
             array(
                 'event_data' => is_array($event_data) ? wp_json_encode($event_data) : $event_data,
                 'is_encrypted' => $is_encrypted ? 1 : 0,
-                'original_headers' => wp_json_encode($original_headers),
+                'original_headers' => $encrypted_headers,
                 'was_originally_encrypted' => $was_originally_encrypted ? 1 : 0,
                 'transmission_method' => $intended_transmission_method,
                 'status' => 'pending'
@@ -372,10 +375,7 @@ class GA4_Cronjob_Manager
                 $original_event = $events[$index];
                 
                 // Get original headers from the queued event
-                $original_headers = array();
-                if (!empty($original_event->original_headers)) {
-                    $original_headers = json_decode($original_event->original_headers, true) ?: array();
-                }
+                $original_headers = $this->decrypt_headers_from_storage($original_event->original_headers);
                 
                 // Create event payload with headers included
                 $event_with_headers = $event_data;
@@ -494,13 +494,9 @@ class GA4_Cronjob_Manager
             $payload_encrypted = false;
             
             // Get original headers from the queued event
-            $original_headers = array();
-            if (!empty($original_event->original_headers)) {
-                $original_headers = json_decode($original_event->original_headers, true) ?: array();
-            } else {
-                if ($this->logger) {
-                    $this->logger->debug("No original headers found for event {$original_event->id}");
-                }
+            $original_headers = $this->decrypt_headers_from_storage($original_event->original_headers);
+            if (empty($original_headers) && $this->logger) {
+                $this->logger->debug("No original headers found for event {$original_event->id}");
             }
             
             $result = $this->send_single_event_to_ga4($final_payload, $measurement_id, $api_secret, $original_headers);
@@ -1515,5 +1511,121 @@ class GA4_Cronjob_Manager
         
         // Fallback: return the original name (not ideal but better than nothing)
         return $country_name;
+    }
+
+    /**
+     * Encrypt headers for database storage using permanent JWT encryption
+     *
+     * @since    3.0.0
+     * @param    array    $headers    The headers array to encrypt.
+     * @return   string              The encrypted headers JSON or plain JSON if encryption disabled/fails.
+     */
+    private function encrypt_headers_for_storage($headers)
+    {
+        // If headers are empty, return empty JSON
+        if (empty($headers)) {
+            return wp_json_encode(array());
+        }
+
+        // Check if encryption is enabled
+        $jwt_encryption_enabled = get_option('ga4_jwt_encryption_enabled', false);
+        if (!$jwt_encryption_enabled) {
+            // Return unencrypted JSON when encryption is disabled
+            return wp_json_encode($headers);
+        }
+
+        // Check if the encryption util class exists
+        if (!class_exists('\GA4ServerSideTagging\Utilities\GA4_Encryption_Util')) {
+            return wp_json_encode($headers); // Return plain JSON if encryption class not available
+        }
+
+        try {
+            $encryption_key = \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::retrieve_encrypted_key('ga4_jwt_encryption_key');
+            if (!$encryption_key) {
+                return wp_json_encode($headers); // No encryption key available
+            }
+
+            // Encrypt headers with permanent key for database storage
+            $headers_json = wp_json_encode($headers);
+            $encrypted = \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::create_permanent_jwt_token($headers_json, $encryption_key);
+            
+            if ($encrypted !== false) {
+                // Return the encrypted JWT token directly as string
+                return $encrypted;
+            }
+
+            // If encryption failed, return unencrypted JSON
+            return wp_json_encode($headers);
+
+        } catch (\Exception $e) {
+            // Log encryption failure
+            if ($this->logger) {
+                $this->logger->error('Failed to encrypt headers for storage: ' . $e->getMessage());
+            }
+            // Return unencrypted JSON if encryption fails
+            return wp_json_encode($headers);
+        }
+    }
+
+    /**
+     * Decrypt headers from database storage
+     *
+     * @since    3.0.0
+     * @param    string    $stored_headers    The stored headers data (may be encrypted).
+     * @return   array                       The decrypted headers array.
+     */
+    private function decrypt_headers_from_storage($stored_headers)
+    {
+        // If headers are empty, return empty array
+        if (empty($stored_headers)) {
+            return array();
+        }
+
+        // Try to decode as JSON first
+        $headers_data = json_decode($stored_headers, true);
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            // Not valid JSON, might be a direct JWT token
+            $headers_data = $stored_headers;
+        }
+
+        // Check if encryption is enabled
+        $jwt_encryption_enabled = get_option('ga4_jwt_encryption_enabled', false);
+        if (!$jwt_encryption_enabled) {
+            // Return decoded JSON when encryption is disabled
+            return is_array($headers_data) ? $headers_data : array();
+        }
+
+        // Check if the encryption util class exists
+        if (!class_exists('\GA4ServerSideTagging\Utilities\GA4_Encryption_Util')) {
+            return is_array($headers_data) ? $headers_data : array();
+        }
+
+        try {
+            $encryption_key = \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::retrieve_encrypted_key('ga4_jwt_encryption_key');
+            if (!$encryption_key) {
+                return is_array($headers_data) ? $headers_data : array();
+            }
+
+            // Try to decrypt if it looks like encrypted data
+            if (is_string($headers_data)) {
+                // Try permanent JWT decryption
+                $decrypted = \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::decrypt_permanent_jwt_token($headers_data, $encryption_key);
+                if ($decrypted !== false) {
+                    $decoded = json_decode($decrypted, true);
+                    return is_array($decoded) ? $decoded : array();
+                }
+            }
+
+            // Return original data if decryption fails or data is not encrypted
+            return is_array($headers_data) ? $headers_data : array();
+
+        } catch (\Exception $e) {
+            // Log decryption failure
+            if ($this->logger) {
+                $this->logger->error('Failed to decrypt headers from storage: ' . $e->getMessage());
+            }
+            // Return original data if decryption fails
+            return is_array($headers_data) ? $headers_data : array();
+        }
     }
 }

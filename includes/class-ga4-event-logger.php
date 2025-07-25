@@ -144,15 +144,16 @@ class GA4_Event_Logger
 
         $args = wp_parse_args($args, $defaults);
 
-        // Handle encrypted payload - decrypt time_jwt and re-encrypt with permanent key for DB storage
-        if (is_string($args['payload']) && !empty($args['payload'])) {
-            $args['payload'] = $this->process_encrypted_payload_for_storage($args['payload']);
-        }
-
-        // Serialize and encrypt sensitive data
+        // Handle payload encryption for database storage
         if (is_array($args['payload']) || is_object($args['payload'])) {
+            // Serialize array/object payload
             $serialized_payload = json_encode($args['payload'], JSON_PRETTY_PRINT);
             $args['payload'] = $this->encrypt_sensitive_data_for_storage($serialized_payload);
+        } else if (is_string($args['payload']) && !empty($args['payload'])) {
+            // Handle string payload - check if it's encrypted and process accordingly
+            $processed_payload = $this->process_encrypted_payload_for_storage($args['payload']);
+            // Only encrypt if not already encrypted by process_encrypted_payload_for_storage
+            $args['payload'] = $this->ensure_payload_encrypted_for_storage($processed_payload);
         }
         
         if (is_array($args['headers']) || is_object($args['headers'])) {
@@ -751,6 +752,56 @@ class GA4_Event_Logger
             // Log encryption failure but don't break the logging process
             error_log('GA4 Event Logger: Failed to encrypt sensitive data for storage - ' . $e->getMessage());
             return $data; // Return original data if encryption fails
+        }
+    }
+
+    /**
+     * Ensure payload is encrypted for database storage
+     * This method checks if data is already encrypted and encrypts if needed
+     *
+     * @since    2.1.0
+     * @param    string    $payload    The payload data to potentially encrypt.
+     * @return   string               The encrypted payload for storage.
+     */
+    private function ensure_payload_encrypted_for_storage($payload)
+    {
+        // Check if the encryption util class exists
+        if (!class_exists('\GA4ServerSideTagging\Utilities\GA4_Encryption_Util')) {
+            return $payload; // Return original if encryption class not available
+        }
+
+        try {
+            $encryption_enabled = get_option('ga4_jwt_encryption_enabled', false);
+            
+            if (!$encryption_enabled) {
+                return $payload; // No encryption enabled, return as-is
+            }
+            
+            $encryption_key = \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::retrieve_encrypted_key('ga4_jwt_encryption_key');
+            if (!$encryption_key) {
+                return $payload; // No encryption key available
+            }
+
+            // Check if already encrypted by trying to decrypt
+            $test_decrypt = \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::decrypt_permanent_jwt_token($payload, $encryption_key);
+            if ($test_decrypt !== false) {
+                // Already encrypted, return as-is
+                return $payload;
+            }
+
+            // Not encrypted, encrypt it with permanent key
+            $encrypted = \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::create_permanent_jwt_token($payload, $encryption_key);
+            if ($encrypted !== false) {
+                return $encrypted; // Successfully encrypted
+            }
+
+            // If encryption failed, return original data
+            return $payload;
+
+        } catch (\Exception $e) {
+            // Log encryption failure but don't break the logging process
+            error_log('GA4 Event Logger: Failed to ensure payload encryption for storage - ' . $e->getMessage());
+            return $payload; // Return original data if encryption fails
         }
     }
 
