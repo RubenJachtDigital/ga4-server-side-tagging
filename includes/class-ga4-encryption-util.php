@@ -868,4 +868,106 @@ class GA4_Encryption_Util
             return false;
         }
     }
+
+    /**
+     * Encrypt headers for database storage using permanent JWT encryption
+     *
+     * @since    3.0.0
+     * @param    array    $headers    The headers array to encrypt.
+     * @return   string              The encrypted headers JSON or plain JSON if encryption disabled/fails.
+     */
+    public static function encrypt_headers_for_storage($headers)
+    {
+        // If headers are empty, return empty JSON
+        if (empty($headers)) {
+            return wp_json_encode(array());
+        }
+
+        // Check if encryption is enabled
+        $jwt_encryption_enabled = get_option('ga4_jwt_encryption_enabled', false);
+        if (!$jwt_encryption_enabled) {
+            // Return unencrypted JSON when encryption is disabled
+            return wp_json_encode($headers);
+        }
+
+        try {
+            $encryption_key = self::retrieve_encrypted_key('ga4_jwt_encryption_key');
+            if (!$encryption_key) {
+                return wp_json_encode($headers); // No encryption key available
+            }
+
+            // Encrypt headers with permanent key for database storage
+            $headers_json = wp_json_encode($headers);
+            $encrypted = self::create_permanent_jwt_token($headers_json, $encryption_key);
+            
+            if ($encrypted !== false) {
+                // Return the encrypted JWT token directly as string
+                return $encrypted;
+            }
+
+            // If encryption failed, return unencrypted JSON
+            return wp_json_encode($headers);
+
+        } catch (\Exception $e) {
+            // Log encryption failure
+            error_log('GA4 Headers Encryption Error: ' . $e->getMessage());
+            // Return unencrypted JSON if encryption fails
+            return wp_json_encode($headers);
+        }
+    }
+
+    /**
+     * Decrypt headers from database storage
+     *
+     * @since    3.0.0
+     * @param    string    $stored_headers    The stored headers data (may be encrypted).
+     * @return   array                       The decrypted headers array.
+     */
+    public static function decrypt_headers_from_storage($stored_headers)
+    {
+        // If headers are empty, return empty array
+        if (empty($stored_headers)) {
+            return array();
+        }
+
+        // Try to decode as JSON first
+        $headers_data = json_decode($stored_headers, true);
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            // Not valid JSON, might be a direct JWT token
+            $headers_data = $stored_headers;
+        }
+
+        // Check if encryption is enabled
+        $jwt_encryption_enabled = get_option('ga4_jwt_encryption_enabled', false);
+        if (!$jwt_encryption_enabled) {
+            // Return decoded JSON when encryption is disabled
+            return is_array($headers_data) ? $headers_data : array();
+        }
+
+        try {
+            $encryption_key = self::retrieve_encrypted_key('ga4_jwt_encryption_key');
+            if (!$encryption_key) {
+                return is_array($headers_data) ? $headers_data : array();
+            }
+
+            // Try to decrypt if it looks like encrypted data
+            if (is_string($headers_data)) {
+                // Try permanent JWT decryption
+                $decrypted = self::decrypt_permanent_jwt_token($headers_data, $encryption_key);
+                if ($decrypted !== false) {
+                    $decoded = json_decode($decrypted, true);
+                    return is_array($decoded) ? $decoded : array();
+                }
+            }
+
+            // Return original data if decryption fails or data is not encrypted
+            return is_array($headers_data) ? $headers_data : array();
+
+        } catch (\Exception $e) {
+            // Log decryption failure
+            error_log('GA4 Headers Decryption Error: ' . $e->getMessage());
+            // Return original data if decryption fails
+            return is_array($headers_data) ? $headers_data : array();
+        }
+    }
 }
