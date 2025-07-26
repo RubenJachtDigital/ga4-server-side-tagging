@@ -159,7 +159,23 @@ class GA4_Cronjob_Manager
 
             // Extract the actual event data (the event key contains the GA4 event)
             if (isset($event_data['event'])) {
-                $batch_events[] = $event_data['event'];
+                $individual_event = $event_data['event'];
+                
+                // Check if individual event is still encrypted (shouldn't be, but handle it)
+                if (is_string($individual_event) && $this->looks_like_jwt($individual_event)) {
+                    if ($this->logger) {
+                        $this->logger->warning("Individual event is encrypted, decrypting: " . substr($individual_event, 0, 50) . "...");
+                    }
+                    $decrypted = $this->decrypt_event_data($individual_event);
+                    if ($decrypted !== false) {
+                        $parsed = json_decode($decrypted, true);
+                        if (json_last_error() === JSON_ERROR_NONE) {
+                            $individual_event = $parsed;
+                        }
+                    }
+                }
+                
+                $batch_events[] = $individual_event;
                 
                 // Use consent from first event for the entire batch
                 if (!$first_event_processed && isset($event_data['consent'])) {
@@ -168,7 +184,23 @@ class GA4_Cronjob_Manager
                 }
             } else {
                 // Fallback for direct event data
-                $batch_events[] = $event_data;
+                $individual_event = $event_data;
+                
+                // Check if individual event is still encrypted (shouldn't be, but handle it)
+                if (is_string($individual_event) && $this->looks_like_jwt($individual_event)) {
+                    if ($this->logger) {
+                        $this->logger->warning("Individual fallback event is encrypted, decrypting: " . substr($individual_event, 0, 50) . "...");
+                    }
+                    $decrypted = $this->decrypt_event_data($individual_event);
+                    if ($decrypted !== false) {
+                        $parsed = json_decode($decrypted, true);
+                        if (json_last_error() === JSON_ERROR_NONE) {
+                            $individual_event = $parsed;
+                        }
+                    }
+                }
+                
+                $batch_events[] = $individual_event;
             }
             
             $event_ids[] = $event->id;
@@ -176,6 +208,15 @@ class GA4_Cronjob_Manager
 
         if (empty($batch_events)) {
             return;
+        }
+
+        // Debug: Log the structure of batch_events to understand the encryption issue
+        if ($this->logger && get_option('ga4_server_side_tagging_debug_mode')) {
+            $this->logger->debug("Batch events before sending to Cloudflare:");
+            foreach ($batch_events as $index => $event) {
+                $event_preview = is_string($event) ? substr($event, 0, 100) . '...' : wp_json_encode($event);
+                $this->logger->debug("Event $index: " . $event_preview);
+            }
         }
 
         
@@ -206,6 +247,36 @@ class GA4_Cronjob_Manager
                 $this->logger->error($transmission_error_message . " - " . count($event_ids) . " events marked as failed");
             }
         }
+    }
+
+    /**
+     * Check if a string looks like a JWT token
+     *
+     * @since    3.0.0
+     * @param    string    $string    The string to check.
+     * @return   boolean   True if it looks like a JWT token.
+     */
+    private function looks_like_jwt($string)
+    {
+        if (!is_string($string)) {
+            return false;
+        }
+        
+        // JWT tokens have exactly 2 dots separating 3 parts
+        if (substr_count($string, '.') !== 2) {
+            return false;
+        }
+        
+        // Split and check each part
+        $parts = explode('.', $string);
+        foreach ($parts as $part) {
+            // JWT parts are base64url encoded and reasonably long
+            if (!preg_match('/^[A-Za-z0-9_-]+$/', $part) || strlen($part) < 10) {
+                return false;
+            }
+        }
+        
+        return true;
     }
 
     /**
