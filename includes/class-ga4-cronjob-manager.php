@@ -138,7 +138,7 @@ class GA4_Cronjob_Manager
         $first_event_processed = false;
 
         foreach ($events as $event) {
-            $event_data = $event->event_data;
+            $event_data = $event->original_payload;
             
             // Decrypt if encrypted
             if ($event->is_encrypted) {
