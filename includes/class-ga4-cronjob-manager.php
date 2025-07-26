@@ -214,8 +214,17 @@ class GA4_Cronjob_Manager
         if ($this->logger && get_option('ga4_server_side_tagging_debug_mode')) {
             $this->logger->debug("Batch events before sending to Cloudflare:");
             foreach ($batch_events as $index => $event) {
-                $event_preview = is_string($event) ? substr($event, 0, 100) . '...' : wp_json_encode($event);
-                $this->logger->debug("Event $index: " . $event_preview);
+                if (is_array($event)) {
+                    $this->logger->debug("Event $index structure: " . wp_json_encode(array_keys($event)));
+                    if (isset($event['name'])) {
+                        $this->logger->debug("Event $index is correctly formatted with name: " . $event['name']);
+                    } elseif (isset($event['event'])) {
+                        $this->logger->debug("Event $index has nested 'event' structure - needs fixing");
+                    }
+                } else {
+                    $event_preview = is_string($event) ? substr($event, 0, 100) . '...' : wp_json_encode($event);
+                    $this->logger->debug("Event $index: " . $event_preview);
+                }
             }
         }
 
@@ -361,12 +370,29 @@ class GA4_Cronjob_Manager
                 // Get original headers from the queued event
                 $original_headers = GA4_Encryption_Util::decrypt_headers_from_storage($original_event->original_headers);
                 
-                // Create event payload with headers included
-                $event_with_headers = $event_data;
-                $event_with_headers['headers'] = $original_headers;
+                // Ensure we have the correct event structure for Cloudflare
+                // $event_data should be the GA4 event with name, params, etc.
+                if (is_array($event_data) && isset($event_data['name']) && isset($event_data['params'])) {
+                    // Event is correctly formatted
+                    $final_event = $event_data;
+                } elseif (is_array($event_data) && isset($event_data['event'])) {
+                    // Event has nested structure, extract the actual event
+                    $final_event = $event_data['event'];
+                    if ($this->logger) {
+                        $this->logger->warning("Found nested event structure, extracting event data");
+                    }
+                } else {
+                    // Fallback - use as is
+                    $final_event = $event_data;
+                    if ($this->logger) {
+                        $this->logger->warning("Unexpected event structure, using as-is");
+                    }
+                }
                 
+                // Add headers to the event
+                $final_event['headers'] = $original_headers;
                 
-                $payload['events'][] = $event_with_headers;
+                $payload['events'][] = $final_event;
             }
         } else {
             // Fallback: use events without headers if events array not available
@@ -412,6 +438,20 @@ class GA4_Cronjob_Manager
                 // Check if payload was encrypted for Cloudflare
                 $payload_encrypted = (isset($payload['encrypted']) && $payload['encrypted'] === true);
                 $this->event_logger->update_event_final_data($event->id, $payload, $headers, 'cloudflare', $event->was_originally_encrypted, $payload_encrypted);
+            }
+        }
+
+        // Debug: Log final payload structure being sent to Cloudflare
+        if ($this->logger && get_option('ga4_server_side_tagging_debug_mode')) {
+            if (isset($payload['encrypted']) && $payload['encrypted']) {
+                $this->logger->debug("🚀 Final Encrypted Payload Sent to Cloudflare");
+            } else {
+                $this->logger->debug("🚀 Final Payload Sent to Cloudflare - Events: " . count($payload['events']) . ", Has Consent: " . (isset($payload['consent']) ? 'yes' : 'no'));
+                if (!empty($payload['events'])) {
+                    $first_event = $payload['events'][0];
+                    $first_event_keys = is_array($first_event) ? array_keys($first_event) : 'not-array';
+                    $this->logger->debug("First event structure: " . wp_json_encode($first_event_keys));
+                }
             }
         }
 
