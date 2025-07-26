@@ -127,7 +127,7 @@ $search = isset($_GET['search']) ? sanitize_text_field($_GET['search']) : '';
 $limit = isset($_GET['limit']) ? max(10, min(200, intval($_GET['limit']))) : 50;
 $offset = isset($_GET['offset']) ? max(0, intval($_GET['offset'])) : 0;
 
-// Get events with filtering and pagination
+// Get events with filtering and pagination (unified table approach)
 $events_data = $this->cronjob_manager->get_events_for_table(array(
     'limit' => $limit,
     'offset' => $offset,
@@ -146,7 +146,17 @@ $current_page = floor($offset / $limit) + 1;
 ?>
 
 <div class="wrap">
-    <h1><?php echo esc_html__('Event Queue & Cronjob Management', 'ga4-server-side-tagging'); ?></h1>
+    <h1><?php echo esc_html__('Event Monitor & Queue Management', 'ga4-server-side-tagging'); ?></h1>
+    
+    <!-- Tab Navigation -->
+    <div class="nav-tab-wrapper" style="margin-bottom: 20px;">
+        <a href="<?php echo admin_url('admin.php?page=ga4-server-side-tagging-events'); ?>" class="nav-tab">
+            <?php echo esc_html__('📊 Event Monitor', 'ga4-server-side-tagging'); ?>
+        </a>
+        <a href="<?php echo admin_url('admin.php?page=ga4-server-side-tagging-cronjobs'); ?>" class="nav-tab nav-tab-active">
+            <?php echo esc_html__('⚙️ Queue Management', 'ga4-server-side-tagging'); ?>
+        </a>
+    </div>
     
     <!-- Statistics Section -->
     <div class="ga4-admin-section">
@@ -338,11 +348,11 @@ $current_page = floor($offset / $limit) + 1;
                                         'completed' => '✅',
                                         'failed' => '❌'
                                     );
-                                    $color = $status_colors[$event->status] ?? '#6c757d';
-                                    $icon = $status_icons[$event->status] ?? '❓';
+                                    $color = $status_colors[$event->event_status] ?? '#6c757d';
+                                    $icon = $status_icons[$event->event_status] ?? '❓';
                                     ?>
                                     <span style="color: <?php echo esc_attr($color); ?>; font-weight: bold; font-size: 11px;">
-                                        <?php echo $icon; ?> <?php echo esc_html(ucfirst($event->status)); ?>
+                                        <?php echo $icon; ?> <?php echo esc_html(ucfirst($event->event_status)); ?>
                                     </span>
                                 </td>
                                 <td>
@@ -420,7 +430,7 @@ $current_page = floor($offset / $limit) + 1;
                                 <td>
                                     <button class="button button-small view-queue-details-btn" 
                                             data-event-id="<?php echo intval($event->id); ?>"
-                                            data-status="<?php echo esc_attr($event->status); ?>"
+                                            data-status="<?php echo esc_attr($event->event_status); ?>"
                                             data-created="<?php echo esc_attr($event->created_at); ?>"
                                             data-processed="<?php echo esc_attr($event->processed_at ?: ''); ?>"
                                             data-retry-count="<?php echo esc_attr($event->retry_count); ?>"

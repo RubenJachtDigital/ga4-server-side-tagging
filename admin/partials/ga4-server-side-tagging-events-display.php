@@ -39,9 +39,9 @@ $search = isset($_GET['search']) ? sanitize_text_field($_GET['search']) : '';
 $limit = isset($_GET['limit']) ? max(10, min(200, intval($_GET['limit']))) : 50;
 $offset = isset($_GET['offset']) ? max(0, intval($_GET['offset'])) : 0;
 
-// Get statistics and events
+// Get statistics and events using unified table approach
 $stats = $event_logger->get_table_stats();
-$events = $event_logger->get_events_for_table(array(
+$events_data = $event_logger->get_events_for_table(array(
     'status' => $filter_status,
     'event_name' => $filter_event,
     'search' => $search,
@@ -49,30 +49,32 @@ $events = $event_logger->get_events_for_table(array(
     'offset' => $offset
 ));
 
-// Get unique event names for filter
+$events = $events_data['results'] ?? $events_data; // Handle both old and new return formats
+$total_events = $events_data['total'] ?? count($events); // Get total from the method
+
+// Get unique event names for filter using unified table
 global $wpdb;
 $table_name = $wpdb->prefix . 'ga4_event_logs';
-$unique_events = $wpdb->get_col("SELECT DISTINCT event_name FROM $table_name WHERE event_name != '' ORDER BY event_name LIMIT 50");
+$unique_events = $wpdb->get_col("SELECT DISTINCT event_name FROM $table_name WHERE record_type = 'event_log' AND event_name != '' ORDER BY event_name LIMIT 50");
 
 // Calculate pagination info
-$total_events = $wpdb->get_var("SELECT COUNT(*) FROM $table_name" . 
-    (!empty($filter_status) || !empty($filter_event) || !empty($search) ? " WHERE 1=1" . 
-    (!empty($filter_status) ? $wpdb->prepare(" AND event_status = %s", $filter_status) : '') .
-    (!empty($filter_event) ? $wpdb->prepare(" AND event_name = %s", $filter_event) : '') .
-    (!empty($search) ? $wpdb->prepare(" AND (event_name LIKE %s OR reason LIKE %s OR ip_address LIKE %s OR user_agent LIKE %s OR payload LIKE %s)", 
-        '%' . $wpdb->esc_like($search) . '%', 
-        '%' . $wpdb->esc_like($search) . '%', 
-        '%' . $wpdb->esc_like($search) . '%',
-        '%' . $wpdb->esc_like($search) . '%',
-        '%' . $wpdb->esc_like($search) . '%') : '') : ''));
-
 $total_pages = ceil($total_events / $limit);
 $current_page = floor($offset / $limit) + 1;
 
 ?>
 
 <div class="wrap">
-    <h1><?php echo esc_html__('Event Monitor', 'ga4-server-side-tagging'); ?></h1>
+    <h1><?php echo esc_html__('Event Monitor & Queue Management', 'ga4-server-side-tagging'); ?></h1>
+    
+    <!-- Tab Navigation -->
+    <div class="nav-tab-wrapper" style="margin-bottom: 20px;">
+        <a href="<?php echo admin_url('admin.php?page=ga4-server-side-tagging-events'); ?>" class="nav-tab nav-tab-active">
+            <?php echo esc_html__('📊 Event Monitor', 'ga4-server-side-tagging'); ?>
+        </a>
+        <a href="<?php echo admin_url('admin.php?page=ga4-server-side-tagging-cronjobs'); ?>" class="nav-tab">
+            <?php echo esc_html__('⚙️ Queue Management', 'ga4-server-side-tagging'); ?>
+        </a>
+    </div>
     
     <!-- Statistics Section -->
     <div class="ga4-admin-section">

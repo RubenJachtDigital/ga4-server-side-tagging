@@ -53,15 +53,21 @@ function ga4_server_side_tagging_activate() {
     update_option( 'ga4_server_side_tagging_version', GA4_SERVER_SIDE_TAGGING_VERSION );
     update_option( 'ga4_server_side_tagging_debug_mode', false );
     
-    // Create events queue table
+    // Create unified table
     require_once GA4_SERVER_SIDE_TAGGING_PLUGIN_DIR . 'includes/class-ga4-server-side-tagging-logger.php';
+    require_once GA4_SERVER_SIDE_TAGGING_PLUGIN_DIR . 'includes/class-ga4-event-logger.php';
     require_once GA4_SERVER_SIDE_TAGGING_PLUGIN_DIR . 'includes/class-ga4-encryption-util.php';
     require_once GA4_SERVER_SIDE_TAGGING_PLUGIN_DIR . 'includes/class-ga4-cronjob-manager.php';
     require_once GA4_SERVER_SIDE_TAGGING_PLUGIN_DIR . 'includes/class-ga4-server-side-tagging-cron.php';
     
     $logger = new GA4ServerSideTagging\Core\GA4_Server_Side_Tagging_Logger();
+    
+    // Create unified table using event logger
+    $event_logger = new GA4ServerSideTagging\Core\GA4_Event_Logger();
+    $event_logger->maybe_create_table();
+    
+    // Initialize cronjob manager (no longer needs table creation)
     $cronjob_manager = new GA4ServerSideTagging\Core\GA4_Cronjob_Manager($logger);
-    $cronjob_manager->maybe_create_table();
     
     // Schedule cron jobs
     $cron_handler = new GA4ServerSideTagging\Core\GA4_Server_Side_Tagging_Cron($logger);

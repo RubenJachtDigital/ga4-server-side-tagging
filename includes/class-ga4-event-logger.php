@@ -80,8 +80,8 @@ class GA4_Event_Logger
 
         $sql = "CREATE TABLE $this->table_name (
             id bigint(20) NOT NULL AUTO_INCREMENT,
-            event_name varchar(255) NOT NULL,
-            event_status enum('allowed','denied','bot_detected','error') NOT NULL,
+            event_name varchar(255) NULL,
+            event_status enum('allowed','denied','bot_detected','error','pending','completed','failed') NOT NULL DEFAULT 'allowed',
             reason varchar(500) NULL,
             payload longtext NULL,
             headers longtext NULL,
@@ -98,13 +98,26 @@ class GA4_Event_Logger
             batch_size int(11) DEFAULT 1,
             transmission_method varchar(50) NULL,
             created_at datetime DEFAULT CURRENT_TIMESTAMP,
+            processed_at datetime NULL,
+            retry_count int(11) DEFAULT 0,
+            error_message text NULL,
+            event_data longtext NULL,
+            is_encrypted tinyint(1) DEFAULT 0,
+            final_payload longtext NULL,
+            final_headers longtext NULL,
+            original_headers longtext NULL,
+            was_originally_encrypted tinyint(1) DEFAULT 0,
+            final_payload_encrypted tinyint(1) DEFAULT 0,
+            record_type enum('event_log','queue_item') DEFAULT 'event_log',
             PRIMARY KEY (id),
             KEY event_status (event_status),
             KEY event_name (event_name),
             KEY created_at (created_at),
             KEY ip_address (ip_address),
             KEY user_id (user_id),
-            KEY session_id (session_id)
+            KEY session_id (session_id),
+            KEY record_type (record_type),
+            KEY transmission_method (transmission_method)
         ) $charset_collate;";
 
         require_once(ABSPATH . 'wp-admin/includes/upgrade.php');
@@ -143,6 +156,11 @@ class GA4_Event_Logger
         );
 
         $args = wp_parse_args($args, $defaults);
+
+        // Set default record type
+        if (!isset($args['record_type'])) {
+            $args['record_type'] = 'event_log';
+        }
 
         // Handle payload encryption for database storage
         if (is_array($args['payload']) || is_object($args['payload'])) {
@@ -186,10 +204,21 @@ class GA4_Event_Logger
                 'cloudflare_response' => sanitize_textarea_field($args['cloudflare_response']),
                 'processing_time_ms' => is_numeric($args['processing_time_ms']) ? floatval($args['processing_time_ms']) : null,
                 'batch_size' => intval($args['batch_size']),
-                'transmission_method' => sanitize_text_field($args['transmission_method'])
+                'transmission_method' => sanitize_text_field($args['transmission_method']),
+                'processed_at' => isset($args['processed_at']) ? $args['processed_at'] : null,
+                'retry_count' => isset($args['retry_count']) ? intval($args['retry_count']) : 0,
+                'error_message' => isset($args['error_message']) ? sanitize_textarea_field($args['error_message']) : null,
+                'event_data' => isset($args['event_data']) ? $args['event_data'] : null,
+                'is_encrypted' => isset($args['is_encrypted']) ? (bool) $args['is_encrypted'] : false,
+                'final_payload' => isset($args['final_payload']) ? $args['final_payload'] : null,
+                'final_headers' => isset($args['final_headers']) ? $args['final_headers'] : null,
+                'original_headers' => isset($args['original_headers']) ? $args['original_headers'] : null,
+                'was_originally_encrypted' => isset($args['was_originally_encrypted']) ? (bool) $args['was_originally_encrypted'] : false,
+                'final_payload_encrypted' => isset($args['final_payload_encrypted']) ? (bool) $args['final_payload_encrypted'] : false,
+                'record_type' => sanitize_text_field($args['record_type'])
             ),
             array(
-                '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%d', '%s', '%d', '%s', '%s', '%f', '%d', '%s'
+                '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%d', '%s', '%d', '%s', '%s', '%f', '%d', '%s', '%s', '%d', '%s', '%s', '%d', '%s', '%s', '%s', '%d', '%d', '%s'
             )
         );
 
@@ -398,32 +427,33 @@ class GA4_Event_Logger
         $stats = array();
 
         // Total events
-        $stats['total'] = $wpdb->get_var("SELECT COUNT(*) FROM $this->table_name");
+        $stats['total'] = $wpdb->get_var("SELECT COUNT(*) FROM $this->table_name WHERE record_type = 'event_log'");
 
         // Events by status
-        $stats['allowed'] = $wpdb->get_var("SELECT COUNT(*) FROM $this->table_name WHERE event_status = 'allowed'");
-        $stats['denied'] = $wpdb->get_var("SELECT COUNT(*) FROM $this->table_name WHERE event_status = 'denied'");
-        $stats['bot_detected'] = $wpdb->get_var("SELECT COUNT(*) FROM $this->table_name WHERE event_status = 'bot_detected'");
-        $stats['error'] = $wpdb->get_var("SELECT COUNT(*) FROM $this->table_name WHERE event_status = 'error'");
+        $stats['allowed'] = $wpdb->get_var("SELECT COUNT(*) FROM $this->table_name WHERE record_type = 'event_log' AND event_status = 'allowed'");
+        $stats['denied'] = $wpdb->get_var("SELECT COUNT(*) FROM $this->table_name WHERE record_type = 'event_log' AND event_status = 'denied'");
+        $stats['bot_detected'] = $wpdb->get_var("SELECT COUNT(*) FROM $this->table_name WHERE record_type = 'event_log' AND event_status = 'bot_detected'");
+        $stats['error'] = $wpdb->get_var("SELECT COUNT(*) FROM $this->table_name WHERE record_type = 'event_log' AND event_status = 'error'");
 
         // Events in last 24 hours
         $stats['last_24h'] = $wpdb->get_var($wpdb->prepare("
             SELECT COUNT(*) 
             FROM $this->table_name 
-            WHERE created_at >= %s
+            WHERE record_type = 'event_log' AND created_at >= %s
         ", date('Y-m-d H:i:s', strtotime('-24 hours'))));
 
         // Events in last hour
         $stats['last_1h'] = $wpdb->get_var($wpdb->prepare("
             SELECT COUNT(*) 
             FROM $this->table_name 
-            WHERE created_at >= %s
+            WHERE record_type = 'event_log' AND created_at >= %s
         ", date('Y-m-d H:i:s', strtotime('-1 hour'))));
 
         // Top event names
         $top_events = $wpdb->get_results("
             SELECT event_name, COUNT(*) as count 
             FROM $this->table_name 
+            WHERE record_type = 'event_log'
             GROUP BY event_name 
             ORDER BY count DESC 
             LIMIT 5
@@ -467,8 +497,8 @@ class GA4_Event_Logger
 
         $args = wp_parse_args($args, $defaults);
 
-        $where_clauses = array();
-        $where_values = array();
+        $where_clauses = array('record_type = %s');
+        $where_values = array('event_log');
 
         // Filter by status
         if (!empty($args['status'])) {
@@ -494,6 +524,14 @@ class GA4_Event_Logger
         }
 
         $where_sql = !empty($where_clauses) ? 'WHERE ' . implode(' AND ', $where_clauses) : '';
+
+        // Get total count first
+        $count_query = "SELECT COUNT(*) FROM $this->table_name $where_sql";
+        if (!empty($where_values)) {
+            $total_events = $wpdb->get_var($wpdb->prepare($count_query, $where_values));
+        } else {
+            $total_events = $wpdb->get_var($count_query);
+        }
 
         // Sanitize ordering
         $allowed_orderby = array('id', 'event_name', 'event_status', 'created_at', 'ip_address', 'processing_time_ms');
@@ -525,7 +563,10 @@ class GA4_Event_Logger
             }
         }
 
-        return $results;
+        return array(
+            'results' => $results,
+            'total' => intval($total_events)
+        );
     }
 
     /**
@@ -638,7 +679,7 @@ class GA4_Event_Logger
         $cutoff_date = date('Y-m-d H:i:s', strtotime("-{$days} days"));
         
         return $wpdb->query($wpdb->prepare(
-            "DELETE FROM $this->table_name WHERE created_at < %s",
+            "DELETE FROM $this->table_name WHERE record_type = 'event_log' AND created_at < %s",
             $cutoff_date
         ));
     }
@@ -848,5 +889,378 @@ class GA4_Event_Logger
             error_log('GA4 Event Logger: Failed to decrypt payload for display - ' . $e->getMessage());
             return $payload; // Return original payload if decryption fails
         }
+    }
+
+    /**
+     * Queue an event for batch processing (unified table approach)
+     *
+     * @since    2.1.0
+     * @param    array     $event_data              The event data to queue.
+     * @param    boolean   $is_encrypted            Whether the event data is encrypted.
+     * @param    array     $original_headers        Original request headers.
+     * @param    boolean   $was_originally_encrypted Whether the original request was encrypted.
+     * @return   boolean   True if queued successfully, false otherwise.
+     */
+    public function queue_event($event_data, $is_encrypted = false, $original_headers = array(), $was_originally_encrypted = false)
+    {
+        // Determine the intended transmission method when queuing
+        $disable_cf_proxy = get_option('ga4_disable_cf_proxy', false);
+        $intended_transmission_method = $disable_cf_proxy ? 'ga4_direct' : 'cloudflare';
+
+        // Encrypt original_headers if encryption is enabled
+        $encrypted_headers = $this->encrypt_sensitive_data_for_storage(wp_json_encode($original_headers));
+
+        return $this->log_event(array(
+            'event_name' => '', // Will be populated during processing
+            'event_status' => 'pending',
+            'record_type' => 'queue_item',
+            'event_data' => is_array($event_data) ? wp_json_encode($event_data) : $event_data,
+            'is_encrypted' => $is_encrypted,
+            'original_headers' => $encrypted_headers,
+            'was_originally_encrypted' => $was_originally_encrypted,
+            'transmission_method' => $intended_transmission_method
+        ));
+    }
+
+    /**
+     * Get queue statistics (unified table approach)
+     *
+     * @since    2.1.0
+     * @return   array    Queue statistics.
+     */
+    public function get_queue_stats()
+    {
+        global $wpdb;
+
+        $stats = $wpdb->get_row($wpdb->prepare(
+            "SELECT 
+                COUNT(*) as total,
+                SUM(CASE WHEN event_status = 'pending' THEN 1 ELSE 0 END) as pending,
+                SUM(CASE WHEN event_status = 'completed' THEN 1 ELSE 0 END) as completed,
+                SUM(CASE WHEN event_status = 'failed' THEN 1 ELSE 0 END) as failed
+            FROM $this->table_name WHERE record_type = %s",
+            'queue_item'
+        ), ARRAY_A);
+
+        return $stats ?: array('total' => 0, 'pending' => 0, 'completed' => 0, 'failed' => 0);
+    }
+
+    /**
+     * Get pending events for processing (unified table approach)
+     *
+     * @since    2.1.0
+     * @param    int    $limit    Number of events to retrieve.
+     * @return   array           Array of pending events.
+     */
+    public function get_pending_events($limit = 1000)
+    {
+        global $wpdb;
+
+        return $wpdb->get_results($wpdb->prepare(
+            "SELECT * FROM $this->table_name 
+             WHERE record_type = 'queue_item' AND event_status = 'pending' 
+             ORDER BY created_at ASC 
+             LIMIT %d",
+            $limit
+        ));
+    }
+
+    /**
+     * Update event status (unified table approach)
+     *
+     * @since    2.1.0
+     * @param    array    $event_ids    Array of event IDs to update.
+     * @param    string   $status       New status.
+     * @param    array    $extra_data   Additional data to update.
+     * @return   boolean  True if successful.
+     */
+    public function update_event_status($event_ids, $status, $extra_data = array())
+    {
+        global $wpdb;
+
+        $update_data = array('event_status' => $status);
+        $update_format = array('%s');
+
+        if ($status == 'completed') {
+            $update_data['processed_at'] = current_time('mysql');
+            $update_format[] = '%s';
+        }
+
+        // Add any extra data
+        foreach ($extra_data as $key => $value) {
+            $update_data[$key] = $value;
+            $update_format[] = is_numeric($value) ? '%d' : '%s';
+        }
+
+        $ids_placeholder = implode(',', array_fill(0, count($event_ids), '%d'));
+        
+        // Build the SET clause dynamically
+        $set_clauses = array();
+        $values = array();
+        
+        foreach ($update_data as $column => $value) {
+            $set_clauses[] = "$column = %s";
+            $values[] = $value;
+        }
+        
+        // Add the IDs to the values array
+        $values = array_merge($values, $event_ids);
+        
+        $sql = "UPDATE $this->table_name SET " . implode(', ', $set_clauses) . " WHERE id IN ($ids_placeholder)";
+        
+        return $wpdb->query($wpdb->prepare($sql, $values));
+    }
+
+    /**
+     * Mark event as failed (unified table approach)
+     *
+     * @since    2.1.0
+     * @param    int       $event_id       The event ID.
+     * @param    string    $error_message  The error message.
+     */
+    public function mark_event_failed($event_id, $error_message)
+    {
+        global $wpdb;
+
+        $wpdb->update(
+            $this->table_name,
+            array(
+                'event_status' => 'failed',
+                'error_message' => $error_message
+            ),
+            array('id' => $event_id),
+            array('%s', '%s'),
+            array('%d')
+        );
+
+        // Increment retry_count
+        $wpdb->query($wpdb->prepare(
+            "UPDATE $this->table_name SET retry_count = retry_count + 1 WHERE id = %d",
+            $event_id
+        ));
+    }
+
+    /**
+     * Update event's final payload and headers (unified table approach)
+     *
+     * @since    2.1.0
+     * @param    int      $event_id                The event ID.
+     * @param    array    $final_payload           The final payload that was sent.
+     * @param    array    $final_headers           The final headers that were sent.
+     * @param    string   $transmission_method     The transmission method used.
+     * @param    boolean  $was_originally_encrypted Whether the original request was encrypted.
+     * @param    boolean  $final_payload_encrypted Whether the final payload was encrypted.
+     */
+    public function update_event_final_data($event_id, $final_payload, $final_headers = array(), $transmission_method = 'cloudflare', $was_originally_encrypted = false, $final_payload_encrypted = false)
+    {
+        global $wpdb;
+        
+        // Prepare headers for storage - encrypt if encryption is enabled
+        $stored_headers = $final_headers;
+        $jwt_encryption_enabled = get_option('ga4_jwt_encryption_enabled', false);
+        
+        if ($jwt_encryption_enabled && !empty($final_headers)) {
+            try {
+                $encrypted_headers = $this->encrypt_sensitive_data_for_storage(wp_json_encode($final_headers));
+                $stored_headers = array('encrypted' => true, 'jwt' => $encrypted_headers);
+            } catch (\Exception $e) {
+                // Continue with unencrypted headers
+                error_log('GA4 Event Logger: Failed to encrypt headers - ' . $e->getMessage());
+            }
+        }
+        
+        $wpdb->update(
+            $this->table_name,
+            array(
+                'final_payload' => wp_json_encode($final_payload),
+                'final_headers' => wp_json_encode($stored_headers),
+                'transmission_method' => $transmission_method,
+                'was_originally_encrypted' => $was_originally_encrypted ? 1 : 0,
+                'final_payload_encrypted' => $final_payload_encrypted ? 1 : 0
+            ),
+            array('id' => $event_id),
+            array('%s', '%s', '%s', '%d', '%d'),
+            array('%d')
+        );
+    }
+
+    /**
+     * Get events for cronjob table display (unified table approach)
+     *
+     * @since    2.1.0
+     * @param    array    $args    Query arguments.
+     * @return   array             Events and pagination info.
+     */
+    public function get_queue_events_for_table($args = array())
+    {
+        global $wpdb;
+
+        $defaults = array(
+            'limit' => 50,
+            'offset' => 0,
+            'status' => '',
+            'search' => '',
+            'orderby' => 'created_at',
+            'order' => 'DESC'
+        );
+
+        $args = wp_parse_args($args, $defaults);
+
+        // Build WHERE clause
+        $where_conditions = array('record_type = %s');
+        $query_args = array('queue_item');
+
+        if (!empty($args['status'])) {
+            $where_conditions[] = "event_status = %s";
+            $query_args[] = $args['status'];
+        }
+
+        if (!empty($args['search'])) {
+            $where_conditions[] = "(error_message LIKE %s OR id LIKE %s OR event_data LIKE %s)";
+            $search_term = '%' . $wpdb->esc_like($args['search']) . '%';
+            $query_args[] = $search_term;
+            $query_args[] = $search_term;
+            $query_args[] = $search_term;
+        }
+
+        $where_sql = ' WHERE ' . implode(' AND ', $where_conditions);
+
+        // Get total count
+        $count_query = "SELECT COUNT(*) FROM $this->table_name" . $where_sql;
+        $total_events = $wpdb->get_var($wpdb->prepare($count_query, $query_args));
+
+        // Get events
+        $orderby = sanitize_sql_orderby($args['orderby'] . ' ' . $args['order']);
+        if (!$orderby) {
+            $orderby = 'created_at DESC';
+        }
+
+        $query = "SELECT * FROM $this->table_name 
+                  $where_sql 
+                  ORDER BY $orderby 
+                  LIMIT %d OFFSET %d";
+
+        $final_args = array_merge($query_args, array($args['limit'], $args['offset']));
+        $events = $wpdb->get_results($wpdb->prepare($query, $final_args));
+
+        // Decrypt payloads and headers for display
+        foreach ($events as $event) {
+            if (!empty($event->event_data)) {
+                $event->event_data = $this->decrypt_payload_for_display($event->event_data);
+            }
+            if (!empty($event->final_payload)) {
+                $event->final_payload = $this->decrypt_payload_for_display($event->final_payload);
+            }
+            if (!empty($event->final_headers)) {
+                $event->final_headers = $this->decrypt_payload_for_display($event->final_headers);
+            }
+            if (!empty($event->original_headers)) {
+                $event->original_headers = $this->decrypt_payload_for_display($event->original_headers);
+            }
+        }
+
+        return array(
+            'events' => $events,
+            'total' => intval($total_events)
+        );
+    }
+
+    /**
+     * Clean old processed events (unified table approach)
+     *
+     * @since    2.1.0
+     * @param    int    $days_old    Number of days to keep events.
+     * @return   int    Number of deleted rows.
+     */
+    public function cleanup_old_queue_events($days_old = 7)
+    {
+        global $wpdb;
+
+        return $wpdb->query($wpdb->prepare(
+            "DELETE FROM $this->table_name 
+             WHERE record_type = 'queue_item' 
+             AND event_status IN ('completed', 'failed') 
+             AND created_at < DATE_SUB(NOW(), INTERVAL %d DAY)",
+            $days_old
+        ));
+    }
+
+    /**
+     * Migrate data from old queue table to unified table
+     *
+     * @since    2.1.0
+     * @return   array    Migration results with counts.
+     */
+    public function migrate_old_queue_data()
+    {
+        global $wpdb;
+        
+        $old_queue_table = $wpdb->prefix . 'ga4_events_queue';
+        $results = array(
+            'queue_migrated' => 0,
+            'queue_errors' => 0,
+            'old_queue_table_exists' => false
+        );
+        
+        // Check if old queue table exists
+        $table_exists = $wpdb->get_var($wpdb->prepare(
+            "SHOW TABLES LIKE %s",
+            $old_queue_table
+        ));
+        
+        if (!$table_exists) {
+            return $results;
+        }
+        
+        $results['old_queue_table_exists'] = true;
+        
+        // Get all records from old queue table
+        $old_queue_events = $wpdb->get_results("SELECT * FROM $old_queue_table");
+        
+        foreach ($old_queue_events as $event) {
+            // Map old queue fields to new unified table
+            $migrate_data = array(
+                'event_name' => '', // Will be empty for queue items
+                'event_status' => $event->status, // pending, completed, failed
+                'record_type' => 'queue_item',
+                'created_at' => $event->created_at,
+                'processed_at' => $event->processed_at,
+                'retry_count' => $event->retry_count ?? 0,
+                'error_message' => $event->error_message,
+                'event_data' => $event->event_data,
+                'is_encrypted' => $event->is_encrypted ?? 0,
+                'final_payload' => $event->final_payload,
+                'final_headers' => $event->final_headers,
+                'original_headers' => $event->original_headers,
+                'transmission_method' => $event->transmission_method ?? 'cloudflare',
+                'was_originally_encrypted' => $event->was_originally_encrypted ?? 0,
+                'final_payload_encrypted' => $event->final_payload_encrypted ?? 0
+            );
+            
+            $migrated = $this->log_event($migrate_data);
+            
+            if ($migrated) {
+                $results['queue_migrated']++;
+            } else {
+                $results['queue_errors']++;
+            }
+        }
+        
+        return $results;
+    }
+
+    /**
+     * Remove old queue table after successful migration
+     *
+     * @since    2.1.0
+     * @return   boolean    True if successful.
+     */
+    public function drop_old_queue_table()
+    {
+        global $wpdb;
+        
+        $old_queue_table = $wpdb->prefix . 'ga4_events_queue';
+        
+        return $wpdb->query("DROP TABLE IF EXISTS $old_queue_table");
     }
 }
