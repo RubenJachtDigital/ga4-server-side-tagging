@@ -55,7 +55,7 @@ $total_events = $events_data['total'] ?? count($events); // Get total from the m
 // Get unique event names for filter using unified table
 global $wpdb;
 $table_name = $wpdb->prefix . 'ga4_event_logs';
-$unique_events = $wpdb->get_col("SELECT DISTINCT event_name FROM $table_name WHERE record_type = 'event_log' AND event_name != '' ORDER BY event_name LIMIT 50");
+$unique_events = $wpdb->get_col("SELECT DISTINCT event_name FROM $table_name WHERE event_name != '' AND event_name IS NOT NULL ORDER BY event_name LIMIT 50");
 
 // Calculate pagination info
 $total_pages = ceil($total_events / $limit);

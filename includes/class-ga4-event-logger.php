@@ -522,18 +522,14 @@ class GA4_Event_Logger
             $where_values[] = $args['event_name'];
         }
 
-        // Enhanced search filter for single-row structure (4 payload columns + user_agent)
+        // Search handling: we'll search in both database fields and encrypted payload fields
+        $search_term = '';
+        $has_search = false;
         if (!empty($args['search'])) {
-            $where_clauses[] = '(event_name LIKE %s OR reason LIKE %s OR ip_address LIKE %s OR user_agent LIKE %s OR original_payload LIKE %s OR final_payload LIKE %s OR original_headers LIKE %s OR final_headers LIKE %s)';
-            $search_term = '%' . $wpdb->esc_like($args['search']) . '%';
-            $where_values[] = $search_term;
-            $where_values[] = $search_term;
-            $where_values[] = $search_term;
-            $where_values[] = $search_term;
-            $where_values[] = $search_term; // original_payload
-            $where_values[] = $search_term; // final_payload
-            $where_values[] = $search_term; // original_headers
-            $where_values[] = $search_term; // final_headers
+            $search_term = $args['search'];
+            $has_search = true;
+            // For encrypted payload search, we need to get more records and filter them after decryption
+            // Don't add database search filters here - we'll get all records and filter in PHP
         }
 
         $where_sql = !empty($where_clauses) ? 'WHERE ' . implode(' AND ', $where_clauses) : '';
@@ -551,31 +547,52 @@ class GA4_Event_Logger
         $orderby = in_array($args['orderby'], $allowed_orderby) ? $args['orderby'] : 'created_at';
         $order = strtoupper($args['order']) === 'ASC' ? 'ASC' : 'DESC';
 
+        // When searching, get more records to search through encrypted content
+        if ($has_search) {
+            // Get a larger batch to search through encrypted content
+            $search_limit = max($args['limit'] * 3, 100); // Get more records for searching
+            $search_offset = 0; // Start from beginning for accurate search
+        } else {
+            $search_limit = $args['limit'];
+            $search_offset = $args['offset'];
+        }
+
         // Build query
         $query = "SELECT * FROM $this->table_name $where_sql ORDER BY $orderby $order LIMIT %d OFFSET %d";
-        $final_values = array_merge($where_values, array($args['limit'], $args['offset']));
+        $final_values = array_merge($where_values, array($search_limit, $search_offset));
 
         if (!empty($where_values)) {
             $query = $wpdb->prepare($query, $final_values);
         } else {
-            $query = $wpdb->prepare($query, $args['limit'], $args['offset']);
+            $query = $wpdb->prepare($query, $search_limit, $search_offset);
         }
 
         $results = $wpdb->get_results($query) ?: array();
 
-        // Decrypt the 4 payload columns for display (single-row approach)
+        // Decrypt the 4 payload columns and perform payload search if needed
+        $filtered_results = array();
         foreach ($results as $result) {
+            // Decrypt payload columns
+            $original_payload_decrypted = '';
+            $final_payload_decrypted = '';
+            $original_headers_decrypted = '';
+            $final_headers_decrypted = '';
+            
             if (!empty($result->original_payload)) {
-                $result->original_payload = $this->decrypt_payload_for_display($result->original_payload);
+                $original_payload_decrypted = $this->decrypt_payload_for_display($result->original_payload);
+                $result->original_payload = $original_payload_decrypted;
             }
             if (!empty($result->final_payload)) {
-                $result->final_payload = $this->decrypt_payload_for_display($result->final_payload);
+                $final_payload_decrypted = $this->decrypt_payload_for_display($result->final_payload);
+                $result->final_payload = $final_payload_decrypted;
             }
             if (!empty($result->original_headers)) {
-                $result->original_headers = $this->decrypt_payload_for_display($result->original_headers);
+                $original_headers_decrypted = $this->decrypt_payload_for_display($result->original_headers);
+                $result->original_headers = $original_headers_decrypted;
             }
             if (!empty($result->final_headers)) {
-                $result->final_headers = $this->decrypt_payload_for_display($result->final_headers);
+                $final_headers_decrypted = $this->decrypt_payload_for_display($result->final_headers);
+                $result->final_headers = $final_headers_decrypted;
             }
             if (!empty($result->bot_detection_rules)) {
                 $result->bot_detection_rules = $this->decrypt_payload_for_display($result->bot_detection_rules);
@@ -585,7 +602,60 @@ class GA4_Event_Logger
             $result->event_status = $result->monitor_status; // For legacy display code
             $result->payload = $result->original_payload; // For legacy display code
             $result->headers = $result->original_headers; // For legacy display code
+            
+            // If searching, check all fields
+            if ($has_search) {
+                $search_found = false;
+                
+                // Search in database fields (non-encrypted)
+                $db_fields = array(
+                    $result->event_name ?? '',
+                    $result->reason ?? '',
+                    $result->ip_address ?? '',
+                    $result->user_agent ?? ''
+                );
+                
+                foreach ($db_fields as $field_content) {
+                    if (stripos($field_content, $search_term) !== false) {
+                        $search_found = true;
+                        break;
+                    }
+                }
+                
+                // Search in decrypted payload fields
+                if (!$search_found) {
+                    $payload_fields = array(
+                        $original_payload_decrypted,
+                        $final_payload_decrypted,
+                        $original_headers_decrypted,
+                        $final_headers_decrypted
+                    );
+                    
+                    foreach ($payload_fields as $field_content) {
+                        if (stripos($field_content, $search_term) !== false) {
+                            $search_found = true;
+                            break;
+                        }
+                    }
+                }
+                
+                if ($search_found) {
+                    $filtered_results[] = $result;
+                }
+            } else {
+                $filtered_results[] = $result;
+            }
         }
+        
+        // Apply pagination to filtered results if we performed search
+        if ($has_search) {
+            $total_filtered = count($filtered_results);
+            $filtered_results = array_slice($filtered_results, $args['offset'], $args['limit']);
+            // Update total count for pagination
+            $total_events = $total_filtered;
+        }
+        
+        $results = $filtered_results;
 
         return array(
             'results' => $results,
@@ -703,7 +773,7 @@ class GA4_Event_Logger
         $cutoff_date = date('Y-m-d H:i:s', strtotime("-{$days} days"));
         
         return $wpdb->query($wpdb->prepare(
-            "DELETE FROM $this->table_name WHERE record_type = 'event_log' AND created_at < %s",
+            "DELETE FROM $this->table_name WHERE created_at < %s",
             $cutoff_date
         ));
     }
