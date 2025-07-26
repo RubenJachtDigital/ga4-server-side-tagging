@@ -145,8 +145,8 @@ class GA4_Server_Side_Tagging_Admin
         // Add submenu for logs
         add_submenu_page(
             'ga4-server-side-tagging',
-            'Error Logs',
-            'Error Logs',
+            'Tagging Logs',
+            'Tagging Logs',
             'manage_options',
             'ga4-server-side-tagging-logs',
             array($this, 'display_logs_page')
@@ -1335,7 +1335,7 @@ class GA4_Server_Side_Tagging_Admin
     }
 
     /**
-     * Display the error logs page.
+     * Display the Tagging logs page.
      *
      * @since    1.0.0
      */
@@ -1345,7 +1345,7 @@ class GA4_Server_Side_Tagging_Admin
         if (isset($_POST['action']) && isset($_POST['_wpnonce']) && wp_verify_nonce($_POST['_wpnonce'], 'ga4_logs_action')) {
             if ($_POST['action'] === 'clear_logs') {
                 $this->logger->clear_log();
-                add_settings_error('ga4_logs', 'logs_cleared', 'Error logs have been cleared.', 'success');
+                add_settings_error('ga4_logs', 'logs_cleared', 'Tagging logs have been cleared.', 'success');
             } elseif ($_POST['action'] === 'toggle_debug_mode') {
                 $debug_mode = get_option('ga4_server_side_tagging_debug_mode', false);
                 update_option('ga4_server_side_tagging_debug_mode', !$debug_mode);
@@ -1376,7 +1376,7 @@ class GA4_Server_Side_Tagging_Admin
 
         ?>
         <div class="wrap">
-            <h1>GA4 Server-Side Tagging - Error Logs</h1>
+            <h1>GA4 Server-Side Tagging - Tagging Logs</h1>
 
             <?php settings_errors('ga4_logs'); ?>
 
@@ -1409,7 +1409,7 @@ class GA4_Server_Side_Tagging_Admin
             </div>
 
             <div class="card">
-                <h2>Error Log</h2>
+                <h2>Tagging Log</h2>
                 <?php if (empty($log_content)): ?>
                     <p>No log entries found. <?php echo !$debug_mode ? 'Enable debug mode to start logging.' : ''; ?></p>
                 <?php else: ?>

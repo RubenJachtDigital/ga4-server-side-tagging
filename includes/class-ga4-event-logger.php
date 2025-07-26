@@ -238,8 +238,9 @@ class GA4_Event_Logger
 
         // Search functionality
         if (!empty($args['search'])) {
-            $where_clauses[] = '(event_name LIKE %s OR reason LIKE %s OR payload LIKE %s OR ip_address LIKE %s)';
+            $where_clauses[] = '(event_name LIKE %s OR reason LIKE %s OR payload LIKE %s OR ip_address LIKE %s OR user_agent LIKE %s)';
             $search_term = '%' . $wpdb->esc_like($args['search']) . '%';
+            $where_values[] = $search_term;
             $where_values[] = $search_term;
             $where_values[] = $search_term;
             $where_values[] = $search_term;
@@ -483,8 +484,10 @@ class GA4_Event_Logger
 
         // Search filter
         if (!empty($args['search'])) {
-            $where_clauses[] = '(event_name LIKE %s OR reason LIKE %s OR ip_address LIKE %s)';
+            $where_clauses[] = '(event_name LIKE %s OR reason LIKE %s OR ip_address LIKE %s OR user_agent LIKE %s OR payload LIKE %s)';
             $search_term = '%' . $wpdb->esc_like($args['search']) . '%';
+            $where_values[] = $search_term;
+            $where_values[] = $search_term;
             $where_values[] = $search_term;
             $where_values[] = $search_term;
             $where_values[] = $search_term;

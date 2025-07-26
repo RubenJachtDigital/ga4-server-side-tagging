@@ -328,7 +328,7 @@ Advanced bot filtering includes:
 ### Common Issues
 
 **Events Not Appearing in GA4**
-1. Check Debug Logs (`GA4 Server-Side Tagging > Error Logs`)
+1. Check Debug Logs (`GA4 Server-Side Tagging > Tagging Logs`)
 2. Verify GA4 Measurement ID and API Secret
 3. Test connection in Settings page
 4. Check Cloudflare Worker configuration
@@ -374,7 +374,7 @@ Enable debug mode in Settings to get detailed logs:
 
 ### Getting Help
 
-- **Error Logs**: Check plugin error logs for detailed debugging
+- **Tagging Logs**: Check plugin Tagging logs for detailed debugging
 - **Event Monitor**: Review event processing and consent status
 - **Queue Status**: Monitor background processing health
 - **Connection Test**: Verify GA4 and Cloudflare connectivity

@@ -198,7 +198,8 @@ if (!defined('WPINC')) {
                 <ul>
                     <li><a href="<?php echo admin_url('admin.php?page=ga4-server-side-tagging-settings'); ?>">⚙️ Settings</a> - Configure basic GA4 and consent settings</li>
                     <li><a href="<?php echo admin_url('admin.php?page=ga4-server-side-tagging-cronjobs'); ?>">📊 Cronjobs</a> - Monitor event processing queue</li>
-                    <li><a href="<?php echo admin_url('admin.php?page=ga4-server-side-tagging-logs'); ?>">📄 Error Logs</a> - View debug and error logs</li>
+                    <li><a href="<?php echo admin_url('admin.php?page=ga4-server-side-tagging-events'); ?>">📄 Event Monitor</a></li>
+                    <li><a href="<?php echo admin_url('admin.php?page=ga4-server-side-tagging-logs'); ?>">📄 Tagging Logs</a> - View tagging logs</li>
                 </ul>
             </div>
 

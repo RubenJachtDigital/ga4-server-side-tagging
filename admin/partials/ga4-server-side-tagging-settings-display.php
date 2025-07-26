@@ -194,7 +194,7 @@ $disable_all_ip = get_option('ga4_disable_all_ip', false);
                                     <input type="checkbox" id="ga4_server_side_tagging_debug_mode" name="ga4_server_side_tagging_debug_mode" <?php checked($debug_mode); ?> />
                                     Enable debug logging
                                 </label>
-                                <p class="description">Enable detailed logging for troubleshooting. Logs can be viewed in the Error Logs page.</p>
+                                <p class="description">Enable detailed logging for troubleshooting. Logs can be viewed in the Tagging Logs page.</p>
                             </td>
                         </tr>
                     </table>
@@ -441,7 +441,7 @@ $disable_all_ip = get_option('ga4_disable_all_ip', false);
                 <ul>
                     <li><a href="<?php echo admin_url('admin.php?page=ga4-server-side-tagging'); ?>">🧪 A/B Testing & Click Tracking</a></li>
                     <li><a href="<?php echo admin_url('admin.php?page=ga4-server-side-tagging-cronjobs'); ?>">📊 Event Queue & Cronjobs</a></li>
-                    <li><a href="<?php echo admin_url('admin.php?page=ga4-server-side-tagging-logs'); ?>">📄 Error Logs</a></li>
+                    <li><a href="<?php echo admin_url('admin.php?page=ga4-server-side-tagging-logs'); ?>">📄 Tagging Logs</a></li>
                     <li><a href="<?php echo admin_url('admin.php?page=ga4-server-side-tagging-events'); ?>">📄 Event Monitor</a></li>
                 </ul>
             </div>

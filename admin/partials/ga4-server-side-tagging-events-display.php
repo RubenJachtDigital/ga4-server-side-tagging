@@ -59,9 +59,11 @@ $total_events = $wpdb->get_var("SELECT COUNT(*) FROM $table_name" .
     (!empty($filter_status) || !empty($filter_event) || !empty($search) ? " WHERE 1=1" . 
     (!empty($filter_status) ? $wpdb->prepare(" AND event_status = %s", $filter_status) : '') .
     (!empty($filter_event) ? $wpdb->prepare(" AND event_name = %s", $filter_event) : '') .
-    (!empty($search) ? $wpdb->prepare(" AND (event_name LIKE %s OR reason LIKE %s OR ip_address LIKE %s)", 
+    (!empty($search) ? $wpdb->prepare(" AND (event_name LIKE %s OR reason LIKE %s OR ip_address LIKE %s OR user_agent LIKE %s OR payload LIKE %s)", 
         '%' . $wpdb->esc_like($search) . '%', 
         '%' . $wpdb->esc_like($search) . '%', 
+        '%' . $wpdb->esc_like($search) . '%',
+        '%' . $wpdb->esc_like($search) . '%',
         '%' . $wpdb->esc_like($search) . '%') : '') : ''));
 
 $total_pages = ceil($total_events / $limit);
@@ -129,7 +131,7 @@ $current_page = floor($offset / $limit) + 1;
                 <div>
                     <label for="search"><?php echo esc_html__('Search:', 'ga4-server-side-tagging'); ?></label><br>
                     <input type="text" id="search" name="search" value="<?php echo esc_attr($search); ?>" 
-                           placeholder="Event name, IP, reason..." style="width: 200px;">
+                           placeholder="Event name, IP, reason, user agent, payload..." style="width: 250px;">
                 </div>
 
                 <!-- Status Filter -->

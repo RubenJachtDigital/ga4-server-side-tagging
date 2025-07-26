@@ -1573,7 +1573,6 @@ class GA4_Server_Side_Tagging_Endpoint
             if (!empty($cloudflare_url) && strpos($cloudflare_url, 'https://') !== 0) {
                 return array('success' => false, 'error' => 'Cloudflare Worker URL must use HTTPS protocol for security');
             }
-            // Performance: Removed error logging for faster processing
 
             $headers = array(
                 'Content-Type' => 'application/json'
