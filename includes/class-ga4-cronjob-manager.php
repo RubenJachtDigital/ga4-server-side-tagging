@@ -376,9 +376,7 @@ class GA4_Cronjob_Manager
                 
                 // Get original headers from the queued event
                 $original_headers = GA4_Encryption_Util::decrypt_headers_from_storage($original_event->original_headers);
-                if ($this->logger && get_option('ga4_server_side_tagging_debug_mode')) {
-                    $this->logger->debug("Cloudflare - Event {$original_event->id} headers: " . wp_json_encode($original_headers));
-                }
+          
                 
                 // Ensure we have the correct event structure for Cloudflare
                 // $event_data should be the GA4 event with name, params, etc.
@@ -388,9 +386,7 @@ class GA4_Cronjob_Manager
                 } elseif (is_array($event_data) && isset($event_data['event'])) {
                     // Event has nested structure, extract the actual event
                     $final_event = $event_data['event'];
-                    if ($this->logger) {
-                        $this->logger->warning("Found nested event structure, extracting event data");
-                    }
+                
                 } else {
                     // Fallback - use as is
                     $final_event = $event_data;
@@ -530,7 +526,8 @@ class GA4_Cronjob_Manager
             // Get original headers from the queued event
             $original_headers = GA4_Encryption_Util::decrypt_headers_from_storage($original_event->original_headers);
             if ($this->logger && get_option('ga4_server_side_tagging_debug_mode')) {
-                $this->logger->debug("GA4 Direct - Event {$original_event->id} headers: " . wp_json_encode($original_headers));
+                $this->logger->debug("GA4 Direct - Event {$original_event->id} raw headers from storage: " . wp_json_encode($original_event->original_headers));
+                $this->logger->debug("GA4 Direct - Event {$original_event->id} decrypted headers: " . wp_json_encode($original_headers));
             }
             if (empty($original_headers) && $this->logger) {
                 $this->logger->debug("No original headers found for event {$original_event->id}");
@@ -592,6 +589,11 @@ class GA4_Cronjob_Manager
             if (isset($original_headers[$stored_key]) && !empty($original_headers[$stored_key])) {
                 $headers[$header_name] = $original_headers[$stored_key];
             }
+        }
+        
+        // Debug log the final headers being sent to GA4
+        if ($this->logger && get_option('ga4_server_side_tagging_debug_mode')) {
+            $this->logger->debug("GA4 Direct - Final headers being sent to GA4: " . wp_json_encode($headers));
         }
         
         $response = wp_remote_post($url, array(

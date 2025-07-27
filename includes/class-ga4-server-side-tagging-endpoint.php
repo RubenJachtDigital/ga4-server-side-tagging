@@ -2085,8 +2085,8 @@ class GA4_Server_Side_Tagging_Endpoint
     private function get_essential_headers($request)
     {
         $essential_headers = array(
-            'user_agent', 'accept_language', 'referer', 
-            'x_forwarded_for', 'x_real_ip'
+            'user_agent', 'accept_language', 'accept', 'referer', 
+            'accept_encoding', 'x_forwarded_for', 'x_real_ip'
         );
         
         $filtered_headers = array();
