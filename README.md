@@ -248,17 +248,73 @@ Event names are automatically sanitized to meet GA4 requirements:
 - Cannot start with a number
 - Converted to lowercase
 
-### Event Queue & Cronjobs
+### Event Queue & Database Architecture
 
-The plugin uses a queuing system for reliable event processing:
+The plugin uses a **unified database architecture** for comprehensive event management:
 
-- **Automatic Processing**: Events processed every 5 minutes
+#### Unified Event Table (`wp_ga4_event_logs`)
+
+All events are stored in a single table with dual-purpose functionality:
+- **Monitor Status**: `allowed`, `denied`, `bot_detected`, `error`
+- **Queue Status**: `pending`, `processing`, `completed`, `failed` (NULL for monitoring-only events)
+
+#### Event Processing Flow
+
+1. **Event Reception**: All events logged with `monitor_status` in unified table
+2. **Allowed Events**: Automatically set `queue_status = 'pending'` for processing
+3. **Denied/Bot Events**: Remain as monitoring records with `queue_status = NULL`
+4. **Background Processing**: Cron processes `queue_status = 'pending'` events every 5 minutes
+5. **Status Updates**: Queue status updated to `completed` or `failed` based on results
+
+#### Database Schema Features
+
+**Core Fields**:
+- Dual status tracking (`monitor_status` + `queue_status`)
+- Event identification (`event_name`, `ip_address`, `user_agent`)
+- Request context (`url`, `referrer`, `user_id`, `session_id`)
+- Consent tracking (`consent_given`)
+
+**Payload Columns** (4 encrypted columns):
+- `original_headers`: Initial request headers (filtered and encrypted)
+- `original_payload`: Original event data (encrypted for storage)
+- `final_payload`: Processed payload sent to GA4/Cloudflare (encrypted)
+- `final_headers`: Final headers sent to external services (encrypted)
+
+**Processing Metadata**:
+- `transmission_method`: `cloudflare` or `ga4_direct`
+- `retry_count`: Failed event retry tracking
+- `error_message`: Detailed failure information
+- `processing_time_ms`: Performance monitoring
+- `batch_size`: Batch processing context
+
+**Encryption Tracking**:
+- `was_originally_encrypted`: Whether original request was encrypted
+- `final_payload_encrypted`: Whether final payload was encrypted
+
+#### Queue Management Features
+
+- **Automatic Processing**: Events processed every 5 minutes via WordPress cron
 - **Manual Trigger**: Force immediate processing via admin panel
-- **Batch Processing**: Up to 1000 events per batch
-- **Retry Logic**: Failed events are retried automatically
-- **Cleanup**: Old events automatically removed
+- **Batch Processing**: Up to 1000 events per batch (configurable)
+- **Retry Logic**: Failed events automatically retried with backoff
+- **Unified Cleanup**: Single command removes old monitoring and queue data
+- **Performance Monitoring**: Processing times and success rates tracked
 
-Monitor queue status at `GA4 Server-Side Tagging > Cronjobs`.
+#### Admin Interface
+
+**Event Monitor** (`GA4 Server-Side Tagging > Event Monitor`):
+- View all events regardless of status
+- Filter by monitor status (allowed/denied/bot_detected/error)
+- Search across encrypted payload data
+- Real-time consent and bot detection analysis
+
+**Queue Management** (`GA4 Server-Side Tagging > Queue Management`):
+- View only events with queue status (pending/processing/completed/failed)
+- Monitor background processing health
+- Manual queue processing and cleanup
+- Processing performance metrics
+
+Monitor queue status at `GA4 Server-Side Tagging > Queue Management`.
 
 ### Event Monitoring
 
