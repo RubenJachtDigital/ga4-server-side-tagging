@@ -127,6 +127,18 @@ class GA4_Encryption_Util
      */
     private static function verify_jwt_token($jwt_token, $key)
     {
+        // Check if data is already decrypted JSON
+        if (is_string($jwt_token) && (substr($jwt_token, 0, 1) === '{' || substr($jwt_token, 0, 1) === '[')) {
+            // This is already JSON data, return it as-is
+            return $jwt_token;
+        }
+        
+        // Check if this even looks like a JWT token before processing
+        if (!self::looks_like_jwt_token($jwt_token)) {
+            // Not a JWT token format, return as-is
+            return $jwt_token;
+        }
+        
         // Split JWT token into parts
         $parts = explode('.', $jwt_token);
         if (count($parts) !== 3) {
@@ -812,6 +824,18 @@ class GA4_Encryption_Util
     public static function decrypt_permanent_jwt_token($jwt_token, $permanent_key_hex)
     {
         try {
+            // Check if data is already decrypted JSON
+            if (is_string($jwt_token) && (substr($jwt_token, 0, 1) === '{' || substr($jwt_token, 0, 1) === '[')) {
+                // This is already JSON data, return it as-is
+                return $jwt_token;
+            }
+            
+            // Check if this even looks like a JWT token before processing
+            if (!self::looks_like_jwt_token($jwt_token)) {
+                // Not a JWT token format, return as-is
+                return $jwt_token;
+            }
+            
             // Validate permanent key
             if (!self::validate_encryption_key($permanent_key_hex)) {
                 throw new \Exception('Invalid permanent encryption key format. Must be 64 hex characters.');
@@ -952,11 +976,20 @@ class GA4_Encryption_Util
 
             // Try to decrypt if it looks like encrypted data
             if (is_string($headers_data)) {
-                // Try permanent JWT decryption
-                $decrypted = self::decrypt_permanent_jwt_token($headers_data, $encryption_key);
-                if ($decrypted !== false) {
-                    $decoded = json_decode($decrypted, true);
+                // Check if it's already JSON data
+                if (substr($headers_data, 0, 1) === '{' || substr($headers_data, 0, 1) === '[') {
+                    $decoded = json_decode($headers_data, true);
                     return is_array($decoded) ? $decoded : array();
+                }
+                
+                // Only attempt JWT decryption if it looks like a JWT token
+                if (self::looks_like_jwt_token($headers_data)) {
+                    // Try permanent JWT decryption
+                    $decrypted = self::decrypt_permanent_jwt_token($headers_data, $encryption_key);
+                    if ($decrypted !== false) {
+                        $decoded = json_decode($decrypted, true);
+                        return is_array($decoded) ? $decoded : array();
+                    }
                 }
             }
 
@@ -969,5 +1002,27 @@ class GA4_Encryption_Util
             // Return original data if decryption fails
             return is_array($headers_data) ? $headers_data : array();
         }
+    }
+      private static function looks_like_jwt_token($string)
+    {
+        if (!is_string($string)) {
+            return false;
+        }
+        
+        // JWT tokens have exactly 2 dots separating 3 parts
+        if (substr_count($string, '.') !== 2) {
+            return false;
+        }
+        
+        // Split and check each part
+        $parts = explode('.', $string);
+        foreach ($parts as $part) {
+            // JWT parts are base64url encoded and reasonably long
+            if (!preg_match('/^[A-Za-z0-9_-]+$/', $part) || strlen($part) < 10) {
+                return false;
+            }
+        }
+        
+        return true;
     }
 }

@@ -2136,7 +2136,6 @@ class GA4_Server_Side_Tagging_Endpoint
             'headers_check' => $this->check_missing_headers($request),
             'asn_check' => $this->check_suspicious_asn($client_ip),
             'behavior_check' => $this->check_behavioral_patterns($request),
-            'user_agent_analysis' => $this->analyze_user_agent_advanced($user_agent),
             'timestamp' => current_time('mysql'),
             'detection_threshold' => 2
         );

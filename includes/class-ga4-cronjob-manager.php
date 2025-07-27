@@ -300,6 +300,18 @@ class GA4_Cronjob_Manager
     private function decrypt_event_data($encrypted_data)
     {
         try {
+            // Check if data is already decrypted JSON
+            if (is_string($encrypted_data) && (substr($encrypted_data, 0, 1) === '{' || substr($encrypted_data, 0, 1) === '[')) {
+                // This is already JSON data, return it as-is
+                return $encrypted_data;
+            }
+            
+            // Only attempt decryption if data looks like a JWT token
+            if (!is_string($encrypted_data) || !$this->looks_like_jwt($encrypted_data)) {
+                // If it doesn't look like JWT, return as-is (might be plain data marked as encrypted)
+                return $encrypted_data;
+            }
+            
             // Try permanent JWT first (for events stored with permanent encryption)
             $permanent_key = GA4_Encryption_Util::retrieve_encrypted_key('ga4_jwt_encryption_key');
             if ($permanent_key) {
@@ -511,7 +523,7 @@ class GA4_Cronjob_Manager
         // Send each event individually
         foreach ($batch_events as $index => $event_data) {
             $original_event = $events[$index];
-            
+            error_log(json_encode($event_data));
             // Transform event data to match Google Analytics expected format
             $final_payload = $this->transformer->transform_event_for_ga4($event_data, $events[$index], $batch_consent);
             
