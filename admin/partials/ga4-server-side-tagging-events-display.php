@@ -347,7 +347,14 @@ $current_page = floor($offset / $limit) + 1;
                                             data-event-status="<?php echo esc_attr($event->event_status); ?>"
                                             data-reason="<?php echo esc_attr($event->reason ?? ''); ?>"
                                             data-payload="<?php echo esc_attr($event->payload ?? ''); ?>"
-                                            data-headers="<?php echo esc_attr($event->headers ?? ''); ?>"
+                                            data-headers="<?php 
+                                                // Properly format headers for display
+                                                if (!empty($event->headers) && is_array($event->headers)) {
+                                                    echo esc_attr(wp_json_encode($event->headers, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+                                                } else {
+                                                    echo esc_attr($event->headers ?? '');
+                                                }
+                                            ?>"
                                             data-ip="<?php echo esc_attr($event->ip_address ?? ''); ?>"
                                             data-user-agent="<?php echo esc_attr($event->user_agent ?? ''); ?>"
                                             data-url="<?php echo esc_attr($event->url ?? ''); ?>"
