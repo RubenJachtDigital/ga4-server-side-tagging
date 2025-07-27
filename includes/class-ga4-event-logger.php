@@ -1337,69 +1337,7 @@ class GA4_Event_Logger
         ));
     }
 
-    /**
-     * Migrate data from old queue table to unified table
-     *
-     * @since    2.1.0
-     * @return   array    Migration results with counts.
-     */
-    public function migrate_old_queue_data()
-    {
-        global $wpdb;
-        
-        $old_queue_table = $wpdb->prefix . 'ga4_events_queue';
-        $results = array(
-            'queue_migrated' => 0,
-            'queue_errors' => 0,
-            'old_queue_table_exists' => false
-        );
-        
-        // Check if old queue table exists
-        $table_exists = $wpdb->get_var($wpdb->prepare(
-            "SHOW TABLES LIKE %s",
-            $old_queue_table
-        ));
-        
-        if (!$table_exists) {
-            return $results;
-        }
-        
-        $results['old_queue_table_exists'] = true;
-        
-        // Get all records from old queue table
-        $old_queue_events = $wpdb->get_results("SELECT * FROM $old_queue_table");
-        
-        foreach ($old_queue_events as $event) {
-            // Map old queue fields to new single-row unified table
-            $migrate_data = array(
-                'event_name' => '', // Will be empty for queue items
-                'monitor_status' => 'allowed', // Queue items were always allowed
-                'queue_status' => $event->status, // pending, completed, failed
-                'created_at' => $event->created_at,
-                'processed_at' => $event->processed_at,
-                'retry_count' => $event->retry_count ?? 0,
-                'error_message' => $event->error_message,
-                'original_payload' => $event->event_data, // event_data becomes original_payload
-                'is_encrypted' => $event->is_encrypted ?? 0,
-                'final_payload' => $event->final_payload,
-                'final_headers' => $event->final_headers,
-                'original_headers' => $event->original_headers,
-                'transmission_method' => $event->transmission_method ?? 'cloudflare',
-                'was_originally_encrypted' => $event->was_originally_encrypted ?? 0,
-                'final_payload_encrypted' => $event->final_payload_encrypted ?? 0
-            );
-            
-            $migrated = $this->log_event($migrate_data);
-            
-            if ($migrated) {
-                $results['queue_migrated']++;
-            } else {
-                $results['queue_errors']++;
-            }
-        }
-        
-        return $results;
-    }
+
 
     /**
      * Remove old queue table after successful migration

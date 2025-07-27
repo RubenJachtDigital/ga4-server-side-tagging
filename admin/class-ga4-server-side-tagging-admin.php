@@ -69,10 +69,7 @@ class GA4_Server_Side_Tagging_Admin
         
         // Initialize encryption salts if they don't exist
         $this->ensure_encryption_salts_exist();
-        
-        // Migrate old transmission method values to new ones
-        $this->migrate_transmission_methods();
-        
+     
         // Register AJAX handlers
         add_action('wp_ajax_ga4_generate_encryption_key', array($this, 'ajax_generate_encryption_key'));
     }
@@ -1645,39 +1642,7 @@ class GA4_Server_Side_Tagging_Admin
         include_once 'partials/ga4-server-side-tagging-events-display.php';
     }
 
-    /**
-     * Migrate old transmission method values to new simplified system
-     *
-     * @since    2.0.0
-     */
-    private function migrate_transmission_methods()
-    {
-        $current_method = get_option('ga4_transmission_method');
-        
-        // Map old values to new ones
-        $migration_map = array(
-            'secure_wp_to_cf' => 'wp_rest_endpoint',
-            'wp_endpoint_to_cf' => 'wp_rest_endpoint'
-            // 'direct_to_cf' stays the same
-        );
-        
-        if (isset($migration_map[$current_method])) {
-            update_option('ga4_transmission_method', $migration_map[$current_method]);
-            
-            if ($this->logger) {
-                $this->logger->info("Migrated transmission method from '$current_method' to '{$migration_map[$current_method]}'");
-            }
-            
-            // If migrating from secure_wp_to_cf, enable encryption by default
-            if ($current_method === 'secure_wp_to_cf') {
-                update_option('ga4_jwt_encryption_enabled', true);
-                
-                if ($this->logger) {
-                    $this->logger->info("Enabled JWT encryption due to migration from secure_wp_to_cf");
-                }
-            }
-        }
-    }
+
 
     /**
      * Display admin notice for DISABLE_WP_CRON warning.
