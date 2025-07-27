@@ -974,6 +974,19 @@ class GA4_Encryption_Util
                 return is_array($headers_data) ? $headers_data : array();
             }
 
+            // Check if headers are in the new encrypted format: {"encrypted": true, "jwt": "..."}
+            if (is_array($headers_data) && isset($headers_data['encrypted']) && $headers_data['encrypted'] === true && isset($headers_data['jwt'])) {
+                // This is the new encrypted format with wrapper
+                $jwt_token = $headers_data['jwt'];
+                $decrypted = self::decrypt_permanent_jwt_token($jwt_token, $encryption_key);
+                if ($decrypted !== false) {
+                    $decoded = json_decode($decrypted, true);
+                    return is_array($decoded) ? $decoded : array();
+                }
+                // If decryption failed, return empty array
+                return array();
+            }
+
             // Try to decrypt if it looks like encrypted data
             if (is_string($headers_data)) {
                 // Check if it's already JSON data
@@ -982,7 +995,7 @@ class GA4_Encryption_Util
                     return is_array($decoded) ? $decoded : array();
                 }
                 
-                // Only attempt JWT decryption if it looks like a JWT token
+                // Only attempt JWT decryption if it looks like a JWT token (legacy format)
                 if (self::looks_like_jwt_token($headers_data)) {
                     // Try permanent JWT decryption
                     $decrypted = self::decrypt_permanent_jwt_token($headers_data, $encryption_key);

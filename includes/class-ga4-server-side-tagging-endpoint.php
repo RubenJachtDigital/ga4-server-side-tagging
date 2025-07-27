@@ -961,25 +961,9 @@ class GA4_Server_Side_Tagging_Endpoint
                     'timestamp' => time()
                 );
                 
-                // Encrypt payload for database storage if encryption is enabled
-                $should_encrypt = false;
-                if ($encryption_enabled) {
-                    $encryption_key = GA4_Encryption_Util::retrieve_encrypted_key('ga4_jwt_encryption_key');
-                    if (!empty($encryption_key)) {
-                        try {
-                            // Use permanent JWT encryption for database storage (no expiry)
-                            $encrypted_data = GA4_Encryption_Util::create_permanent_jwt_token(wp_json_encode($event_data), $encryption_key);
-                            $should_encrypt = true;
-                            $event_data = $encrypted_data;
-                            
-                        } catch (\Exception $e) {
-                            $this->logger->warning("Failed to encrypt event for queuing with permanent key: " . $e->getMessage());
-                            // Continue with unencrypted data
-                        }
-                    } else {
-                        $this->logger->warning("Permanent encryption key not available - storing event unencrypted");
-                    }
-                }
+                // Note: Encryption will be handled by the event logger's log_event method
+                // based on the ga4_jwt_encryption_enabled setting, so we don't encrypt here
+                $should_encrypt = $encryption_enabled;
                 
                 // Get original request headers - filter only essential ones for lightweight storage
                 $original_headers = $this->get_essential_headers($request);
@@ -993,7 +977,7 @@ class GA4_Server_Side_Tagging_Endpoint
                     array(
                         'event_name' => $event['name'] ?? 'unknown',
                         'reason' => 'Successfully queued for batch processing',
-                        'original_payload' => $should_encrypt ? $event_data : json_encode($event_data),
+                        'original_payload' => $event_data,  // Always pass array data - encryption handled by log_event
                         'ip_address' => $client_ip,
                         'user_agent' => $request->get_header('user-agent'),
                         'url' => $request->get_header('origin'),

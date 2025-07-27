@@ -309,30 +309,27 @@ class GA4_Cronjob_Manager
                 return $encrypted_data;
             }
             
-            // Try permanent JWT first (for events stored with permanent encryption)
-            $permanent_key = GA4_Encryption_Util::retrieve_encrypted_key('ga4_jwt_encryption_key');
-            if ($permanent_key) {
-                $decrypted = GA4_Encryption_Util::decrypt_permanent_jwt_token($encrypted_data, $permanent_key);
-                if ($decrypted !== false) {
-                    return $decrypted;
-                }
+            // Check if encryption is enabled
+            $encryption_enabled = get_option('ga4_jwt_encryption_enabled', false);
+            if (!$encryption_enabled) {
+                return $encrypted_data; // No encryption enabled, return as-is
             }
             
-            // Try time-based JWT (for recent events that may still use time-based encryption)
-            $decrypted = GA4_Encryption_Util::verify_time_based_jwt($encrypted_data);
+            // Get encryption key
+            $encryption_key = GA4_Encryption_Util::retrieve_encrypted_key('ga4_jwt_encryption_key');
+            if (!$encryption_key) {
+                return $encrypted_data; // No encryption key available
+            }
+
+            // Use the same decryption method as the event logger for consistency
+            $decrypted = GA4_Encryption_Util::decrypt($encrypted_data, $encryption_key);
             if ($decrypted !== false) {
                 return $decrypted;
             }
-            
-            // Fallback to regular JWT with stored encryption key (legacy compatibility)
-            if ($permanent_key) {
-                $decrypted = GA4_Encryption_Util::decrypt($encrypted_data, $permanent_key);
-                if ($decrypted !== false) {
-                    return $decrypted;
-                }
-            }
 
-            return false;
+            // If general decrypt failed, return original data
+            return $encrypted_data;
+
         } catch (\Exception $e) {
             if ($this->logger) {
                 $this->logger->error("Event decryption failed: " . $e->getMessage());
@@ -379,6 +376,9 @@ class GA4_Cronjob_Manager
                 
                 // Get original headers from the queued event
                 $original_headers = GA4_Encryption_Util::decrypt_headers_from_storage($original_event->original_headers);
+                if ($this->logger && get_option('ga4_server_side_tagging_debug_mode')) {
+                    $this->logger->debug("Cloudflare - Event {$original_event->id} headers: " . wp_json_encode($original_headers));
+                }
                 
                 // Ensure we have the correct event structure for Cloudflare
                 // $event_data should be the GA4 event with name, params, etc.
@@ -529,6 +529,9 @@ class GA4_Cronjob_Manager
             
             // Get original headers from the queued event
             $original_headers = GA4_Encryption_Util::decrypt_headers_from_storage($original_event->original_headers);
+            if ($this->logger && get_option('ga4_server_side_tagging_debug_mode')) {
+                $this->logger->debug("GA4 Direct - Event {$original_event->id} headers: " . wp_json_encode($original_headers));
+            }
             if (empty($original_headers) && $this->logger) {
                 $this->logger->debug("No original headers found for event {$original_event->id}");
             }

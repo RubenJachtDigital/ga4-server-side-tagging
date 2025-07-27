@@ -517,17 +517,18 @@ $current_page = floor($offset / $limit) + 1;
                                                 echo esc_attr($payload_result['data']);
                                             ?>"
                                             data-final-headers="<?php 
-                                                $headers_result = decrypt_event_data($event->final_headers ?: '');
-                                                echo esc_attr($headers_result['data']);
+                                                // Use already decrypted headers from the event logger
+                                                if (!empty($event->final_headers) && is_array($event->final_headers)) {
+                                                    echo esc_attr(wp_json_encode($event->final_headers, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+                                                } else {
+                                                    echo esc_attr($event->final_headers ?: '');
+                                                }
                                             ?>"
                                             data-payload-encrypted="<?php 
                                                 $payload_result = decrypt_event_data($event->final_payload ?: '');
                                                 echo esc_attr($payload_result['was_encrypted'] ? '1' : '0');
                                             ?>"
-                                            data-headers-encrypted="<?php 
-                                                $headers_result = decrypt_event_data($event->final_headers ?: '');
-                                                echo esc_attr($headers_result['was_encrypted'] ? '1' : '0');
-                                            ?>"
+                                            data-headers-encrypted="0"
                                             data-is-encrypted="<?php echo esc_attr($event->is_encrypted ? '1' : '0'); ?>"
                                             style="font-size: 10px; padding: 3px 8px;">
                                         <?php echo esc_html__('View', 'ga4-server-side-tagging'); ?>

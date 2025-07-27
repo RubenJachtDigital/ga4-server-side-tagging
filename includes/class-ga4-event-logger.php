@@ -330,7 +330,7 @@ class GA4_Event_Logger
                 $result->payload = $this->decrypt_payload_for_display($result->payload);
             }
             if (!empty($result->headers)) {
-                $result->headers = $this->decrypt_payload_for_display($result->headers);
+                $result->headers = \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::decrypt_headers_from_storage($result->headers);
             }
             if (!empty($result->bot_detection_rules)) {
                 $result->bot_detection_rules = $this->decrypt_payload_for_display($result->bot_detection_rules);
@@ -414,7 +414,7 @@ class GA4_Event_Logger
                 $result->payload = $this->decrypt_payload_for_display($result->payload);
             }
             if (!empty($result->headers)) {
-                $result->headers = $this->decrypt_payload_for_display($result->headers);
+                $result->headers = \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::decrypt_headers_from_storage($result->headers);
             }
             if (!empty($result->bot_detection_rules)) {
                 $result->bot_detection_rules = $this->decrypt_payload_for_display($result->bot_detection_rules);
@@ -587,11 +587,11 @@ class GA4_Event_Logger
                 $result->final_payload = $final_payload_decrypted;
             }
             if (!empty($result->original_headers)) {
-                $original_headers_decrypted = $this->decrypt_payload_for_display($result->original_headers);
+                $original_headers_decrypted = \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::decrypt_headers_from_storage($result->original_headers);
                 $result->original_headers = $original_headers_decrypted;
             }
             if (!empty($result->final_headers)) {
-                $final_headers_decrypted = $this->decrypt_payload_for_display($result->final_headers);
+                $final_headers_decrypted = \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::decrypt_headers_from_storage($result->final_headers);
                 $result->final_headers = $final_headers_decrypted;
             }
             if (!empty($result->bot_detection_rules)) {
@@ -1010,7 +1010,7 @@ class GA4_Event_Logger
         $base_args = array(
             'monitor_status' => $monitor_status,
             'queue_status' => $queue_status,
-            'original_headers' => wp_json_encode($original_headers),
+            'original_headers' => $this->prepare_headers_for_storage($original_headers),
             'was_originally_encrypted' => $was_originally_encrypted,
             'transmission_method' => $intended_transmission_method
         );
@@ -1055,7 +1055,8 @@ class GA4_Event_Logger
             $original_headers,
             $was_originally_encrypted,
             array(
-                'is_encrypted' => $is_encrypted || get_option('ga4_jwt_encryption_enabled', false)
+                'is_encrypted' => $is_encrypted || get_option('ga4_jwt_encryption_enabled', false),
+                'original_payload' => $encrypted_data  // Pass the encrypted data as original_payload
             )
         );
     }
@@ -1298,10 +1299,10 @@ class GA4_Event_Logger
                 $event->final_payload = $this->decrypt_payload_for_display($event->final_payload);
             }
             if (!empty($event->original_headers)) {
-                $event->original_headers = $this->decrypt_payload_for_display($event->original_headers);
+                $event->original_headers = \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::decrypt_headers_from_storage($event->original_headers);
             }
             if (!empty($event->final_headers)) {
-                $event->final_headers = $this->decrypt_payload_for_display($event->final_headers);
+                $event->final_headers = \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::decrypt_headers_from_storage($event->final_headers);
             }
             
             // Add backward compatibility fields for cronjob admin display
@@ -1413,5 +1414,35 @@ class GA4_Event_Logger
         $old_queue_table = $wpdb->prefix . 'ga4_events_queue';
         
         return $wpdb->query("DROP TABLE IF EXISTS $old_queue_table");
+    }
+
+    /**
+     * Prepare headers for database storage with encryption if enabled
+     *
+     * @since    3.0.0
+     * @param    array    $headers    Headers array to prepare.
+     * @return   string              Prepared headers for storage (encrypted or plain JSON).
+     */
+    private function prepare_headers_for_storage($headers)
+    {
+        if (empty($headers)) {
+            return wp_json_encode(array());
+        }
+        
+        $jwt_encryption_enabled = get_option('ga4_jwt_encryption_enabled', false);
+        
+        if ($jwt_encryption_enabled) {
+            try {
+                $headers_json = wp_json_encode($headers);
+                $encrypted_headers = $this->encrypt_sensitive_data_for_storage($headers_json);
+                return wp_json_encode(array('encrypted' => true, 'jwt' => $encrypted_headers));
+            } catch (\Exception $e) {
+                // Continue with unencrypted headers if encryption fails
+                error_log('GA4 Event Logger: Failed to encrypt original headers - ' . $e->getMessage());
+            }
+        }
+        
+        // Return plain JSON if encryption is disabled or failed
+        return wp_json_encode($headers);
     }
 }
