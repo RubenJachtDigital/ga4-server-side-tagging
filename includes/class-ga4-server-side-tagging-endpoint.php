@@ -215,13 +215,13 @@ class GA4_Server_Side_Tagging_Endpoint
             $context = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 2)[1]['function'] ?? 'unknown';
             $message = ($context === 'send_events') ? 'Bot detected attempting to send events' : 'Bot detected attempting to access secure config';
             
-            $this->logger->bot_detected($message, json_encode(array(
+            $this->logger->bot_detected($message, array(
                 'ip' => $client_ip,
                 'user_agent' => $user_agent,
                 'referer' => $referer,
                 'detection_details' => $detection_details,
                 'context' => $context
-            )));
+            ));
         }
 
         return $is_bot;
@@ -670,11 +670,7 @@ class GA4_Server_Side_Tagging_Endpoint
                     )
                 );
 
-                $this->logger->warning("Bot detected attempting to send events - blocked from database storage", json_encode(array(
-                    'ip' => $client_ip,
-                    'user_agent' => $request->get_header('user-agent'),
-                    'referer' => $request->get_header('referer')
-                )));
+                $this->logger->warning("Bot detected attempting to send events - blocked from database storage. IP: {$client_ip}, User-Agent: " . $request->get_header('user-agent') . ", Referer: " . $request->get_header('referer'));
                 return new \WP_REST_Response(
                     array(
                         'error' => 'Request blocked',
@@ -900,13 +896,7 @@ class GA4_Server_Side_Tagging_Endpoint
                         );
                     }
 
-                    $this->logger->warning("Bot detected via WordPress endpoint - blocked from processing", array(
-                        'ip' => $client_ip,
-                        'user_agent' => $request->get_header('user-agent'),
-                        'bot_score' => $bot_detection_result['score'],
-                        'reasons' => $bot_detection_result['reasons'],
-                        'event_count' => count($request_data['events'])
-                    ));
+                    $this->logger->warning("Bot detected via WordPress endpoint - blocked from processing. IP: {$client_ip}, User-Agent: " . $request->get_header('user-agent') . ", Bot Score: {$bot_detection_result['score']}, Reasons: " . implode(', ', $bot_detection_result['reasons']) . ", Event Count: " . count($request_data['events']));
                     
                     // Return success response but don't process the events (same as Cloudflare Worker)
                     return new \WP_REST_Response(array(
@@ -2035,7 +2025,7 @@ class GA4_Server_Side_Tagging_Endpoint
    
         
         if (!isset($request_data['consent']) || !is_array($request_data['consent'])) {
-            $this->logger->info('No consent data found or not array', json_encode($request_data['consent'] ?? 'not_set'));
+            $this->logger->info('No consent data found or not array: ' . json_encode($request_data['consent'] ?? 'not_set'));
             return null;
         }
         
@@ -2044,7 +2034,7 @@ class GA4_Server_Side_Tagging_Endpoint
         // Check for legacy consent_mode field first
         if (isset($consent['consent_mode'])) {
             $result = $consent['consent_mode'] === 'GRANTED';
-            $this->logger->info('Using legacy consent_mode', json_encode(array('consent_mode' => $consent['consent_mode'], 'result' => $result)));
+            $this->logger->info('Using legacy consent_mode: ' . json_encode(array('consent_mode' => $consent['consent_mode'], 'result' => $result)));
             return $result;
         }
         
@@ -2061,17 +2051,17 @@ class GA4_Server_Side_Tagging_Endpoint
         // If only one field is present, use that
         if (isset($consent['ad_user_data'])) {
             $result = $ad_user_data_granted;
-            $this->logger->info('Using ad_user_data only', json_encode(array('ad_user_data' => $consent['ad_user_data'], 'result' => $result)));
+            $this->logger->info('Using ad_user_data only: ' . json_encode(array('ad_user_data' => $consent['ad_user_data'], 'result' => $result)));
             return $result;
         }
         
         if (isset($consent['ad_personalization'])) {
             $result = $ad_personalization_granted;
-            $this->logger->info('Using ad_personalization only', json_encode(array('ad_personalization' => $consent['ad_personalization'], 'result' => $result)));
+            $this->logger->info('Using ad_personalization only: ' . json_encode(array('ad_personalization' => $consent['ad_personalization'], 'result' => $result)));
             return $result;
         }
         
-        $this->logger->info('No valid consent fields found', json_encode($consent));
+        $this->logger->info('No valid consent fields found: ' . json_encode($consent));
         return null;
     }
 

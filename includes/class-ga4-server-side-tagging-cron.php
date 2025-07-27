@@ -142,36 +142,18 @@ class GA4_Server_Side_Tagging_Cron
         
         try {
             // Include necessary files
-            require_once GA4_SERVER_SIDE_TAGGING_PLUGIN_DIR . 'includes/class-ga4-server-side-tagging-endpoint.php';
+            require_once GA4_SERVER_SIDE_TAGGING_PLUGIN_DIR . 'includes/class-ga4-cronjob-manager.php';
             require_once GA4_SERVER_SIDE_TAGGING_PLUGIN_DIR . 'includes/class-ga4-encryption-util.php';
             
-            // Initialize the endpoint
-            $endpoint = new GA4_Server_Side_Tagging_Endpoint($this->logger);
-            
-            // Get batch size from options (default 100)
-            $batch_size = get_option('ga4_queue_batch_size', 100);
+            // Initialize the cronjob manager
+            $cronjob_manager = new \GA4ServerSideTagging\Core\GA4_Cronjob_Manager($this->logger);
             
             // Process the queue
-            $result = $endpoint->process_event_queue($batch_size);
+            $cronjob_manager->process_event_queue();
             
             $processing_time = round((microtime(true) - $start_time) * 1000, 2);
             
-            if ($result['success'] && $result['events_processed'] > 0) {
-                $this->logger->info(sprintf(
-                    'Cron job successfully processed %d events in batch %s (%.2fms)',
-                    $result['events_processed'],
-                    $result['batch_id'],
-                    $processing_time
-                ));
-                
-                // Update performance metrics
-                $this->update_performance_metrics($result['events_processed'], $processing_time);
-                
-            } else if ($result['success'] && $result['events_processed'] === 0) {
-            
-            } else {
-                $this->logger->error('Cron job failed to process events: ' . $result['error']);
-            }
+            $this->logger->info("Event queue processing completed in {$processing_time}ms");
             
         } catch (\Exception $e) {
             $processing_time = round((microtime(true) - $start_time) * 1000, 2);

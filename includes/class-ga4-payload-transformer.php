@@ -1028,7 +1028,7 @@ class GA4_Payload_Transformer
         }
         
         // Ensure format is WIDTHxHEIGHT
-        $resolution = preg_replace('/[^\d\x]/', '', $resolution);
+        $resolution = preg_replace('/[^\dx]/', '', $resolution);
         if (preg_match('/^(\d+)[x\*](\d+)$/', $resolution, $matches)) {
             return $matches[1] . 'x' . $matches[2];
         }

@@ -990,7 +990,7 @@ class GA4_Event_Logger
      * Create initial event record with queue status (single-row approach)
      *
      * @since    2.1.0
-     * @param    array     $event_data              The event data to queue.
+     * @param    array|string $event_data            The event data to queue (array) or raw request body (string).
      * @param    string    $monitor_status          Monitor status (allowed/denied/bot_detected/error).
      * @param    array     $original_headers        Original request headers.
      * @param    boolean   $was_originally_encrypted Whether the original request was encrypted.

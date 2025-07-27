@@ -516,7 +516,6 @@ class GA4_Cronjob_Manager
         // Send each event individually
         foreach ($batch_events as $index => $event_data) {
             $original_event = $events[$index];
-            error_log(json_encode($event_data));
             // Transform event data to match Google Analytics expected format
             $final_payload = $this->transformer->transform_event_for_ga4($event_data, $events[$index], $batch_consent);
             
@@ -525,10 +524,7 @@ class GA4_Cronjob_Manager
             
             // Get original headers from the queued event
             $original_headers = GA4_Encryption_Util::decrypt_headers_from_storage($original_event->original_headers);
-            if ($this->logger && get_option('ga4_server_side_tagging_debug_mode')) {
-                $this->logger->debug("GA4 Direct - Event {$original_event->id} raw headers from storage: " . wp_json_encode($original_event->original_headers));
-                $this->logger->debug("GA4 Direct - Event {$original_event->id} decrypted headers: " . wp_json_encode($original_headers));
-            }
+         
             if (empty($original_headers) && $this->logger) {
                 $this->logger->debug("No original headers found for event {$original_event->id}");
             }
