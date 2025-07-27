@@ -617,7 +617,7 @@ class GA4_Event_Logger
                 );
                 
                 foreach ($db_fields as $field_content) {
-                    if (stripos($field_content, $search_term) !== false) {
+                    if (stripos((string)$field_content, $search_term) !== false) {
                         $search_found = true;
                         break;
                     }
@@ -633,7 +633,9 @@ class GA4_Event_Logger
                     );
                     
                     foreach ($payload_fields as $field_content) {
-                        if (stripos($field_content, $search_term) !== false) {
+                        // Convert arrays to JSON strings for searching
+                        $search_content = is_array($field_content) ? wp_json_encode($field_content) : (string)$field_content;
+                        if (stripos($search_content, $search_term) !== false) {
                             $search_found = true;
                             break;
                         }
