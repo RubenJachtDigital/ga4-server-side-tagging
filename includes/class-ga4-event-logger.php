@@ -609,6 +609,7 @@ class GA4_Event_Logger
                 
                 // Search in database fields (non-encrypted)
                 $db_fields = array(
+                    $result->id ?? '',
                     $result->event_name ?? '',
                     $result->reason ?? '',
                     $result->ip_address ?? '',
@@ -1254,10 +1255,11 @@ class GA4_Event_Logger
         }
 
         if (!empty($args['search'])) {
-            $where_conditions[] = "(error_message LIKE %s OR id LIKE %s OR original_payload LIKE %s OR final_payload LIKE %s OR user_agent LIKE %s)";
+            $where_conditions[] = "(error_message LIKE %s OR id LIKE %s OR event_name LIKE %s OR original_payload LIKE %s OR final_payload LIKE %s OR user_agent LIKE %s)";
             $search_term = '%' . $wpdb->esc_like($args['search']) . '%';
             $query_args[] = $search_term;
             $query_args[] = $search_term;
+            $query_args[] = $search_term; // event_name
             $query_args[] = $search_term; // original_payload
             $query_args[] = $search_term; // final_payload
             $query_args[] = $search_term; // user_agent

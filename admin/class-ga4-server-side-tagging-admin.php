@@ -944,6 +944,13 @@ class GA4_Server_Side_Tagging_Admin
             update_option('ga4_conversion_form_ids', $this->sanitize_form_ids(wp_unslash($_POST['ga4_conversion_form_ids'])));
         }
 
+        if (isset($_POST['ga4_event_batch_size'])) {
+            $batch_size = absint($_POST['ga4_event_batch_size']);
+            // Ensure batch size is within safe limits (1-5000)
+            $batch_size = max(1, min(5000, $batch_size));
+            update_option('ga4_event_batch_size', $batch_size);
+        }
+
         // GA4 Checkbox options
         update_option('ga4_server_side_tagging_debug_mode', isset($_POST['ga4_server_side_tagging_debug_mode']));
         update_option('ga4_track_logged_in_users', isset($_POST['ga4_track_logged_in_users']));

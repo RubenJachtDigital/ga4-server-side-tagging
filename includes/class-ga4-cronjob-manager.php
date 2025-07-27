@@ -121,8 +121,9 @@ class GA4_Cronjob_Manager
      */
     public function process_event_queue()
     {
-        // Get batch size setting
-        $batch_size = 1000;
+        // Get batch size setting (configurable, default 1000)
+        $batch_size = get_option('ga4_event_batch_size', 1000);
+        $batch_size = max(1, min(5000, intval($batch_size))); // Ensure it's within safe limits
         
         // Get pending events from unified table
         $events = $this->event_logger->get_pending_events($batch_size);

@@ -22,15 +22,33 @@ $event_logger = new GA4_Event_Logger();
 if (isset($_POST['cleanup_logs']) && wp_verify_nonce($_POST['_wpnonce'], 'ga4_cleanup_logs')) {
     $days = intval($_POST['cleanup_days']) ?: 30;
     
-    // Save the cleanup days setting for Event Monitor
-    update_option('ga4_event_logs_cleanup_days', $days);
+    // Save the unified cleanup days setting
+    update_option('ga4_event_cleanup_days', $days);
     
     $cleaned = $event_logger->cleanup_old_logs($days);
     echo '<div class="notice notice-success is-dismissible"><p>Cleaned up ' . $cleaned . ' event logs older than ' . $days . ' days.</p></div>';
 }
 
-// Get the saved cleanup days setting for Event Monitor (default: 30 days)
-$event_logs_cleanup_days = get_option('ga4_event_logs_cleanup_days', 30);
+// Get the unified cleanup days setting (default: 7 days)
+// Migrate from old separate settings if they exist
+$event_cleanup_days = get_option('ga4_event_cleanup_days');
+if ($event_cleanup_days === false) {
+    // Check for old separate settings and use them as migration
+    $old_event_logs_days = get_option('ga4_event_logs_cleanup_days');
+    $old_event_queue_days = get_option('ga4_event_queue_cleanup_days');
+    
+    if ($old_event_logs_days !== false || $old_event_queue_days !== false) {
+        // Use the lower value for safety (more conservative cleanup)
+        $event_cleanup_days = min(
+            $old_event_logs_days !== false ? $old_event_logs_days : 7,
+            $old_event_queue_days !== false ? $old_event_queue_days : 7
+        );
+        // Save the migrated value
+        update_option('ga4_event_cleanup_days', $event_cleanup_days);
+    } else {
+        $event_cleanup_days = 7; // Default
+    }
+}
 
 // Get filter parameters
 $filter_status = isset($_GET['filter_status']) ? sanitize_text_field($_GET['filter_status']) : '';
@@ -133,7 +151,7 @@ $current_page = floor($offset / $limit) + 1;
                 <div>
                     <label for="search"><?php echo esc_html__('Search:', 'ga4-server-side-tagging'); ?></label><br>
                     <input type="text" id="search" name="search" value="<?php echo esc_attr($search); ?>" 
-                           placeholder="Event name, IP, reason, user agent, payload..." style="width: 250px;">
+                           placeholder="ID, event name, IP, reason, user agent, payload..." style="width: 250px;">
                 </div>
 
                 <!-- Status Filter -->
@@ -187,7 +205,7 @@ $current_page = floor($offset / $limit) + 1;
         <form method="post" style="display: inline-block;">
             <?php wp_nonce_field('ga4_cleanup_logs'); ?>
             <label for="cleanup_days"><?php echo esc_html__('Clean up logs older than:', 'ga4-server-side-tagging'); ?></label>
-            <input type="number" id="cleanup_days" name="cleanup_days" value="<?php echo esc_attr($event_logs_cleanup_days); ?>" min="1" max="365" style="width: 60px;">
+            <input type="number" id="cleanup_days" name="cleanup_days" value="<?php echo esc_attr($event_cleanup_days); ?>" min="1" max="365" style="width: 60px;">
             <span><?php echo esc_html__('days', 'ga4-server-side-tagging'); ?></span>
             <input type="submit" name="cleanup_logs" class="button" value="<?php echo esc_attr__('Cleanup Old Logs', 'ga4-server-side-tagging'); ?>"
                    onclick="return confirm('<?php echo esc_js(__('Are you sure you want to delete old event logs?', 'ga4-server-side-tagging')); ?>');">

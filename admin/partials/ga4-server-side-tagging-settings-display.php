@@ -33,6 +33,7 @@ $track_logged_in_users = get_option('ga4_track_logged_in_users', true);
 $yith_raq_form_id = get_option('ga4_yith_raq_form_id', '');
 $conversion_form_ids = get_option('ga4_conversion_form_ids', '');
 $disable_all_ip = get_option('ga4_disable_all_ip', false);
+$batch_size = get_option('ga4_event_batch_size', 1000);
 ?>
 
 <div class="wrap">
@@ -197,12 +198,22 @@ $disable_all_ip = get_option('ga4_disable_all_ip', false);
                                 <p class="description">Enable detailed logging for troubleshooting. Logs can be viewed in the Tagging Logs page.</p>
                             </td>
                         </tr>
+                        <tr>
+                            <th scope="row">
+                                <label for="ga4_event_batch_size">Event Batch Size</label>
+                            </th>
+                            <td>
+                                <input type="number" id="ga4_event_batch_size" name="ga4_event_batch_size" value="<?php echo esc_attr($batch_size); ?>" min="1" max="5000" step="1" style="width: 100px;" />
+                                <span> events per batch</span>
+                                <p class="description">Number of events to process in each batch when sending to GA4/Cloudflare. Higher values improve performance but may cause timeouts. Recommended: 1000-2000.</p>
+                            </td>
+                        </tr>
                     </table>
                 </div>
 
-                <!-- Cloudflare Integration -->
+                <!-- Tracking configuration -->
                 <div class="ga4-server-side-tagging-admin-section">
-                    <h3>Cloudflare Integration</h3>
+                    <h3>Tracking configuration</h3>
                     <table class="form-table">
                         <tr>
                             <th scope="row">Transmission Method</th>

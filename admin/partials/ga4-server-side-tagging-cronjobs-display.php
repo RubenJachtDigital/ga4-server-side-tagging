@@ -43,6 +43,41 @@ function decrypt_event_data($encrypted_data) {
     );
 }
 
+// Helper function to extract event name from payload
+function extract_event_name_from_payload($event_data) {
+    if (empty($event_data)) {
+        return '';
+    }
+    
+    // Try to parse as JSON first
+    $parsed_data = json_decode($event_data, true);
+    if (json_last_error() !== JSON_ERROR_NONE) {
+        return '';
+    }
+    
+    // Check if there's an event array with events
+    if (isset($parsed_data['events']) && is_array($parsed_data['events']) && !empty($parsed_data['events'])) {
+        $first_event = $parsed_data['events'][0];
+        if (isset($first_event['name'])) {
+            return $first_event['name'];
+        }
+    }
+    
+    // Check if there's a direct event with name
+    if (isset($parsed_data['event']) && is_array($parsed_data['event'])) {
+        if (isset($parsed_data['event']['name'])) {
+            return $parsed_data['event']['name'];
+        }
+    }
+    
+    // Check if the payload itself is an event with name
+    if (isset($parsed_data['name'])) {
+        return $parsed_data['name'];
+    }
+    
+    return '';
+}
+
 // Helper function to decrypt JWT tokens (same method as event monitor)
 function decrypt_jwt_token($jwt_token) {
     if (empty($jwt_token)) {
@@ -107,15 +142,33 @@ if (isset($_POST['trigger_cronjob']) && wp_verify_nonce($_POST['_wpnonce'], 'ga4
 if (isset($_POST['cleanup_events']) && wp_verify_nonce($_POST['_wpnonce'], 'ga4_cleanup_events')) {
     $days = intval($_POST['cleanup_days']) ?: 7;
     
-    // Save the cleanup days setting for Event Queue
-    update_option('ga4_event_queue_cleanup_days', $days);
+    // Save the unified cleanup days setting
+    update_option('ga4_event_cleanup_days', $days);
     
     $cleaned = $this->cronjob_manager->cleanup_old_events($days);
     echo '<div class="notice notice-success is-dismissible"><p>Cleaned up ' . $cleaned . ' old events.</p></div>';
 }
 
-// Get the saved cleanup days setting for Event Queue (default: 7 days)
-$event_queue_cleanup_days = get_option('ga4_event_queue_cleanup_days', 7);
+// Get the unified cleanup days setting (default: 7 days)
+// Migrate from old separate settings if they exist
+$event_cleanup_days = get_option('ga4_event_cleanup_days');
+if ($event_cleanup_days === false) {
+    // Check for old separate settings and use them as migration
+    $old_event_logs_days = get_option('ga4_event_logs_cleanup_days');
+    $old_event_queue_days = get_option('ga4_event_queue_cleanup_days');
+    
+    if ($old_event_logs_days !== false || $old_event_queue_days !== false) {
+        // Use the lower value for safety (more conservative cleanup)
+        $event_cleanup_days = min(
+            $old_event_logs_days !== false ? $old_event_logs_days : 7,
+            $old_event_queue_days !== false ? $old_event_queue_days : 7
+        );
+        // Save the migrated value
+        update_option('ga4_event_cleanup_days', $event_cleanup_days);
+    } else {
+        $event_cleanup_days = 7; // Default
+    }
+}
 
 // Get queue statistics
 $stats = $this->cronjob_manager->get_queue_stats();
@@ -205,7 +258,7 @@ $current_page = floor($offset / $limit) + 1;
         <form method="post" style="display: inline-block;">
             <?php wp_nonce_field('ga4_cleanup_events'); ?>
             <label for="cleanup_days"><?php echo esc_html__('Clean up events older than:', 'ga4-server-side-tagging'); ?></label>
-            <input type="number" id="cleanup_days" name="cleanup_days" value="<?php echo esc_attr($event_queue_cleanup_days); ?>" min="1" max="365" style="width: 60px;">
+            <input type="number" id="cleanup_days" name="cleanup_days" value="<?php echo esc_attr($event_cleanup_days); ?>" min="1" max="365" style="width: 60px;">
             <span><?php echo esc_html__('days', 'ga4-server-side-tagging'); ?></span>
             <input type="submit" name="cleanup_events" class="button" value="<?php echo esc_attr__('Cleanup Old Events', 'ga4-server-side-tagging'); ?>"
                    onclick="return confirm('<?php echo esc_js(__('Are you sure you want to delete old events?', 'ga4-server-side-tagging')); ?>');">
@@ -224,7 +277,7 @@ $current_page = floor($offset / $limit) + 1;
                 <div>
                     <label for="search"><?php echo esc_html__('Search:', 'ga4-server-side-tagging'); ?></label><br>
                     <input type="text" id="search" name="search" value="<?php echo esc_attr($search); ?>" 
-                           placeholder="ID, error message..." style="width: 200px;">
+                           placeholder="ID, event name, error message, payload..." style="width: 250px;">
                 </div>
 
                 <!-- Status Filter -->
@@ -322,6 +375,7 @@ $current_page = floor($offset / $limit) + 1;
                     <thead>
                         <tr>
                             <th style="width: 60px;"><?php echo esc_html__('ID', 'ga4-server-side-tagging'); ?></th>
+                            <th style="width: 120px;"><?php echo esc_html__('Event Name', 'ga4-server-side-tagging'); ?></th>
                             <th style="width: 100px;"><?php echo esc_html__('Status', 'ga4-server-side-tagging'); ?></th>
                             <th style="width: 120px;"><?php echo esc_html__('Transmission', 'ga4-server-side-tagging'); ?></th>
                             <th style="width: 100px;"><?php echo esc_html__('Encryption', 'ga4-server-side-tagging'); ?></th>
@@ -336,6 +390,21 @@ $current_page = floor($offset / $limit) + 1;
                         <?php foreach ($events as $event): ?>
                             <tr>
                                 <td><?php echo intval($event->id); ?></td>
+                                <td>
+                                    <?php
+                                    // Extract event name from the original payload
+                                    $event_name = '';
+                                    if (!empty($event->event_data)) {
+                                        $event_name = extract_event_name_from_payload($event->event_data);
+                                    }
+                                    
+                                    if (!empty($event_name)) {
+                                        echo '<strong>' . esc_html($event_name) . '</strong>';
+                                    } else {
+                                        echo '<span style="color: #999; font-style: italic;">Unknown</span>';
+                                    }
+                                    ?>
+                                </td>
                                 <td>
                                     <?php
                                     $status_colors = array(
@@ -484,7 +553,20 @@ $current_page = floor($offset / $limit) + 1;
                 </tr>
                 <tr>
                     <td><strong><?php echo esc_html__('Batch Size:', 'ga4-server-side-tagging'); ?></strong></td>
-                    <td><?php echo esc_html__('Up to', 'ga4-server-side-tagging'); ?> 1000 <?php echo esc_html__('events per batch', 'ga4-server-side-tagging'); ?></td>
+                    <td>
+                        <?php 
+                        $batch_size = get_option('ga4_event_batch_size', 1000);
+                        echo sprintf(
+                            esc_html__('Up to %s events per batch', 'ga4-server-side-tagging'), 
+                            '<strong>' . number_format($batch_size) . '</strong>'
+                        ); 
+                        ?>
+                        <br><small style="color: #666;">
+                            <a href="<?php echo admin_url('admin.php?page=ga4-server-side-tagging-settings'); ?>" style="text-decoration: none;">
+                                ⚙️ <?php echo esc_html__('Change in Settings', 'ga4-server-side-tagging'); ?>
+                            </a>
+                        </small>
+                    </td>
                 </tr>
                 <tr>
                     <td><strong><?php echo esc_html__('WordPress Cron:', 'ga4-server-side-tagging'); ?></strong></td>
