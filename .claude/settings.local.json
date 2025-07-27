@@ -15,7 +15,9 @@
       "Bash(wp cron event:*)",
       "Bash(git config:*)",
       "WebFetch(domain:developers.google.com)",
-      "Bash(sed:*)"
+      "Bash(sed:*)",
+      "Bash(wp eval:*)",
+      "Bash(rm:*)"
     ],
     "deny": []
   }

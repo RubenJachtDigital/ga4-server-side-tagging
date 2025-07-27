@@ -51,38 +51,52 @@ class GA4_Payload_Transformer
      */
     public function transform_event_for_ga4($event_data, $original_event, $batch_consent = null)
     {
+        // Handle nested event structure (event is wrapped in 'event' key)
+        if (isset($event_data['event']) && is_array($event_data['event'])) {
+            // Extract the actual event from the wrapper
+            $actual_event = $event_data['event'];
+            
+            // Also extract other top-level data that might be useful
+            if (isset($event_data['consent']) && !$batch_consent) {
+                $batch_consent = $event_data['consent'];
+            }
+        } else {
+            // Event data is already in the correct format
+            $actual_event = $event_data;
+        }
+        
         // Start with basic GA4 payload structure
         $ga4_payload = array(
-            'client_id' => $event_data['client_id'] ?? $this->generate_client_id(),
+            'client_id' => $actual_event['client_id'] ?? $this->generate_client_id(),
             'events' => array(
                 array(
-                    'name' => $event_data['name'],
-                    'params' => $event_data['params'] ?? array()
+                    'name' => $actual_event['name'],
+                    'params' => $actual_event['params'] ?? array()
                 )
             )
         );
         
         // Extract and move client_id from params to top level
-        if (isset($event_data['params']['client_id'])) {
-            $ga4_payload['client_id'] = $event_data['params']['client_id'];
+        if (isset($actual_event['params']['client_id'])) {
+            $ga4_payload['client_id'] = $actual_event['params']['client_id'];
             unset($ga4_payload['events'][0]['params']['client_id']);
         }
         
         // Add user_id at top level if present (and move from params if found there)
-        if (isset($event_data['user_id'])) {
-            $ga4_payload['user_id'] = $event_data['user_id'];
-        } elseif (isset($event_data['params']['user_id'])) {
-            $ga4_payload['user_id'] = $event_data['params']['user_id'];
+        if (isset($actual_event['user_id'])) {
+            $ga4_payload['user_id'] = $actual_event['user_id'];
+        } elseif (isset($actual_event['params']['user_id'])) {
+            $ga4_payload['user_id'] = $actual_event['params']['user_id'];
             unset($ga4_payload['events'][0]['params']['user_id']);
         }
         
         // Add timestamp_micros at top level if present  
-        if (isset($event_data['timestamp_micros'])) {
-            $ga4_payload['timestamp_micros'] = $event_data['timestamp_micros'];
+        if (isset($actual_event['timestamp_micros'])) {
+            $ga4_payload['timestamp_micros'] = $actual_event['timestamp_micros'];
         }
         
         // Extract and add consent data at top level with privacy compliance
-        $consent_data = $this->extract_consent_data($event_data, $original_event, $batch_consent);
+        $consent_data = $this->extract_consent_data($actual_event, $original_event, $batch_consent);
         $consent_denied = false;
         
         // Always include consent data at top level since it's available and important for GA4
@@ -190,6 +204,9 @@ class GA4_Payload_Transformer
         if (isset($event_data['consent'])) {
             return $event_data['consent'];
         }
+        
+        // Third priority: check if event_data has the wrapper structure with consent at top level
+        // This handles cases where consent is at the wrapper level, not in the individual event
         
         // Fallback: try to get consent from original event data
         $original_event_data = json_decode($original_event->event_data, true);

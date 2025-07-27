@@ -189,9 +189,6 @@ class GA4_Cronjob_Manager
                 
                 // Check if individual event is still encrypted (shouldn't be, but handle it)
                 if (is_string($individual_event) && $this->looks_like_jwt($individual_event)) {
-                    if ($this->logger) {
-                        $this->logger->warning("Individual fallback event is encrypted, decrypting: " . substr($individual_event, 0, 50) . "...");
-                    }
                     $decrypted = $this->decrypt_event_data($individual_event);
                     if ($decrypted !== false) {
                         $parsed = json_decode($decrypted, true);
