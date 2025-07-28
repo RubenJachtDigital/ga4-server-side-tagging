@@ -29,7 +29,13 @@ if (!function_exists('get_option')) {
         static $options = array(
             'ga4_measurement_id' => 'G-TEST123',
             'ga4_api_secret' => 'test-secret',
-            'ga4_jwt_encryption_enabled' => false
+            'ga4_jwt_encryption_enabled' => false,
+            'ga4_jwt_encryption_key' => '', // Disabled for testing
+            'ga4_cloudflare_worker_url' => 'https://test-worker.workers.dev/',
+            'ga4_transmission_method' => 'wp_rest_endpoint',
+            'ga4_disable_cf_proxy' => false,
+            'ga4_disable_bot_detection' => true,
+            'ga4_server_side_tagging_debug_mode' => false
         );
         return isset($options[$option]) ? $options[$option] : $default;
     }
@@ -65,6 +71,127 @@ if (!function_exists('current_time')) {
     }
 }
 
+if (!function_exists('wp_parse_url')) {
+    function wp_parse_url($url, $component = -1) {
+        return parse_url($url, $component);
+    }
+}
+
+if (!function_exists('site_url')) {
+    function site_url() {
+        return 'https://example.com';
+    }
+}
+
+if (!function_exists('session_id')) {
+    function session_id() {
+        return 'test_session_123';
+    }
+}
+
+if (!function_exists('session_start')) {
+    function session_start() {
+        return true; // Mock session_start for testing
+    }
+}
+
+if (!function_exists('wp_remote_post')) {
+    function wp_remote_post($url, $args = array()) {
+        return array(
+            'response' => array('code' => 200),
+            'body' => json_encode(array('success' => true))
+        );
+    }
+}
+
+if (!function_exists('wp_remote_retrieve_response_code')) {
+    function wp_remote_retrieve_response_code($response) {
+        return isset($response['response']['code']) ? $response['response']['code'] : 200;
+    }
+}
+
+if (!function_exists('wp_remote_retrieve_body')) {
+    function wp_remote_retrieve_body($response) {
+        return isset($response['body']) ? $response['body'] : '';
+    }
+}
+
+// Mock WP_REST_Response class
+if (!class_exists('WP_REST_Response')) {
+    class WP_REST_Response {
+        private $data;
+        private $status;
+        
+        public function __construct($data = null, $status = 200) {
+            $this->data = $data;
+            $this->status = $status;
+        }
+        
+        public function get_data() {
+            return $this->data;
+        }
+        
+        public function get_status() {
+            return $this->status;
+        }
+    }
+}
+
+// Mock WP_REST_Request class
+if (!class_exists('WP_REST_Request')) {
+    class WP_REST_Request {
+        private $data;
+        private $headers;
+        private $method;
+        private $route;
+        
+        public function __construct($method = 'GET', $route = '') {
+            $this->method = $method;
+            $this->route = $route;
+            $this->data = array();
+            $this->headers = array();
+        }
+        
+        public function get_json_params() {
+            return $this->data;
+        }
+        
+        public function get_body() {
+            return json_encode($this->data);
+        }
+        
+        public function get_headers() {
+            return $this->headers;
+        }
+        
+        public function get_header($name) {
+            $key = strtolower($name);
+            return isset($this->headers[$key]) ? $this->headers[$key][0] : null;
+        }
+        
+        public function get_method() {
+            return $this->method;
+        }
+        
+        public function get_route() {
+            return $this->route;
+        }
+        
+        public function get_query_params() {
+            return array();
+        }
+        
+        public function set_body($data) {
+            $this->data = json_decode($data, true);
+        }
+        
+        public function set_header($name, $value) {
+            $key = strtolower($name);
+            $this->headers[$key] = array($value);
+        }
+    }
+}
+
 // Mock wpdb class for database tests
 class wpdb {
     public $prefix = 'wp_';
@@ -92,6 +219,14 @@ class wpdb {
     public function get_var($query) {
         return '0';
     }
+    
+    public function get_row($query) {
+        return null;
+    }
+    
+    public function get_charset_collate() {
+        return 'DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci';
+    }
 }
 
 // Global wpdb instance
@@ -109,4 +244,98 @@ if (!defined('WPINC')) {
 
 if (!defined('GA4_TEST_MODE')) {
     define('GA4_TEST_MODE', true);
+}
+
+if (!defined('DISABLE_WP_CRON')) {
+    define('DISABLE_WP_CRON', false);
+}
+
+// Initialize global variables for testing
+if (!isset($_SERVER)) {
+    $_SERVER = array();
+}
+$_SERVER['REMOTE_ADDR'] = '127.0.0.1';
+$_SERVER['HTTP_USER_AGENT'] = 'Mozilla/5.0 (Test Browser)';
+
+// Start session early to prevent header issues
+@session_start();
+
+if (!isset($_SESSION)) {
+    $_SESSION = array();
+}
+
+// Mock WordPress dbDelta function
+if (!function_exists('dbDelta')) {
+    function dbDelta($queries) {
+        return array('ga4_event_logs' => 'Created table ga4_event_logs');
+    }
+}
+
+// Mock WordPress cron functions
+if (!function_exists('wp_next_scheduled')) {
+    function wp_next_scheduled($hook, $args = array()) {
+        return false; // No cron jobs scheduled for testing
+    }
+}
+
+if (!function_exists('wp_schedule_event')) {
+    function wp_schedule_event($timestamp, $recurrence, $hook, $args = array()) {
+        return true;
+    }
+}
+
+if (!function_exists('wp_clear_scheduled_hook')) {
+    function wp_clear_scheduled_hook($hook, $args = array()) {
+        return true;
+    }
+}
+
+// Mock WordPress hook functions
+if (!function_exists('add_action')) {
+    function add_action($hook_name, $callback, $priority = 10, $accepted_args = 1) {
+        return true;
+    }
+}
+
+if (!function_exists('remove_action')) {
+    function remove_action($hook_name, $callback, $priority = 10) {
+        return true;
+    }
+}
+
+if (!function_exists('do_action')) {
+    function do_action($hook_name, ...$args) {
+        return null;
+    }
+}
+
+if (!function_exists('add_filter')) {
+    function add_filter($hook_name, $callback, $priority = 10, $accepted_args = 1) {
+        return true;
+    }
+}
+
+if (!function_exists('apply_filters')) {
+    function apply_filters($hook_name, $value, ...$args) {
+        return $value;
+    }
+}
+
+// Mock WordPress transient functions
+if (!function_exists('get_transient')) {
+    function get_transient($transient) {
+        return false; // No transients in testing
+    }
+}
+
+if (!function_exists('set_transient')) {
+    function set_transient($transient, $value, $expiration = 0) {
+        return true;
+    }
+}
+
+if (!function_exists('delete_transient')) {
+    function delete_transient($transient) {
+        return true;
+    }
 }

@@ -50,6 +50,7 @@
             "@test:simple"
         ],
         "test:simple": "./vendor/bin/phpunit --bootstrap=tests/bootstrap-simple.php --testsuite=simple",
+        "test:endpoint": "./vendor/bin/phpunit --bootstrap=tests/bootstrap-simple.php tests/unit/EndpointStandaloneTest.php",
         "test:unit": "./vendor/bin/phpunit --bootstrap=tests/bootstrap-native.php --testsuite=unit",
         "test:integration": "./vendor/bin/phpunit --testsuite=integration",
         "test:coverage": "phpunit --coverage-html=tests/coverage --coverage-text",
@@ -69,6 +70,8 @@
     },
     "scripts-descriptions": {
         "test": "Run all tests (unit and integration)",
+        "test:simple": "Run simple tests without WordPress dependencies",
+        "test:endpoint": "Run endpoint standalone tests with provided data",
         "test:unit": "Run unit tests only",
         "test:integration": "Run integration tests only", 
         "test:coverage": "Run tests with coverage report",

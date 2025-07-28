@@ -17,6 +17,7 @@
     <testsuites>
         <testsuite name="simple">
             <file>./tests/unit/SimpleEncryptionTest.php</file>
+            <file>./tests/unit/EndpointStandaloneTest.php</file>
         </testsuite>
         <testsuite name="unit">
             <directory suffix="Test.php">./tests/unit/</directory>
