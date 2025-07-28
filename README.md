@@ -154,7 +154,7 @@ Browser JavaScript → WordPress REST API → Event Queue → Google Analytics
 |--------|------------------|-------------|-------------|-------------------|
 | Direct to Cloudflare | Minimal | Very Low | Highest | Yes |
 | WP REST Endpoint | Low | Medium | High | Yes |
-| Direct to GA4 | Low | Medium | High | No |
+| Direct to GA4 | Low | Medium | High | Yes |
 
 ### Choosing the Right Method
 
@@ -333,7 +333,6 @@ POST /wp-json/ga4-server-side-tagging/v1/send-events
 
 **Headers:**
 - `Content-Type: application/json`
-- `X-API-Key: your-api-key` (if using WP REST Endpoint method)
 
 **Payload:**
 ```json
@@ -456,28 +455,6 @@ Configure form tracking:
 2. Add Conversion Form IDs (comma-separated)
 3. Forms automatically trigger GA4 events
 
-### Custom Theme Integration
-
-Add tracking to your theme:
-
-```javascript
-// Manual event tracking
-fetch('/wp-json/ga4-server-side-tagging/v1/send-events', {
-    method: 'POST',
-    headers: {
-        'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-        events: [{
-            name: 'custom_event',
-            params: {
-                custom_parameter: 'value'
-            }
-        }],
-        client_id: 'your-client-id'
-    })
-});
-```
 
 ## Advanced Configuration
 
