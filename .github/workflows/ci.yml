@@ -135,7 +135,7 @@ jobs:
         <?php
         $violations = [];
         $allowed_patterns = [
-            'logs/ga4-server-side-tagging.log', // Writing to log file is ok
+            '$this->log_file', // Writing to log file is ok
             'if (defined(\'WP_DEBUG\') && WP_DEBUG)', // Wrapped in debug check is ok
         ];
         
@@ -171,7 +171,8 @@ jobs:
             if ($file->isFile() && 
                 $file->getExtension() === 'php' && 
                 strpos($file->getPath(), '/vendor/') === false && 
-                strpos($file->getPath(), '/tests/') === false) {
+                strpos($file->getPath(), '/tests/') === false &&
+                $file->getFilename() !== 'check_error_log.php') {
                 checkFile($file->getPathname());
             }
         }
