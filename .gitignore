@@ -1,0 +1,105 @@
+# WordPress Plugin .gitignore
+
+# Composer dependencies
+/vendor/
+composer.phar
+
+# Node.js dependencies  
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Testing and Development
+/tests/coverage/
+/tests/tmp/
+/tmp/
+phpunit.phar
+.phpunit.result.cache
+
+# WordPress test environment
+/wordpress/
+/wp-tests-config.php
+/bin/wordpress/
+/bin/wp-tests-lib/
+
+# IDE and Editor files
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+.atom/
+.brackets.json
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# Logs and databases
+*.log
+*.sql
+*.sqlite
+/logs/*.log
+error_log
+
+# Environment and configuration files
+.env
+.env.local
+.env.production
+.env.test
+wp-config.php
+wp-config-local.php
+
+# Build artifacts and caches
+/build/
+/dist/
+/.cache/
+.sass-cache/
+*.css.map
+*.js.map
+
+# Code coverage and quality reports
+/coverage/
+/reports/
+clover.xml
+phpstan.cache
+psalm.cache
+
+# Backup files
+*.bak
+*.backup
+*.old
+*.orig
+*.save
+*.swp
+*.tmp
+*~
+
+# Archive files (unless specifically needed)
+*.zip
+*.tar
+*.gz
+*.rar
+*.7z
+
+# Plugin-specific ignores
+/uploads/
+/wp-content/uploads/
+/wp-content/cache/
+
+# Security keys and sensitive data
+*.key
+*.pem
+*.cert
+secrets.json
+auth.json
+
+# Development tools output
+.phpcs-cache
+.phpcbf-cache
