@@ -23,7 +23,11 @@
         "phpmd/phpmd": "^2.11",
         "dealerdirect/phpcodesniffer-composer-installer": "^0.7",
         "wp-coding-standards/wpcs": "^2.3",
-        "phpcompatibility/phpcompatibility-wp": "^2.1"
+        "phpcompatibility/phpcompatibility-wp": "^2.1",
+        "symfony/config": "^6.0",
+        "symfony/dependency-injection": "^6.0",
+        "symfony/filesystem": "^6.0",
+        "symfony/var-exporter": "^6.0"
     },
     "autoload": {
         "classmap": [

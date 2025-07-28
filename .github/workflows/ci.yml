@@ -29,12 +29,15 @@ jobs:
       uses: actions/cache@v3
       with:
         path: vendor
-        key: ${{ runner.os }}-php-${{ matrix.php-version }}-${{ hashFiles('**/composer.lock') }}
+        key: ${{ runner.os }}-php-${{ matrix.php-version }}-${{ hashFiles('**/composer.json') }}
         restore-keys: |
           ${{ runner.os }}-php-${{ matrix.php-version }}-
 
     - name: Install Composer dependencies
-      run: composer install --prefer-dist --no-progress
+      run: |
+        # Remove lock file and install dependencies for current PHP version
+        rm -f composer.lock
+        composer install --prefer-dist --no-progress
 
     - name: Run PHP syntax check
       run: composer lint
@@ -79,7 +82,10 @@ jobs:
         php-version: '8.1'
         
     - name: Install Composer dependencies
-      run: composer install --prefer-dist --no-progress
+      run: |
+        # Remove lock file and install dependencies for current PHP version
+        rm -f composer.lock
+        composer install --prefer-dist --no-progress
 
     - name: Run PHP Mess Detector
       run: composer run-script md
@@ -104,7 +110,10 @@ jobs:
         php-version: '8.1'
         
     - name: Install Composer dependencies (production only)
-      run: composer install --prefer-dist --no-progress --no-dev
+      run: |
+        # Remove lock file and install dependencies for current PHP version
+        rm -f composer.lock
+        composer install --prefer-dist --no-progress --no-dev
       
     - name: Test plugin activation
       run: |
