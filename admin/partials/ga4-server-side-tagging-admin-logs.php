@@ -9,13 +9,13 @@
  */
 
 // If this file is called directly, abort.
-if ( ! defined( 'WPINC' ) ) {
+if (! defined('WPINC')) {
     die;
 }
 ?>
 
 <div class="wrap">
-    <h1><?php echo esc_html( get_admin_page_title() ); ?></h1>
+    <h1><?php echo esc_html(get_admin_page_title()); ?></h1>
     
     <?php settings_errors(); ?>
     
@@ -31,18 +31,18 @@ if ( ! defined( 'WPINC' ) ) {
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
                         <div>
                             <strong>Current Date/Time:</strong> 
-                            <span id="current-datetime"><?php echo esc_html( current_time( 'Y-m-d H:i:s T' ) ); ?></span>
+                            <span id="current-datetime"><?php echo esc_html(current_time('Y-m-d H:i:s T')); ?></span>
                             <small style="color: #666; margin-left: 10px;">(Updates every second)</small>
                         </div>
                         <form method="post" action="" style="margin: 0;">
-                            <?php wp_nonce_field( 'ga4_server_side_tagging_logs' ); ?>
+                            <?php wp_nonce_field('ga4_server_side_tagging_logs'); ?>
                             <input type="submit" name="ga4_clear_logs" class="button-secondary" value="Clear Logs" onclick="return confirm('Are you sure you want to clear all logs?');" />
                         </form>
                     </div>
                 </div>
                 
                 <div class="ga4-server-side-tagging-logs">
-                    <?php if ( empty( $log_content ) ) : ?>
+                    <?php if (empty($log_content)) : ?>
                         <p>No logs available. Enable debug mode in the settings to start logging events.</p>
                     <?php else : ?>
                         <div class="ga4-log-info">
@@ -54,13 +54,13 @@ if ( ! defined( 'WPINC' ) ) {
                                 <div>
                                     <strong>🕐 Reference Time:</strong> 
                                     <span id="reference-time" style="font-family: 'Courier New', monospace; background: #f0f0f1; padding: 2px 6px; border-radius: 3px; border: 1px solid #c3c4c7;">
-                                        <?php echo esc_html( current_time( 'Y-m-d H:i:s T' ) ); ?>
+                                        <?php echo esc_html(current_time('Y-m-d H:i:s T')); ?>
                                     </span>
                                 </div>
                             </div>
                         </div>
                         <div class="ga4-server-side-tagging-log-viewer">
-                            <pre><?php echo esc_html( $log_content ); ?></pre>
+                            <pre><?php echo esc_html($log_content); ?></pre>
                         </div>
                     <?php endif; ?>
                 </div>
@@ -71,12 +71,12 @@ if ( ! defined( 'WPINC' ) ) {
             <div class="ga4-server-side-tagging-admin-box">
                 <h3>Debug Information</h3>
                 <ul>
-                    <li><strong>Debug Mode:</strong> <?php echo get_option( 'ga4_server_side_tagging_debug_mode', false ) ? 'Enabled' : 'Disabled'; ?></li>
-                    <li><strong>Plugin Version:</strong> <?php echo esc_html( GA4_SERVER_SIDE_TAGGING_VERSION ); ?></li>
-                    <li><strong>WordPress Version:</strong> <?php echo esc_html( get_bloginfo( 'version' ) ); ?></li>
-                    <li><strong>PHP Version:</strong> <?php echo esc_html( phpversion() ); ?></li>
-                    <?php if ( class_exists( 'WooCommerce' ) ) : ?>
-                        <li><strong>WooCommerce Version:</strong> <?php echo esc_html( WC()->version ); ?></li>
+                    <li><strong>Debug Mode:</strong> <?php echo get_option('ga4_server_side_tagging_debug_mode', false) ? 'Enabled' : 'Disabled'; ?></li>
+                    <li><strong>Plugin Version:</strong> <?php echo esc_html(GA4_SERVER_SIDE_TAGGING_VERSION); ?></li>
+                    <li><strong>WordPress Version:</strong> <?php echo esc_html(get_bloginfo('version')); ?></li>
+                    <li><strong>PHP Version:</strong> <?php echo esc_html(phpversion()); ?></li>
+                    <?php if (class_exists('WooCommerce')) : ?>
+                        <li><strong>WooCommerce Version:</strong> <?php echo esc_html(WC()->version); ?></li>
                     <?php endif; ?>
                 </ul>
             </div>

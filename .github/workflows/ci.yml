@@ -1,0 +1,150 @@
+name: CI Tests
+
+on:
+  push:
+    branches: [ main, master, develop ]
+  pull_request:
+    branches: [ main, master, develop ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    strategy:
+      matrix:
+        php-version: ['7.4', '8.0', '8.1', '8.2']
+        wordpress-version: ['latest', '6.0', '5.9']
+        
+    services:
+      mysql:
+        image: mysql:5.7
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: wordpress_test
+          MYSQL_USER: wp_user
+          MYSQL_PASSWORD: wp_pass
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=3
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Setup PHP
+      uses: shivammathur/setup-php@v2
+      with:
+        php-version: ${{ matrix.php-version }}
+        extensions: dom, curl, libxml, mbstring, zip, pcntl, pdo, sqlite, pdo_sqlite, mysql, mysqli, pdo_mysql, bcmath, soap, intl, gd, exif, iconv, imagick
+        coverage: xdebug
+
+    - name: Validate composer.json and composer.lock
+      run: composer validate --strict
+
+    - name: Cache Composer packages
+      id: composer-cache
+      uses: actions/cache@v3
+      with:
+        path: vendor
+        key: ${{ runner.os }}-php-${{ matrix.php-version }}-${{ hashFiles('**/composer.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-php-${{ matrix.php-version }}-
+
+    - name: Install Composer dependencies
+      run: composer install --prefer-dist --no-progress
+
+    - name: Setup WordPress test environment
+      run: |
+        bash bin/install-wp-tests.sh wordpress_test wp_user wp_pass 127.0.0.1:3306 ${{ matrix.wordpress-version }}
+      env:
+        WP_TESTS_DIR: /tmp/wordpress-tests-lib
+        WP_CORE_DIR: /tmp/wordpress
+
+    - name: Run PHP syntax check
+      run: composer run-script lint
+
+    - name: Run code style checks
+      run: composer run-script cs:check
+
+    - name: Run PHPStan static analysis
+      run: composer run-script stan
+      continue-on-error: true
+
+    - name: Run unit tests
+      run: composer run-script test:unit
+
+    - name: Run integration tests
+      run: composer run-script test:integration
+      env:
+        WP_TESTS_DIR: /tmp/wordpress-tests-lib
+
+    - name: Generate coverage report
+      run: composer run-script test:coverage
+      if: matrix.php-version == '8.1' && matrix.wordpress-version == 'latest'
+
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v3
+      if: matrix.php-version == '8.1' && matrix.wordpress-version == 'latest'
+      with:
+        files: ./tests/coverage/clover.xml
+        flags: unittests
+        name: codecov-umbrella
+        fail_ci_if_error: false
+
+  security:
+    runs-on: ubuntu-latest
+    name: Security checks
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Setup PHP
+      uses: shivammathur/setup-php@v2
+      with:
+        php-version: '8.1'
+        
+    - name: Install Composer dependencies
+      run: composer install --prefer-dist --no-progress
+
+    - name: Run PHP Mess Detector
+      run: composer run-script md
+      continue-on-error: true
+
+    - name: Security audit for Composer dependencies
+      run: composer audit
+      continue-on-error: true
+
+  deployment-test:
+    runs-on: ubuntu-latest
+    name: Test plugin deployment
+    needs: test
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+      
+    - name: Setup PHP
+      uses: shivammathur/setup-php@v2
+      with:
+        php-version: '8.1'
+        
+    - name: Install Composer dependencies (production only)
+      run: composer install --prefer-dist --no-progress --no-dev
+      
+    - name: Test plugin activation
+      run: |
+        # Simple test to ensure plugin file syntax is valid
+        php -l ga4-server-side-tagging.php
+        
+    - name: Check for required WordPress functions
+      run: |
+        # Ensure plugin doesn't use development-only functions
+        if grep -r "var_dump\|print_r\|error_log" --include="*.php" --exclude-dir=tests --exclude-dir=vendor .; then
+          echo "Found debug functions in production code"
+          exit 1
+        fi

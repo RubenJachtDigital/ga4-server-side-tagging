@@ -17,7 +17,26 @@
       "WebFetch(domain:developers.google.com)",
       "Bash(sed:*)",
       "Bash(wp eval:*)",
-      "Bash(rm:*)"
+      "Bash(rm:*)",
+      "Bash(mkdir:*)",
+      "Bash(mv:*)",
+      "Bash(chmod:*)",
+      "Bash(composer install:*)",
+      "Bash(composer setup-tests:*)",
+      "Bash(bash:*)",
+      "Bash(composer lint:*)",
+      "Bash(composer test:*)",
+      "Bash(./vendor/bin/phpunit:*)",
+      "Bash(composer cs:check:*)",
+      "Bash(composer cs:fix:*)",
+      "Bash(composer stan:*)",
+      "Bash(./vendor/bin/phpstan analyse --level=5 includes/ admin/ public/ --no-progress)",
+      "Bash(composer md:*)",
+      "Bash(composer:*)",
+      "Bash(./vendor/bin/phpcbf:*)",
+      "Bash(timeout:*)",
+      "Bash(gtimeout:*)",
+      "Bash(git check-ignore:*)"
     ],
     "deny": []
   }

@@ -10,7 +10,8 @@
  */
 
 // Helper function to decrypt encrypted data
-function decrypt_event_data($encrypted_data) {
+function decrypt_event_data($encrypted_data)
+{
     if (empty($encrypted_data)) {
         return array('data' => '', 'was_encrypted' => false);
     }
@@ -44,7 +45,8 @@ function decrypt_event_data($encrypted_data) {
 }
 
 // Helper function to extract event name from payload
-function extract_event_name_from_payload($event_data) {
+function extract_event_name_from_payload($event_data)
+{
     if (empty($event_data)) {
         return '';
     }
@@ -79,7 +81,8 @@ function extract_event_name_from_payload($event_data) {
 }
 
 // Helper function to decrypt JWT tokens (same method as event monitor)
-function decrypt_jwt_token($jwt_token) {
+function decrypt_jwt_token($jwt_token)
+{
     if (empty($jwt_token)) {
         return array('data' => '', 'was_encrypted' => false);
     }
@@ -125,7 +128,6 @@ function decrypt_jwt_token($jwt_token) {
 
         // If decryption failed, return original (might not be encrypted)
         return array('data' => $jwt_token, 'was_encrypted' => false);
-
     } catch (\Exception $e) {
         // Silently handle decryption failures to avoid log spam
         return array('data' => $jwt_token, 'was_encrypted' => false);
@@ -231,7 +233,7 @@ $current_page = floor($offset / $limit) + 1;
                 <tr>
                     <td><strong><?php echo esc_html__('Next Scheduled Run:', 'ga4-server-side-tagging'); ?></strong></td>
                     <td colspan="3">
-                        <?php 
+                        <?php
                         if ($next_scheduled) {
                             echo esc_html(date('Y-m-d H:i:s', $next_scheduled));
                             echo ' <small style="color: #666;">(' . esc_html(human_time_diff($next_scheduled, time())) . ')</small>';
@@ -322,15 +324,15 @@ $current_page = floor($offset / $limit) + 1;
                     min($offset + $limit, $total_events),
                     number_format($total_events)
                 ); ?>
-                <?php if ($filter_status || $search): ?>
+                <?php if ($filter_status || $search) : ?>
                     <span style="color: #666;"><?php echo esc_html__('(filtered)', 'ga4-server-side-tagging'); ?></span>
                 <?php endif; ?>
             </div>
             
             <!-- Pagination -->
-            <?php if ($total_pages > 1): ?>
+            <?php if ($total_pages > 1) : ?>
             <div class="tablenav-pages">
-                <?php 
+                <?php
                 $base_url = admin_url('admin.php?page=' . $_GET['page']);
                 $query_args = array_filter(array(
                     'filter_status' => $filter_status,
@@ -338,7 +340,7 @@ $current_page = floor($offset / $limit) + 1;
                     'limit' => $limit
                 ));
                 
-                if ($current_page > 1): ?>
+                if ($current_page > 1) : ?>
                     <a class="button" href="<?php echo esc_url(add_query_arg(array_merge($query_args, array('offset' => 0)), $base_url)); ?>">
                         <?php echo esc_html__('« First', 'ga4-server-side-tagging'); ?>
                     </a>
@@ -349,7 +351,7 @@ $current_page = floor($offset / $limit) + 1;
                 
                 <span style="margin: 0 10px;"><?php echo sprintf(esc_html__('Page %d of %d', 'ga4-server-side-tagging'), $current_page, $total_pages); ?></span>
                 
-                <?php if ($current_page < $total_pages): ?>
+                <?php if ($current_page < $total_pages) : ?>
                     <a class="button" href="<?php echo esc_url(add_query_arg(array_merge($query_args, array('offset' => $current_page * $limit)), $base_url)); ?>">
                         <?php echo esc_html__('Next ›', 'ga4-server-side-tagging'); ?>
                     </a>
@@ -367,9 +369,9 @@ $current_page = floor($offset / $limit) + 1;
         <h2><?php echo esc_html__('Event Queue', 'ga4-server-side-tagging'); ?></h2>
 
         
-        <?php if (empty($events)): ?>
+        <?php if (empty($events)) : ?>
             <p><?php echo esc_html__('No events found matching your criteria.', 'ga4-server-side-tagging'); ?></p>
-        <?php else: ?>
+        <?php else : ?>
             <div style="max-height: 600px; overflow-y: auto; border: 1px solid #ddd; border-radius: 3px;">
                 <table class="widefat striped">
                     <thead>
@@ -387,7 +389,7 @@ $current_page = floor($offset / $limit) + 1;
                         </tr>
                     </thead>
                     <tbody>
-                        <?php foreach ($events as $event): ?>
+                        <?php foreach ($events as $event) : ?>
                             <tr>
                                 <td><?php echo intval($event->id); ?></td>
                                 <td>
@@ -409,7 +411,7 @@ $current_page = floor($offset / $limit) + 1;
                                     <?php
                                     $status_colors = array(
                                         'pending' => '#0073aa',
-                                        'completed' => '#28a745', 
+                                        'completed' => '#28a745',
                                         'failed' => '#dc3545'
                                     );
                                     $status_icons = array(
@@ -463,14 +465,14 @@ $current_page = floor($offset / $limit) + 1;
                                     ?>
                                 </td>
                                 <td style="font-size: 11px;">
-                                    <?php 
+                                    <?php
                                     $date = new DateTime($event->created_at);
                                     echo esc_html($date->format('M j, Y'));
-                                    echo '<br>' . esc_html($date->format('H:i:s')); 
+                                    echo '<br>' . esc_html($date->format('H:i:s'));
                                     ?>
                                 </td>
                                 <td style="font-size: 11px;">
-                                    <?php 
+                                    <?php
                                     if ($event->processed_at) {
                                         $processed_date = new DateTime($event->processed_at);
                                         echo esc_html($processed_date->format('M j, Y'));
@@ -481,18 +483,18 @@ $current_page = floor($offset / $limit) + 1;
                                     ?>
                                 </td>
                                 <td style="text-align: center;">
-                                    <?php if ($event->retry_count > 0): ?>
+                                    <?php if ($event->retry_count > 0) : ?>
                                         <span style="color: #ffc107; font-weight: bold;"><?php echo intval($event->retry_count); ?></span>
-                                    <?php else: ?>
+                                    <?php else : ?>
                                         <span style="color: #999;">0</span>
                                     <?php endif; ?>
                                 </td>
                                 <td>
-                                    <?php if ($event->error_message): ?>
+                                    <?php if ($event->error_message) : ?>
                                         <span title="<?php echo esc_attr($event->error_message); ?>" style="font-size: 11px; cursor: help;">
                                             <?php echo esc_html(wp_trim_words($event->error_message, 8, '...')); ?>
                                         </span>
-                                    <?php else: ?>
+                                    <?php else : ?>
                                         <span style="color: #999;">-</span>
                                     <?php endif; ?>
                                 </td>
@@ -504,27 +506,27 @@ $current_page = floor($offset / $limit) + 1;
                                             data-processed="<?php echo esc_attr($event->processed_at ?: ''); ?>"
                                             data-retry-count="<?php echo esc_attr($event->retry_count); ?>"
                                             data-error="<?php echo esc_attr($event->error_message ?: ''); ?>"
-                                            data-event-data="<?php 
+                                            data-event-data="<?php
                                                 $event_data_result = decrypt_event_data($event->event_data ?: '');
                                                 echo esc_attr($event_data_result['data']);
                                             ?>"
-                                            data-event-data-encrypted="<?php 
+                                            data-event-data-encrypted="<?php
                                                 $event_data_result = decrypt_event_data($event->event_data ?: '');
                                                 echo esc_attr($event_data_result['was_encrypted'] ? '1' : '0');
                                             ?>"
-                                            data-final-payload="<?php 
+                                            data-final-payload="<?php
                                                 $payload_result = decrypt_event_data($event->final_payload ?: '');
                                                 echo esc_attr($payload_result['data']);
                                             ?>"
-                                            data-final-headers="<?php 
+                                            data-final-headers="<?php
                                                 // Use already decrypted headers from the event logger
-                                                if (!empty($event->final_headers) && is_array($event->final_headers)) {
-                                                    echo esc_attr(wp_json_encode($event->final_headers, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
-                                                } else {
-                                                    echo esc_attr($event->final_headers ?: '');
-                                                }
+                                            if (!empty($event->final_headers) && is_array($event->final_headers)) {
+                                                echo esc_attr(wp_json_encode($event->final_headers, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+                                            } else {
+                                                echo esc_attr($event->final_headers ?: '');
+                                            }
                                             ?>"
-                                            data-payload-encrypted="<?php 
+                                            data-payload-encrypted="<?php
                                                 $payload_result = decrypt_event_data($event->final_payload ?: '');
                                                 echo esc_attr($payload_result['was_encrypted'] ? '1' : '0');
                                             ?>"
@@ -555,12 +557,12 @@ $current_page = floor($offset / $limit) + 1;
                 <tr>
                     <td><strong><?php echo esc_html__('Batch Size:', 'ga4-server-side-tagging'); ?></strong></td>
                     <td>
-                        <?php 
+                        <?php
                         $batch_size = get_option('ga4_event_batch_size', 1000);
                         echo sprintf(
-                            esc_html__('Up to %s events per batch', 'ga4-server-side-tagging'), 
+                            esc_html__('Up to %s events per batch', 'ga4-server-side-tagging'),
                             '<strong>' . number_format($batch_size) . '</strong>'
-                        ); 
+                        );
                         ?>
                         <br><small style="color: #666;">
                             <a href="<?php echo admin_url('admin.php?page=ga4-server-side-tagging-settings'); ?>" style="text-decoration: none;">
@@ -572,7 +574,7 @@ $current_page = floor($offset / $limit) + 1;
                 <tr>
                     <td><strong><?php echo esc_html__('WordPress Cron:', 'ga4-server-side-tagging'); ?></strong></td>
                     <td>
-                        <?php 
+                        <?php
                         // Check if cron is disabled
                         if (defined('DISABLE_WP_CRON') && DISABLE_WP_CRON) {
                             echo '<span style="color: #dc3545;">' . esc_html__('❌ Disabled (DISABLE_WP_CRON)', 'ga4-server-side-tagging') . '</span>';
@@ -594,7 +596,7 @@ $current_page = floor($offset / $limit) + 1;
             </tbody>
         </table>
         
-        <?php if (!wp_next_scheduled('ga4_process_event_queue')): ?>
+        <?php if (!wp_next_scheduled('ga4_process_event_queue')) : ?>
             <div class="notice notice-warning" style="margin-top: 15px;">
                 <p><strong><?php echo esc_html__('Warning:', 'ga4-server-side-tagging'); ?></strong> <?php echo esc_html__('The cronjob is not scheduled. Events will not be processed automatically.', 'ga4-server-side-tagging'); ?></p>
             </div>

@@ -126,11 +126,11 @@ $current_page = floor($offset / $limit) + 1;
             </tbody>
         </table>
         
-        <?php if (!empty($stats['top_events'])): ?>
+        <?php if (!empty($stats['top_events'])) : ?>
         <div style="margin-top: 15px;">
             <strong><?php echo esc_html__('Top Event Types:', 'ga4-server-side-tagging'); ?></strong>
             <div style="margin-top: 5px;">
-                <?php foreach (array_slice($stats['top_events'], 0, 5) as $event): ?>
+                <?php foreach (array_slice($stats['top_events'], 0, 5) as $event) : ?>
                     <span style="display: inline-block; background: #f1f1f1; padding: 2px 8px; margin: 2px; border-radius: 3px; font-size: 12px;">
                         <?php echo esc_html($event['event_name']); ?> (<?php echo number_format($event['count']); ?>)
                     </span>
@@ -171,7 +171,7 @@ $current_page = floor($offset / $limit) + 1;
                     <label for="filter_event"><?php echo esc_html__('Event Type:', 'ga4-server-side-tagging'); ?></label><br>
                     <select id="filter_event" name="filter_event">
                         <option value=""><?php echo esc_html__('All Events', 'ga4-server-side-tagging'); ?></option>
-                        <?php foreach ($unique_events as $event_name): ?>
+                        <?php foreach ($unique_events as $event_name) : ?>
                             <option value="<?php echo esc_attr($event_name); ?>" <?php selected($filter_event, $event_name); ?>>
                                 <?php echo esc_html($event_name); ?>
                             </option>
@@ -224,15 +224,15 @@ $current_page = floor($offset / $limit) + 1;
                     min($offset + $limit, $total_events),
                     number_format($total_events)
                 ); ?>
-                <?php if ($filter_status || $filter_event || $search): ?>
+                <?php if ($filter_status || $filter_event || $search) : ?>
                     <span style="color: #666;"><?php echo esc_html__('(filtered)', 'ga4-server-side-tagging'); ?></span>
                 <?php endif; ?>
             </div>
             
             <!-- Pagination -->
-            <?php if ($total_pages > 1): ?>
+            <?php if ($total_pages > 1) : ?>
             <div class="tablenav-pages">
-                <?php 
+                <?php
                 $base_url = admin_url('admin.php?page=ga4-server-side-tagging-events');
                 $query_args = array_filter(array(
                     'filter_status' => $filter_status,
@@ -241,7 +241,7 @@ $current_page = floor($offset / $limit) + 1;
                     'limit' => $limit
                 ));
                 
-                if ($current_page > 1): ?>
+                if ($current_page > 1) : ?>
                     <a class="button" href="<?php echo esc_url(add_query_arg(array_merge($query_args, array('offset' => 0)), $base_url)); ?>">
                         <?php echo esc_html__('« First', 'ga4-server-side-tagging'); ?>
                     </a>
@@ -252,7 +252,7 @@ $current_page = floor($offset / $limit) + 1;
                 
                 <span style="margin: 0 10px;"><?php echo sprintf(esc_html__('Page %d of %d', 'ga4-server-side-tagging'), $current_page, $total_pages); ?></span>
                 
-                <?php if ($current_page < $total_pages): ?>
+                <?php if ($current_page < $total_pages) : ?>
                     <a class="button" href="<?php echo esc_url(add_query_arg(array_merge($query_args, array('offset' => $current_page * $limit)), $base_url)); ?>">
                         <?php echo esc_html__('Next ›', 'ga4-server-side-tagging'); ?>
                     </a>
@@ -269,9 +269,9 @@ $current_page = floor($offset / $limit) + 1;
     <div class="ga4-admin-section">
         <h2><?php echo esc_html__('Event Logs', 'ga4-server-side-tagging'); ?></h2>
         
-        <?php if (empty($events)): ?>
+        <?php if (empty($events)) : ?>
             <p><?php echo esc_html__('No events found matching your criteria.', 'ga4-server-side-tagging'); ?></p>
-        <?php else: ?>
+        <?php else : ?>
             <div style="max-height: 600px; overflow-y: auto; border: 1px solid #ddd; border-radius: 3px;">
                 <table class="widefat striped">
                     <thead>
@@ -286,12 +286,12 @@ $current_page = floor($offset / $limit) + 1;
                         </tr>
                     </thead>
                     <tbody>
-                        <?php foreach ($events as $event): ?>
+                        <?php foreach ($events as $event) : ?>
                             <tr>
                                 <td><?php echo intval($event->id); ?></td>
                                 <td>
                                     <strong><?php echo esc_html($event->event_name); ?></strong>
-                                    <?php if ($event->batch_size > 1): ?>
+                                    <?php if ($event->batch_size > 1) : ?>
                                         <br><small style="color: #666;">Batch: <?php echo intval($event->batch_size); ?> events</small>
                                     <?php endif; ?>
                                 </td>
@@ -299,7 +299,7 @@ $current_page = floor($offset / $limit) + 1;
                                     <?php
                                     $status_colors = array(
                                         'allowed' => '#28a745',
-                                        'denied' => '#dc3545', 
+                                        'denied' => '#dc3545',
                                         'bot_detected' => '#ffc107',
                                         'error' => '#6c757d'
                                     );
@@ -317,27 +317,27 @@ $current_page = floor($offset / $limit) + 1;
                                     </span>
                                 </td>
                                 <td>
-                                    <?php if ($event->reason): ?>
+                                    <?php if ($event->reason) : ?>
                                         <span title="<?php echo esc_attr($event->reason); ?>" style="font-size: 11px;">
                                             <?php echo esc_html(wp_trim_words($event->reason, 8, '...')); ?>
                                         </span>
-                                    <?php else: ?>
+                                    <?php else : ?>
                                         <span style="color: #999;">-</span>
                                     <?php endif; ?>
                                 </td>
                                 <td>
                                     <code style="font-size: 11px;"><?php echo esc_html($event->ip_address ?: 'N/A'); ?></code>
-                                    <?php if ($event->consent_given !== null): ?>
+                                    <?php if ($event->consent_given !== null) : ?>
                                         <br><small style="color: <?php echo $event->consent_given ? '#28a745' : '#dc3545'; ?>;">
                                             <?php echo $event->consent_given ? 'Consent ✓' : 'Consent ✗'; ?>
                                         </small>
                                     <?php endif; ?>
                                 </td>
                                 <td style="font-size: 11px;">
-                                    <?php 
+                                    <?php
                                     $date = new DateTime($event->created_at);
                                     echo esc_html($date->format('M j, Y'));
-                                    echo '<br>' . esc_html($date->format('H:i:s')); 
+                                    echo '<br>' . esc_html($date->format('H:i:s'));
                                     ?>
                                 </td>
                                 <td>
@@ -347,13 +347,13 @@ $current_page = floor($offset / $limit) + 1;
                                             data-event-status="<?php echo esc_attr($event->event_status); ?>"
                                             data-reason="<?php echo esc_attr($event->reason ?? ''); ?>"
                                             data-payload="<?php echo esc_attr($event->payload ?? ''); ?>"
-                                            data-headers="<?php 
+                                            data-headers="<?php
                                                 // Properly format headers for display
-                                                if (!empty($event->headers) && is_array($event->headers)) {
-                                                    echo esc_attr(wp_json_encode($event->headers, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
-                                                } else {
-                                                    echo esc_attr($event->headers ?? '');
-                                                }
+                                            if (!empty($event->headers) && is_array($event->headers)) {
+                                                echo esc_attr(wp_json_encode($event->headers, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+                                            } else {
+                                                echo esc_attr($event->headers ?? '');
+                                            }
                                             ?>"
                                             data-ip="<?php echo esc_attr($event->ip_address ?? ''); ?>"
                                             data-user-agent="<?php echo esc_attr($event->user_agent ?? ''); ?>"
@@ -361,15 +361,15 @@ $current_page = floor($offset / $limit) + 1;
                                             data-referrer="<?php echo esc_attr($event->referrer ?? ''); ?>"
                                             data-user-id="<?php echo esc_attr($event->user_id ?? ''); ?>"
                                             data-session-id="<?php echo esc_attr($event->session_id ?? ''); ?>"
-                                            data-consent-given="<?php 
+                                            data-consent-given="<?php
                                                 // Handle both boolean and integer values from database
-                                                if (is_null($event->consent_given)) {
-                                                    echo esc_attr('');
-                                                } else {
-                                                    // Convert to boolean first, then to string
-                                                    $consent_bool = (bool) $event->consent_given;
-                                                    echo esc_attr($consent_bool ? 'true' : 'false');
-                                                }
+                                            if (is_null($event->consent_given)) {
+                                                echo esc_attr('');
+                                            } else {
+                                                // Convert to boolean first, then to string
+                                                $consent_bool = (bool) $event->consent_given;
+                                                echo esc_attr($consent_bool ? 'true' : 'false');
+                                            }
                                             ?>"
                                             data-consent-debug="<?php echo esc_attr('Raw: ' . var_export($event->consent_given, true) . ' | Type: ' . gettype($event->consent_given)); ?>"
                                             data-bot-rules="<?php echo esc_attr($event->bot_detection_rules ?? ''); ?>"

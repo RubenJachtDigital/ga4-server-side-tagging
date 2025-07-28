@@ -185,7 +185,7 @@ class GA4_Event_Logger
                 if (is_array($args[$field]) || is_object($args[$field])) {
                     $serialized_data = json_encode($args[$field], JSON_PRETTY_PRINT);
                     $args[$field] = $this->encrypt_sensitive_data_for_storage($serialized_data);
-                } else if (is_string($args[$field])) {
+                } elseif (is_string($args[$field])) {
                     $processed_data = $this->process_encrypted_payload_for_storage($args[$field]);
                     $args[$field] = $this->ensure_payload_encrypted_for_storage($processed_data);
                 }
@@ -846,7 +846,6 @@ class GA4_Event_Logger
 
             // If no encryption or not encrypted, return original payload
             return $payload;
-
         } catch (\Exception $e) {
             // Log processing failure but don't break the logging process
             error_log('GA4 Event Logger: Failed to process encrypted payload - ' . $e->getMessage());
@@ -888,7 +887,6 @@ class GA4_Event_Logger
 
             // If encryption failed, return original data
             return $data;
-
         } catch (\Exception $e) {
             // Log encryption failure but don't break the logging process
             error_log('GA4 Event Logger: Failed to encrypt sensitive data for storage - ' . $e->getMessage());
@@ -938,7 +936,6 @@ class GA4_Event_Logger
 
             // If encryption failed, return original data
             return $payload;
-
         } catch (\Exception $e) {
             // Log encryption failure but don't break the logging process
             error_log('GA4 Event Logger: Failed to ensure payload encryption for storage - ' . $e->getMessage());
@@ -980,7 +977,6 @@ class GA4_Event_Logger
 
             // If decryption failed, return original (might not be encrypted)
             return $payload;
-
         } catch (\Exception $e) {
             // Log decryption failure but don't break the display process
             error_log('GA4 Event Logger: Failed to decrypt payload for display - ' . $e->getMessage());

@@ -1,0 +1,67 @@
+parameters:
+    level: 5
+    paths:
+        - includes/
+        - admin/
+        - public/
+    
+    excludePaths:
+        - vendor/
+        - node_modules/
+        - tests/coverage/
+        - .git/
+    
+    bootstrapFiles:
+        - tests/bootstrap.php
+    
+    # WordPress-specific configuration would go here if supported
+    
+    ignoreErrors:
+        # WordPress core functions that PHPStan doesn't recognize
+        - '#Function wp_json_encode not found#'
+        - '#Function wp_remote_post not found#'
+        - '#Function wp_remote_get not found#'
+        - '#Function wp_schedule_event not found#'
+        - '#Function wp_next_scheduled not found#'
+        - '#Function get_option not found#'
+        - '#Function update_option not found#'
+        - '#Function add_option not found#'
+        - '#Function delete_option not found#'
+        - '#Function current_time not found#'
+        - '#Function wp_unslash not found#'
+        - '#Function sanitize_text_field not found#'
+        - '#Function is_wp_error not found#'
+        - '#Function wp_parse_url not found#'
+        - '#Function wp_http_validate_url not found#'
+        - '#Function site_url not found#'
+        - '#Function wp_get_environment_type not found#'
+        - '#Function is_ssl not found#'
+        - '#Function wp_cache_get not found#'
+        - '#Function wp_cache_set not found#'
+        - '#Function register_rest_route not found#'
+        - '#Function rest_ensure_response not found#'
+        - '#Function get_transient not found#'
+        - '#Function set_transient not found#'
+        - '#Function delete_transient not found#'
+        
+        # WordPress globals
+        - '#Variable \$wpdb#'
+        - '#Access to an undefined property wpdb::\$prefix#'
+        - '#Call to method [a-zA-Z_]+\(\) on an unknown class wpdb#'
+        
+        # WordPress classes that PHPStan doesn't recognize
+        - '#Class WP_REST_Request not found#'
+        - '#Class WP_REST_Response not found#'
+        - '#Class WP_Error not found#'
+        - '#Class WP_UnitTestCase not found#'
+        
+        # Allow dynamic property access for WordPress objects
+        - '#Access to an undefined property [a-zA-Z_\\\\]+::\$[a-zA-Z_]+#'
+        
+        # Allow mixed types for WordPress data structures
+        - '#Parameter .+ expects .+, mixed given#'
+        - '#Function .+ expects .+, mixed given#'
+        
+    reportUnmatchedIgnoredErrors: false
+    checkMissingIterableValueType: false
+    checkGenericClassInNonGenericObjectType: false

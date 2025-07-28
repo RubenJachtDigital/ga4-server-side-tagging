@@ -53,8 +53,8 @@ if (!defined('WPINC')) {
                         <p class="description">Configure button click tracking for A/B tests. When users click elements with these CSS classes, events will be sent with the variant as the event name (e.g., "button_test_a" or "button_test_b"). Add the CSS classes to your buttons in your theme.</p>
                         
                         <div id="ab_tests_container">
-                            <?php if (!empty($ab_tests_array)): ?>
-                                <?php foreach ($ab_tests_array as $index => $test): ?>
+                            <?php if (!empty($ab_tests_array)) : ?>
+                                <?php foreach ($ab_tests_array as $index => $test) : ?>
                                     <div class="ab-test-item" data-index="<?php echo $index; ?>">
                                         <table class="form-table">
                                             <tr>
@@ -129,8 +129,8 @@ if (!defined('WPINC')) {
                         <p class="description">Configure element click tracking. When users click elements matching these CSS selectors, custom events will be sent with the specified event name (e.g., "button_click", "download_pdf"). Event names will be automatically sanitized to be GA4-compliant.</p>
                         
                         <div id="click_tracks_container">
-                            <?php if (!empty($click_tracks_array)): ?>
-                                <?php foreach ($click_tracks_array as $index => $track): ?>
+                            <?php if (!empty($click_tracks_array)) : ?>
+                                <?php foreach ($click_tracks_array as $index => $track) : ?>
                                     <div class="click-track-item" data-index="<?php echo $index; ?>">
                                         <table class="form-table">
                                             <tr>

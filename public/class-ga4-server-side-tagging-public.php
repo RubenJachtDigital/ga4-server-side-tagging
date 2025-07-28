@@ -185,7 +185,7 @@ class GA4_Server_Side_Tagging_Public
             // WP REST Endpoint method - check if encryption is enabled
             $encryption_enabled = get_option('ga4_jwt_encryption_enabled', false);
             $script_data['encryptionEnabled'] = $encryption_enabled;
-        } else if ($transmission_method === 'direct_to_cf') {
+        } elseif ($transmission_method === 'direct_to_cf') {
             // Direct method - no encryption, includes cloudflare URL
             $script_data['encryptionEnabled'] = false;
             $script_data['cloudflareWorkerUrl'] = get_option('ga4_cloudflare_worker_url', '');
@@ -278,7 +278,7 @@ class GA4_Server_Side_Tagging_Public
 
     /**
      * Get current cart data for GA4 tracking
-     * 
+     *
      * @return array Cart data formatted for GA4 events
      */
     public function get_cart_data_for_tracking()
@@ -395,7 +395,7 @@ class GA4_Server_Side_Tagging_Public
 
     /**
      * Get variation attributes as a string
-     * 
+     *
      * @param array $cart_item Cart item data
      * @return string Variation attributes formatted as string
      */
@@ -407,8 +407,9 @@ class GA4_Server_Side_Tagging_Public
 
         $attributes = array();
         foreach ($cart_item['variation'] as $key => $value) {
-            if (empty($value))
+            if (empty($value)) {
                 continue;
+            }
 
             // Remove 'attribute_' prefix and format
             $attribute_name = str_replace('attribute_', '', $key);
@@ -833,8 +834,9 @@ class GA4_Server_Side_Tagging_Public
         if ($variation) {
             $attributes = [];
             foreach ($variation->get_variation_attributes() as $attribute => $value) {
-                if (empty($value))
+                if (empty($value)) {
                     continue;
+                }
 
                 $attribute_name = str_replace('attribute_', '', $attribute);
                 $attribute_name = str_replace('pa_', '', $attribute_name);
@@ -873,7 +875,7 @@ class GA4_Server_Side_Tagging_Public
 
     /**
      * Check if time-based encryption is available (WordPress salts configured)
-     * 
+     *
      * @return bool True if time-based encryption is available
      */
     private function is_time_based_encryption_available()
@@ -898,8 +900,7 @@ class GA4_Server_Side_Tagging_Public
 
     /**
      * AJAX handler for nonce refresh (cache-proof implementation)
-     * 
+     *
      * @since 1.0.0
      */
- 
 }

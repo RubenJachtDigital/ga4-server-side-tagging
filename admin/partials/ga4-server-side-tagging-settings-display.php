@@ -359,14 +359,14 @@ $batch_size = get_option('ga4_event_batch_size', 1000);
                     </p>
                 </div>
 
-                <?php if ($test_result): ?>
+                <?php if ($test_result) : ?>
                     <div class="ga4-server-side-tagging-admin-section">
                         <h3>Connection Test Results</h3>
 
                         <div class="ga4-server-side-tagging-test-result <?php echo $test_result['success'] ? 'success' : 'error'; ?>">
                             <p><strong>GA4 API:</strong> <?php echo esc_html($test_result['message']); ?></p>
 
-                            <?php if (isset($test_result['cloudflare']) && $test_result['cloudflare']['tested']): ?>
+                            <?php if (isset($test_result['cloudflare']) && $test_result['cloudflare']['tested']) : ?>
                                 <p><strong>Cloudflare Worker:</strong>
                                     <?php echo esc_html($test_result['cloudflare']['message']); ?></p>
                             <?php endif; ?>
@@ -481,14 +481,14 @@ $batch_size = get_option('ga4_event_batch_size', 1000);
                         <code id="cf_ga4_api_secret"><?php echo esc_html($api_secret ?: '[Set your GA4 API Secret first - Generate in GA4 Admin]'); ?></code>
                         <button type="button" class="copy-secret-btn" data-target="cf_ga4_api_secret">Copy</button>
                     </div>
-                    <?php if ($transmission_method === 'wp_rest_endpoint'): ?>
+                    <?php if ($transmission_method === 'wp_rest_endpoint') : ?>
                     <div class="cf-secret-item">
                         <strong>API_KEY:</strong>
                         <code id="cf_api_key"><?php echo esc_html($worker_api_key ?: '[Generate Worker API key first]'); ?></code>
                         <button type="button" class="copy-secret-btn" data-target="cf_api_key">Copy</button>
                     </div>
                     <?php endif; ?>
-                    <?php if ($transmission_method === 'wp_rest_endpoint' && $jwt_encryption_enabled): ?>
+                    <?php if ($transmission_method === 'wp_rest_endpoint' && $jwt_encryption_enabled) : ?>
                     <div class="cf-secret-item">
                         <strong>ENCRYPTION_KEY:</strong>
                         <code id="cf_encryption_key"><?php echo esc_html($jwt_encryption_key ?: '[Generate encryption key first]'); ?></code>
@@ -497,7 +497,7 @@ $batch_size = get_option('ga4_event_batch_size', 1000);
                     <?php endif; ?>
                     <div class="cf-secret-item">
                         <strong>ALLOWED_DOMAINS:</strong>
-                        <code id="cf_allowed_domains"><?php 
+                        <code id="cf_allowed_domains"><?php
                             $domain = parse_url(home_url(), PHP_URL_HOST);
                             $www_domain = strpos($domain, 'www.') === 0 ? substr($domain, 4) : 'www.' . $domain;
                             $domains = $domain . ',' . $www_domain;

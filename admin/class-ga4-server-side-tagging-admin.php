@@ -538,7 +538,6 @@ class GA4_Server_Side_Tagging_Admin
                 'default' => '',
             )
         );
-
     }
 
     /**
@@ -1387,7 +1386,7 @@ class GA4_Server_Side_Tagging_Admin
             <div class="notice notice-info">
                 <p>
                     Debug mode is currently <strong><?php echo $debug_mode ? 'enabled' : 'disabled'; ?></strong>.
-                    <?php if (!$debug_mode): ?>
+                    <?php if (!$debug_mode) : ?>
                         Enable debug mode to start logging events.
                     <?php endif; ?>
                 </p>
@@ -1414,9 +1413,9 @@ class GA4_Server_Side_Tagging_Admin
 
             <div class="card">
                 <h2>Tagging Log</h2>
-                <?php if (empty($log_content)): ?>
+                <?php if (empty($log_content)) : ?>
                     <p>No log entries found. <?php echo !$debug_mode ? 'Enable debug mode to start logging.' : ''; ?></p>
-                <?php else: ?>
+                <?php else : ?>
                     <div class="ga4-log-info" style="margin-bottom: 10px;">
                         <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px; background: #fff; border: 1px solid #ccd0d4; border-radius: 4px;">
                             <div>
@@ -1426,7 +1425,7 @@ class GA4_Server_Side_Tagging_Admin
                             <div>
                                 <strong>🕐 Reference Time:</strong> 
                                 <span id="dashboard-reference-time" style="font-family: 'Courier New', monospace; background: #f0f0f1; padding: 2px 6px; border-radius: 3px; border: 1px solid #c3c4c7;">
-                                    <?php echo esc_html( current_time( 'Y-m-d H:i:s T' ) ); ?>
+                                    <?php echo esc_html(current_time('Y-m-d H:i:s T')); ?>
                                 </span>
                             </div>
                         </div>
@@ -1562,10 +1561,10 @@ class GA4_Server_Side_Tagging_Admin
 
     /**
      * Ensure WordPress encryption salts exist for key storage
-     * 
+     *
      * Initializes the required WordPress options for encryption key storage
      * if they don't already exist.
-     * 
+     *
      * @since 1.0.0
      * @return void
      */
@@ -1578,7 +1577,7 @@ class GA4_Server_Side_Tagging_Admin
             $this->logger->info('Created WordPress encryption salt for secure key storage');
         }
 
-        // Check if time-based auth key exists, if not create it  
+        // Check if time-based auth key exists, if not create it
         if (empty(get_option('ga4_time_based_auth_key', ''))) {
             $auth_key = bin2hex(random_bytes(32)); // 64-character hex string
             update_option('ga4_time_based_auth_key', $auth_key);

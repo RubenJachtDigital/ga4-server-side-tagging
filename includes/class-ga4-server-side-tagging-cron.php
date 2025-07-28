@@ -97,7 +97,6 @@ class GA4_Server_Side_Tagging_Cron
     public function maybe_schedule_crons()
     {
         $this->schedule_cron_jobs();
-
     }
 
     /**
@@ -154,7 +153,6 @@ class GA4_Server_Side_Tagging_Cron
             $processing_time = round((microtime(true) - $start_time) * 1000, 2);
             
             $this->logger->info("Event queue processing completed in {$processing_time}ms");
-            
         } catch (\Exception $e) {
             $processing_time = round((microtime(true) - $start_time) * 1000, 2);
             $this->logger->error(sprintf(
@@ -238,7 +236,6 @@ class GA4_Server_Side_Tagging_Cron
                 $wpdb->query("OPTIMIZE TABLE {$table_name}");
                 $this->logger->info('Event queue table optimized after cleanup');
             }
-            
         } catch (\Exception $e) {
             $this->logger->error('Event cleanup failed: ' . $e->getMessage());
         }

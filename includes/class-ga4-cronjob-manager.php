@@ -98,9 +98,9 @@ class GA4_Cronjob_Manager
     public function queue_event($event_data, $is_encrypted = false, $original_headers = array(), $was_originally_encrypted = false)
     {
         $result = $this->event_logger->queue_event(
-            $event_data, 
-            $is_encrypted, 
-            $original_headers, 
+            $event_data,
+            $is_encrypted,
+            $original_headers,
             $was_originally_encrypted
         );
 
@@ -235,7 +235,6 @@ class GA4_Cronjob_Manager
             $success = $this->send_events_to_ga4($events, $batch_events, $batch_consent);
             $transmission_error_message = "Failed to send events directly to Google Analytics";
         } else {
-        
             $success = $this->send_batch_to_cloudflare($batch_events, $batch_consent, $events);
             $transmission_error_message = "Failed to send events to Cloudflare Worker";
         }
@@ -243,7 +242,6 @@ class GA4_Cronjob_Manager
         if ($success) {
             // Mark all events as processed using unified table
             $this->event_logger->update_event_status($event_ids, 'completed');
-
         } else {
             // Mark events as failed with specific error message for chosen transmission method
             foreach ($event_ids as $event_id) {
@@ -329,7 +327,6 @@ class GA4_Cronjob_Manager
 
             // If general decrypt failed, return original data
             return $encrypted_data;
-
         } catch (\Exception $e) {
             if ($this->logger) {
                 $this->logger->error("Event decryption failed: " . $e->getMessage());
@@ -386,7 +383,6 @@ class GA4_Cronjob_Manager
                 } elseif (is_array($event_data) && isset($event_data['event'])) {
                     // Event has nested structure, extract the actual event
                     $final_event = $event_data['event'];
-                
                 } else {
                     // Fallback - use as is
                     $final_event = $event_data;
@@ -573,7 +569,7 @@ class GA4_Cronjob_Manager
         // Map original headers to proper format (headers are stored with underscores)
         $header_mapping = array(
             'user_agent' => 'User-Agent',
-            'accept_language' => 'Accept-Language', 
+            'accept_language' => 'Accept-Language',
             'accept' => 'Accept',
             'referer' => 'Referer',
             'accept_encoding' => 'Accept-Encoding',

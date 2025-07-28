@@ -23,14 +23,14 @@
  */
 
 // If this file is called directly, abort.
-if ( ! defined( 'WPINC' ) ) {
+if (! defined('WPINC')) {
     die;
 }
 
 // Define plugin version
-define( 'GA4_SERVER_SIDE_TAGGING_VERSION', '2.2.0' );
-define( 'GA4_SERVER_SIDE_TAGGING_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
-define( 'GA4_SERVER_SIDE_TAGGING_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
+define('GA4_SERVER_SIDE_TAGGING_VERSION', '2.2.0');
+define('GA4_SERVER_SIDE_TAGGING_PLUGIN_DIR', plugin_dir_path(__FILE__));
+define('GA4_SERVER_SIDE_TAGGING_PLUGIN_URL', plugin_dir_url(__FILE__));
 
 // Include required files
 require_once GA4_SERVER_SIDE_TAGGING_PLUGIN_DIR . 'includes/class-ga4-server-side-tagging.php';
@@ -42,16 +42,17 @@ require_once GA4_SERVER_SIDE_TAGGING_PLUGIN_DIR . 'includes/class-ga4-payload-tr
 use GA4ServerSideTagging\Core\GA4_Server_Side_Tagging;
 
 // Activation and deactivation hooks
-register_activation_hook( __FILE__, 'ga4_server_side_tagging_activate' );
-register_deactivation_hook( __FILE__, 'ga4_server_side_tagging_deactivate' );
+register_activation_hook(__FILE__, 'ga4_server_side_tagging_activate');
+register_deactivation_hook(__FILE__, 'ga4_server_side_tagging_deactivate');
 
 /**
  * The code that runs during plugin activation.
  */
-function ga4_server_side_tagging_activate() {
+function ga4_server_side_tagging_activate()
+{
     // Create necessary database tables and options
-    update_option( 'ga4_server_side_tagging_version', GA4_SERVER_SIDE_TAGGING_VERSION );
-    update_option( 'ga4_server_side_tagging_debug_mode', false );
+    update_option('ga4_server_side_tagging_version', GA4_SERVER_SIDE_TAGGING_VERSION);
+    update_option('ga4_server_side_tagging_debug_mode', false);
     
     // Create unified table
     require_once GA4_SERVER_SIDE_TAGGING_PLUGIN_DIR . 'includes/class-ga4-server-side-tagging-logger.php';
@@ -77,7 +78,8 @@ function ga4_server_side_tagging_activate() {
 /**
  * The code that runs during plugin deactivation.
  */
-function ga4_server_side_tagging_deactivate() {
+function ga4_server_side_tagging_deactivate()
+{
     // Clear scheduled cron jobs
     require_once GA4_SERVER_SIDE_TAGGING_PLUGIN_DIR . 'includes/class-ga4-server-side-tagging-logger.php';
     require_once GA4_SERVER_SIDE_TAGGING_PLUGIN_DIR . 'includes/class-ga4-server-side-tagging-cron.php';
@@ -90,9 +92,10 @@ function ga4_server_side_tagging_deactivate() {
 /**
  * Begins execution of the plugin.
  */
-function run_ga4_server_side_tagging() {
+function run_ga4_server_side_tagging()
+{
     $plugin = new GA4_Server_Side_Tagging();
     $plugin->run();
 }
 
-run_ga4_server_side_tagging(); 
+run_ga4_server_side_tagging();

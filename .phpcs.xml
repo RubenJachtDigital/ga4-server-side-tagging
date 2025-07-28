@@ -1,0 +1,73 @@
+<?xml version="1.0"?>
+<ruleset name="GA4 Server-Side Tagging">
+    <description>PHP_CodeSniffer configuration for GA4 Server-Side Tagging plugin</description>
+
+    <!-- Check all PHP files in the plugin -->
+    <file>.</file>
+
+    <!-- Exclude vendor and test coverage directories -->
+    <exclude-pattern>*/vendor/*</exclude-pattern>
+    <exclude-pattern>*/node_modules/*</exclude-pattern>
+    <exclude-pattern>*/tests/coverage/*</exclude-pattern>
+    <exclude-pattern>*/.git/*</exclude-pattern>
+
+    <!-- Use WordPress Coding Standards -->
+    <rule ref="WordPress">
+        <!-- Allow short array syntax -->
+        <exclude name="Generic.Arrays.DisallowShortArraySyntax"/>
+        
+        <!-- Allow long lines in test files -->
+        <exclude name="Generic.Files.LineLength.TooLong"/>
+        
+        <!-- Relax some naming conventions for test files -->
+        <exclude name="WordPress.Files.FileName.InvalidClassFileName"/>
+        <exclude name="WordPress.Files.FileName.NotHyphenatedLowercase"/>
+    </rule>
+
+    <!-- Use WordPress-Core for core functionality -->
+    <rule ref="WordPress-Core"/>
+
+    <!-- Use WordPress-Docs for documentation -->
+    <rule ref="WordPress-Docs"/>
+
+    <!-- Use WordPress-Extra for extra best practices -->
+    <rule ref="WordPress-Extra">
+        <!-- Allow short ternary operator -->
+        <exclude name="WordPress.PHP.DisallowShortTernary"/>
+    </rule>
+
+    <!-- Check for PHP compatibility -->
+    <rule ref="PHPCompatibilityWP"/>
+
+    <!-- Configuration for WordPress standards -->
+    <config name="minimum_supported_wp_version" value="5.0"/>
+    <config name="testVersion" value="7.4-"/>
+
+    <!-- Show progress and colors -->
+    <arg value="sp"/>
+    <arg name="colors"/>
+    <arg name="extensions" value="php"/>
+    <arg name="parallel" value="8"/>
+
+    <!-- Custom rules for this project -->
+    <rule ref="WordPress.WP.I18n">
+        <properties>
+            <property name="text_domain" type="array">
+                <element value="ga4-server-side-tagging"/>
+            </properties>
+        </rule>
+
+    <!-- Allow specific WordPress function exclusions for testing -->
+    <rule ref="WordPress.PHP.NoSilencedErrors">
+        <exclude-pattern>*/tests/*</exclude-pattern>
+    </rule>
+
+    <!-- Relax some rules for test files -->
+    <rule ref="WordPress.Security.EscapeOutput">
+        <exclude-pattern>*/tests/*</exclude-pattern>
+    </rule>
+
+    <rule ref="WordPress.Security.NonceVerification">
+        <exclude-pattern>*/tests/*</exclude-pattern>
+    </rule>
+</ruleset>

@@ -112,7 +112,6 @@ class GA4_Server_Side_Tagging_Endpoint
             'callback' => array($this, 'send_events_encrypted'),
             'permission_callback' => array($this, 'check_strong_permission'),
         ));
-
     }
 
 
@@ -129,7 +128,7 @@ class GA4_Server_Side_Tagging_Endpoint
         $session_validated = isset($_SESSION[$this->validation_session_key]) && $_SESSION[$this->validation_session_key] === true;
 
         if ($session_validated && $this->performance_mode_enabled) {
-            // Session already validated - perform only basic origin check            
+            // Session already validated - perform only basic origin check
             if (!$this->validate_request_origin($request)) {
                 $this->log_security_failure($request, 'ORIGIN_VALIDATION_FAILED', 'Request origin validation failed (basic check)');
                 return false;
@@ -166,7 +165,7 @@ class GA4_Server_Side_Tagging_Endpoint
 
     /**
      * Comprehensive bot detection for secure config endpoint.
-     * 
+     *
      * Implements server-side bot detection similar to client-side patterns
      * to prevent bots from accessing sensitive configuration data.
      *
@@ -196,7 +195,9 @@ class GA4_Server_Side_Tagging_Endpoint
         );
 
         // Require at least 2 positive checks to classify as bot (same as Cloudflare worker)
-        $positive_checks = array_filter($bot_checks, function($check) { return $check === true; });
+        $positive_checks = array_filter($bot_checks, function ($check) {
+            return $check === true;
+        });
         $is_bot = count($positive_checks) >= 2;
 
         if ($is_bot) {
@@ -603,7 +604,7 @@ class GA4_Server_Side_Tagging_Endpoint
         // SECURITY: For encrypted endpoint, we use enhanced session validation instead of URL nonces
         // This is much safer than exposing nonces in URL parameters which can be logged/cached
         
-        // The session-based validation happens in check_strong_permission() which is already 
+        // The session-based validation happens in check_strong_permission() which is already
         // applied to this route, providing adequate security for encrypted requests
         
         // Additional validation: Ensure request contains encrypted JWT data
@@ -809,7 +810,6 @@ class GA4_Server_Side_Tagging_Endpoint
                         $request_data['events'][$index]['params'] = array();
                     }
                 }
-                
             } elseif (isset($request_data['event_name']) || isset($request_data['name'])) {
                 // Legacy single event format - convert to unified batch structure
                 $event_name = $request_data['event_name'] ?? $request_data['name'];
@@ -841,8 +841,6 @@ class GA4_Server_Side_Tagging_Endpoint
                 if ($consent_data) {
                     $request_data['consent'] = $consent_data;
                 }
-                
-                
             } else {
                 $this->event_logger->create_event_record(
                     $request->get_body(),
@@ -876,25 +874,25 @@ class GA4_Server_Side_Tagging_Endpoint
             $bot_detection_result = $this->detect_bot_from_event_data($request, $request_data);
             if ($bot_detection_result['is_bot']) {
                     // Log each event as bot detected
-                    foreach ($request_data['events'] as $event) {
-                        $this->event_logger->create_event_record(
-                            json_encode($request_data, JSON_PRETTY_PRINT),
-                            'bot_detected', // monitor_status
-                            $this->get_essential_headers($request),
-                            false,
-                            array(
-                                'event_name' => $event['name'] ?? 'unknown',
-                                'reason' => 'WordPress-side bot detection: Score ' . $bot_detection_result['score'] . '/100',
-                                'ip_address' => $client_ip,
-                                'user_agent' => $request->get_header('user-agent'),
-                                'url' => $request->get_header('origin'),
-                                'referrer' => $request->get_header('referer'),
-                                'session_id' => $session_id,
-                                'consent_given' => $this->extract_consent_status($request_data),
-                                'bot_detection_rules' => array_merge($this->get_bot_detection_details($request), $bot_detection_result)
-                            )
-                        );
-                    }
+                foreach ($request_data['events'] as $event) {
+                    $this->event_logger->create_event_record(
+                        json_encode($request_data, JSON_PRETTY_PRINT),
+                        'bot_detected', // monitor_status
+                        $this->get_essential_headers($request),
+                        false,
+                        array(
+                            'event_name' => $event['name'] ?? 'unknown',
+                            'reason' => 'WordPress-side bot detection: Score ' . $bot_detection_result['score'] . '/100',
+                            'ip_address' => $client_ip,
+                            'user_agent' => $request->get_header('user-agent'),
+                            'url' => $request->get_header('origin'),
+                            'referrer' => $request->get_header('referer'),
+                            'session_id' => $session_id,
+                            'consent_given' => $this->extract_consent_status($request_data),
+                            'bot_detection_rules' => array_merge($this->get_bot_detection_details($request), $bot_detection_result)
+                        )
+                    );
+                }
 
                     $this->logger->warning("Bot detected via WordPress endpoint - blocked from processing. IP: {$client_ip}, User-Agent: " . $request->get_header('user-agent') . ", Bot Score: {$bot_detection_result['score']}, Reasons: " . implode(', ', $bot_detection_result['reasons']) . ", Event Count: " . count($request_data['events']));
                     
@@ -905,7 +903,7 @@ class GA4_Server_Side_Tagging_Endpoint
                         'filtered' => true,
                         'message' => 'Events processed successfully'
                     ), 200);
-                }
+            }
                 
             // Clean botData from all events after bot detection (before database storage)
             foreach ($request_data['events'] as $index => $event) {
@@ -915,7 +913,7 @@ class GA4_Server_Side_Tagging_Endpoint
             }
 
             // Log batch info with type distinction
-            $event_count = count($request_data['events']);            
+            $event_count = count($request_data['events']);
 
             // Check if cronjob batching is enabled and WP-Cron is available
             $cronjob_enabled = true;
@@ -999,7 +997,6 @@ class GA4_Server_Side_Tagging_Endpoint
                 'events_failed' => $failed_events,
                 'message' => 'Events queued for batch processing every 5 minutes'
             ), 200);
-
         } catch (\Exception $e) {
             $processing_time = round((microtime(true) - $start_time) * 1000, 2);
             $this->logger->error("Failed to process batch events request for session: {$session_id} after {$processing_time}ms: " . $e->getMessage());
@@ -1087,7 +1084,7 @@ class GA4_Server_Side_Tagging_Endpoint
                 // Events successfully sent - logging handled by main flow to prevent duplicate entries
 
                 $response_data = array(
-                    'success' => true, 
+                    'success' => true,
                     'events_processed' => $event_count,
                         'mode' => 'direct_sending'
                 );
@@ -1100,7 +1097,7 @@ class GA4_Server_Side_Tagging_Endpoint
 
                 $this->logger->error("Failed to send batch events to Cloudflare for session: {$session_id} after {$processing_time}ms: " . $result['error']);
                 return new \WP_REST_Response(array(
-                    'error' => 'Batch event sending failed', 
+                    'error' => 'Batch event sending failed',
                     'details' => $result['error'],
                     'events_failed' => $event_count,
                     'mode' => 'direct_sending'
@@ -1114,7 +1111,7 @@ class GA4_Server_Side_Tagging_Endpoint
             // Async events sent - logging handled by main flow to prevent duplicate entries
             
             return new \WP_REST_Response(array(
-                'success' => true, 
+                'success' => true,
                 'events_processed' => $event_count,
                 'mode' => 'direct_sending'
             ), 200);
@@ -1279,7 +1276,7 @@ class GA4_Server_Side_Tagging_Endpoint
 
     /**
      * Handle encrypted request data
-     * 
+     *
      * @param \WP_REST_Request $request Request object
      * @return array|null Decrypted request data or original data
      */
@@ -1307,7 +1304,7 @@ class GA4_Server_Side_Tagging_Endpoint
     /**
      * Handle time-based JWT requests from JavaScript clients
      * Uses 5-minute rotating encryption keys
-     * 
+     *
      * @param string $time_jwt Time-based JWT token
      * @param \WP_REST_Request $request Request object for logging
      * @return array Decrypted request data
@@ -1331,7 +1328,7 @@ class GA4_Server_Side_Tagging_Endpoint
     /**
      * Handle permanent JWT requests (backend/stored data)
      * Uses permanent encryption keys that don't expire
-     * 
+     *
      * @param array $request_body Request body data
      * @param \WP_REST_Request $request Request object for logging
      * @return array Decrypted request data
@@ -1492,7 +1489,6 @@ class GA4_Server_Side_Tagging_Endpoint
                 'headers' => $headers,
                 'body' => wp_json_encode($body)
             ));
-
         } catch (\Exception $e) {
             $this->logger->error('Async event forwarding failed: ' . $e->getMessage());
         }
@@ -1616,7 +1612,7 @@ class GA4_Server_Side_Tagging_Endpoint
                     // Response is not JSON - handle as plain text
                     // If it's a simple success message, treat it as successful
                     $response_body_trimmed = trim($response_body);
-                    if (empty($response_body_trimmed) || 
+                    if (empty($response_body_trimmed) ||
                         stripos($response_body_trimmed, 'success') !== false ||
                         stripos($response_body_trimmed, 'ok') !== false ||
                         stripos($response_body_trimmed, 'processed') !== false ||
@@ -1635,7 +1631,6 @@ class GA4_Server_Side_Tagging_Endpoint
             } else {
                 return array('success' => false, 'error' => 'HTTP ' . $response_code . ': ' . $response_body);
             }
-
         } catch (\Exception $e) {
             return array('success' => false, 'error' => $e->getMessage());
         }
@@ -1716,28 +1711,29 @@ class GA4_Server_Side_Tagging_Endpoint
      * @param    string    $key    The key to check.
      * @return   bool             True if key appears to be encrypted.
      */
-    private function is_key_in_encrypted_format( $key ) {
+    private function is_key_in_encrypted_format($key)
+    {
         // Encrypted keys are base64 encoded JSON with specific structure
         try {
             // Try to decode as base64
-            $decoded = base64_decode( $key, true );
-            if ( $decoded === false ) {
+            $decoded = base64_decode($key, true);
+            if ($decoded === false) {
                 return false;
             }
             
             // Try to parse as JSON
-            $json_data = json_decode( $decoded, true );
-            if ( json_last_error() !== JSON_ERROR_NONE ) {
+            $json_data = json_decode($decoded, true);
+            if (json_last_error() !== JSON_ERROR_NONE) {
                 return false;
             }
             
             // Check if it has the expected encrypted key structure
-            if ( is_array( $json_data ) && isset( $json_data['data'], $json_data['iv'], $json_data['tag'] ) ) {
+            if (is_array($json_data) && isset($json_data['data'], $json_data['iv'], $json_data['tag'])) {
                 return true;
             }
             
             return false;
-        } catch ( \Exception $e ) {
+        } catch (\Exception $e) {
             return false;
         }
     }
@@ -1991,7 +1987,7 @@ class GA4_Server_Side_Tagging_Endpoint
         // Additional automation tool patterns not in existing check
         $automation_patterns = array(
             '/puppeteer/i',
-            '/playwright/i', 
+            '/playwright/i',
             '/cypress/i',
             '/testcafe/i',
             '/nightwatch/i',
@@ -2075,7 +2071,7 @@ class GA4_Server_Side_Tagging_Endpoint
     private function get_essential_headers($request)
     {
         $essential_headers = array(
-            'user_agent', 'accept_language', 'accept', 'referer', 
+            'user_agent', 'accept_language', 'accept', 'referer',
             'accept_encoding', 'x_forwarded_for', 'x_real_ip'
         );
         
@@ -2114,5 +2110,4 @@ class GA4_Server_Side_Tagging_Endpoint
             'detection_threshold' => 2
         );
     }
-
 }

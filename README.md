@@ -54,11 +54,6 @@ The plugin offers three transmission methods for sending analytics data, each wi
 Browser JavaScript → Cloudflare Worker → Google Analytics
 ```
 
-**Encryption**: 
-- Time-based JWT tokens (short-lived, 5-10 minute expiry)
-- Encrypted with rotating keys for maximum security
-- Headers are never encrypted (stored as plain text for efficiency)
-
 **Headers**: 
 - Essential headers (User-Agent, Accept-Language, Referer, IP) filtered and sent
 - Fallback to Cloudflare request headers if payload headers unavailable
@@ -81,7 +76,7 @@ Browser JavaScript → WordPress REST API → Event Queue → Cloudflare Worker 
 **Encryption**:
 - Permanent JWT tokens (no expiry) for database storage
 - Event data encrypted with permanent keys
-- Headers stored separately (not encrypted for performance)
+- Headers stored separately
 - Final payload can be encrypted before sending to Cloudflare
 
 **Headers**:
@@ -92,7 +87,7 @@ Browser JavaScript → WordPress REST API → Event Queue → Cloudflare Worker 
 **Processing**:
 - Events queued in WordPress database
 - Background cron processing every 5 minutes  
-- Batch processing (up to 1000 events per batch)
+- Batch processing
 - Comprehensive logging and monitoring
 - Retry logic for failed events
 
@@ -135,7 +130,7 @@ Browser JavaScript → WordPress REST API → Event Queue → Google Analytics
 ### Security & Privacy
 
 **JWT Encryption**:
-- Time-based JWTs: Short-lived tokens for direct transmission (Method 1)
+- Time-based JWTs: Short-lived tokens for direct transmission
 - Permanent JWTs: Long-term storage encryption for database (Methods 2 & 3)
 - Rotation-based encryption keys prevent replay attacks
 - Headers never encrypted (performance optimization)
@@ -509,6 +504,98 @@ Optimize for high-traffic sites:
 - Adjust cron frequency
 - Implement caching strategies
 - Use dedicated Cloudflare Workers
+
+## Testing
+
+The plugin includes a comprehensive Composer-based testing infrastructure:
+
+### **Available Test Commands:**
+```bash
+# Run all tests (default - simple encryption tests)
+composer test
+
+# Run simple test suite (encryption functionality)
+composer test:simple
+
+# Run unit tests with native bootstrap  
+composer test:unit
+
+# Run integration tests
+composer test:integration
+
+# Run tests with coverage report
+composer test:coverage
+
+# Check code style against WordPress standards
+composer cs:check
+
+# Fix code style issues automatically  
+composer cs:fix
+
+# Run PHPStan static analysis
+composer stan
+
+# Run PHP Mess Detector
+composer md
+
+# Check PHP syntax across all files
+composer lint
+```
+
+### **Test Features:**
+- ✅ **Standalone testing**: No WordPress installation required
+- ✅ **Encryption validation**: Tests JWT encryption/decryption functionality  
+- ✅ **WordPress-style autoloading**: Supports both PSR-4 and classmap autoloading
+- ✅ **Code quality tools**: PHPStan, PHPCS, PHPMD integration
+- ✅ **CI/CD ready**: GitHub Actions workflow included
+- ✅ **Coverage reports**: HTML and text coverage output
+- ✅ **Git integration**: Comprehensive .gitignore for development workflow
+
+### **Development Setup:**
+```bash
+# Clone and setup the development environment
+git clone <repository-url>
+cd ga4-server-side-tagging
+
+# Install Composer dependencies
+composer install
+
+# Run the test suite  
+composer test
+
+# Check code quality
+composer cs:check
+composer stan
+```
+
+### **File Structure:**
+```
+ga4-server-side-tagging/
+├── .gitignore              # Git ignore rules for dev environment
+├── composer.json           # Dependencies and scripts
+├── phpunit.xml            # PHPUnit configuration
+├── tests/                 # Test files and bootstraps
+│   ├── bootstrap-simple.php
+│   ├── unit/
+│   └── integration/
+├── vendor/                # Composer dependencies (ignored)
+└── ...                    # Plugin files
+```
+
+Expected output:
+```
+PHPUnit 9.6.23 by Sebastian Bergmann and contributors.
+
+Simple Encryption
+ ✔ Encryption class exists
+ ✔ Encrypt method exists  
+ ✔ Decrypt method exists
+ ✔ Basic encryption
+ ✔ Encryption decryption cycle
+ ✔ Invalid key handling
+
+OK (6 tests, 9 assertions)
+```
 
 ## License
 

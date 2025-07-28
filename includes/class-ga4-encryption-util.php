@@ -4,7 +4,7 @@ namespace GA4ServerSideTagging\Utilities;
 
 /**
  * JWT Encryption Utilities for GA4 Server-Side Tagging
- * 
+ *
  * Provides JWT encryption using HMACSHA256 with the backend key for secure request transmission
  *
  * @since      1.0.0
@@ -19,7 +19,7 @@ class GA4_Encryption_Util
 {
     /**
      * Create JWT token with encrypted payload
-     * 
+     *
      * @param string $plaintext Data to encrypt as JWT payload
      * @param string $key_hex Backend key as hex string (64 characters for 256-bit)
      * @return string|false JWT token, or false on failure
@@ -40,7 +40,6 @@ class GA4_Encryption_Util
 
             // Create JWT token with the plaintext as payload
             return self::create_jwt_token($plaintext, $key);
-            
         } catch (\Exception $e) {
             error_log('GA4 JWT Creation Error: ' . $e->getMessage());
             return false;
@@ -49,7 +48,7 @@ class GA4_Encryption_Util
 
     /**
      * Verify and decrypt JWT token
-     * 
+     *
      * @param string $jwt_token JWT token to verify and decrypt
      * @param string $key_hex Backend key as hex string (64 characters for 256-bit)
      * @return string|false Decrypted plaintext, or false on failure
@@ -70,7 +69,6 @@ class GA4_Encryption_Util
 
             // Verify and decode JWT token
             return self::verify_jwt_token($jwt_token, $key);
-            
         } catch (\Exception $e) {
             error_log('GA4 JWT Verification Error: ' . $e->getMessage());
             return false;
@@ -80,7 +78,7 @@ class GA4_Encryption_Util
     /**
      * Create JWT token using HMACSHA256 with AES-GCM encrypted payload
      * This is the internal method used by both time-based and permanent JWT creation
-     * 
+     *
      * @param string $payload Data to encrypt as JWT payload
      * @param string $key Binary signing key
      * @return string JWT token
@@ -120,7 +118,7 @@ class GA4_Encryption_Util
 
     /**
      * Verify JWT token and extract payload with AES-GCM decryption
-     * 
+     *
      * @param string $jwt_token JWT token to verify
      * @param string $key Binary signing key
      * @return string|false Decrypted payload or false on failure
@@ -173,7 +171,7 @@ class GA4_Encryption_Util
         }
         
         // Handle both encrypted and legacy unencrypted tokens
-        if (isset($header['enc']) && $header['enc'] === 'A256GCM' && 
+        if (isset($header['enc']) && $header['enc'] === 'A256GCM' &&
             isset($payload['enc_data']) && isset($payload['iv']) && isset($payload['tag'])) {
             // New encrypted format - decrypt the payload
             try {
@@ -195,7 +193,7 @@ class GA4_Encryption_Util
 
     /**
      * Base64URL encode
-     * 
+     *
      * @param string $data Data to encode
      * @return string Encoded data
      */
@@ -206,7 +204,7 @@ class GA4_Encryption_Util
 
     /**
      * Base64URL decode
-     * 
+     *
      * @param string $data Data to decode
      * @return string Decoded data
      */
@@ -217,7 +215,7 @@ class GA4_Encryption_Util
 
     /**
      * Encrypt data using AES-256-GCM
-     * 
+     *
      * @param string $plaintext Data to encrypt
      * @param string $key 32-byte encryption key
      * @return array Array containing encrypted data and IV
@@ -251,7 +249,7 @@ class GA4_Encryption_Util
 
     /**
      * Decrypt data using AES-256-GCM
-     * 
+     *
      * @param string $encrypted_data Encrypted data
      * @param string $iv Initialization vector
      * @param string $tag Authentication tag
@@ -281,7 +279,7 @@ class GA4_Encryption_Util
 
     /**
      * Parse JWT encrypted request payload
-     * 
+     *
      * @param array $request_data Request data containing JWT field
      * @param string $encryption_key Backend encryption key (hex)
      * @return array|false Decrypted data array, or false on failure
@@ -309,7 +307,7 @@ class GA4_Encryption_Util
 
     /**
      * Create JWT encrypted response payload
-     * 
+     *
      * @param array $data Response data
      * @param string $encryption_key Backend encryption key (hex)
      * @return array JWT response structure
@@ -330,7 +328,7 @@ class GA4_Encryption_Util
 
     /**
      * Check if request uses JWT encryption
-     * 
+     *
      * @param \WP_REST_Request $request Request object
      * @return bool True if request has JWT encryption header
      */
@@ -341,7 +339,7 @@ class GA4_Encryption_Util
 
     /**
      * Validate encryption key format
-     * 
+     *
      * @param string $key_hex Encryption key
      * @return bool True if key is valid 256-bit hex key
      */
@@ -352,7 +350,7 @@ class GA4_Encryption_Util
 
     /**
      * Check if a value is in encrypted format (base64 encoded JSON with data/iv/tag structure)
-     * 
+     *
      * @param string $value Value to check
      * @return bool True if value appears to be encrypted
      */
@@ -384,7 +382,7 @@ class GA4_Encryption_Util
 
     /**
      * Encrypt encryption key for database storage using WordPress salts
-     * 
+     *
      * @param string $key_hex Raw encryption key (64 hex characters)
      * @return string Encrypted key for database storage
      */
@@ -418,7 +416,7 @@ class GA4_Encryption_Util
 
     /**
      * Decrypt encryption key from database storage using WordPress salts
-     * 
+     *
      * @param string $encrypted_key Encrypted key from database
      * @return string|false Decrypted key (64 hex characters) or false on failure
      */
@@ -457,7 +455,6 @@ class GA4_Encryption_Util
             }
             
             return $decrypted_key;
-            
         } catch (\Exception $e) {
             error_log('GA4 Key Decryption Error: ' . $e->getMessage());
             return false;
@@ -467,7 +464,7 @@ class GA4_Encryption_Util
     /**
      * Decrypt general key from database storage using WordPress salts
      * This method works with any key format, unlike decrypt_key_from_storage which only works with 64-char hex
-     * 
+     *
      * @param string $encrypted_key Encrypted key from database
      * @return string|false Decrypted key (any format) or false on failure
      */
@@ -502,7 +499,6 @@ class GA4_Encryption_Util
             
             // No format validation for general keys - return as-is
             return $decrypted_key;
-            
         } catch (\Exception $e) {
             error_log('GA4 General Key Decryption Error: ' . $e->getMessage());
             return false;
@@ -512,7 +508,7 @@ class GA4_Encryption_Util
     /**
      * Encrypt general key for database storage using WordPress salts
      * This method works with any string format, unlike encrypt_key_for_storage which only works with 64-char hex
-     * 
+     *
      * @param string $key_value Raw key value (any format)
      * @return string Encrypted key for database storage
      */
@@ -546,7 +542,7 @@ class GA4_Encryption_Util
 
     /**
      * Securely store encryption key in WordPress options
-     * 
+     *
      * @param string $key_hex Raw encryption key (64 hex characters)
      * @param string $option_name WordPress option name
      * @return bool True on success, false on failure
@@ -571,7 +567,7 @@ class GA4_Encryption_Util
 
     /**
      * Securely retrieve encryption key from WordPress options
-     * 
+     *
      * @param string $option_name WordPress option name
      * @return string|false Decrypted key or false on failure
      */
@@ -606,7 +602,7 @@ class GA4_Encryption_Util
     /**
      * Generate time-based key for client-server encryption (5-minute slots)
      * Same function used on both client and server side
-     * 
+     *
      * @return string 64-character hex key
      */
     public static function generate_time_based_key()
@@ -628,7 +624,7 @@ class GA4_Encryption_Util
 
     /**
      * Normalize site URL to match JavaScript window.location.origin format
-     * 
+     *
      * @return string Normalized site URL without trailing slash
      */
     private static function normalize_site_url()
@@ -643,7 +639,7 @@ class GA4_Encryption_Util
 
     /**
      * Create time-based JWT token for client-server communication
-     * 
+     *
      * @param array $payload Data to encrypt
      * @return string JWT token
      */
@@ -657,7 +653,7 @@ class GA4_Encryption_Util
 
     /**
      * Verify and decrypt time-based JWT token with clock tolerance
-     * 
+     *
      * @param string $jwt_token JWT token to verify
      * @return array|false Decrypted payload or false on failure
      */
@@ -675,7 +671,6 @@ class GA4_Encryption_Util
             }
             
             return $decrypted_data;
-            
         } catch (\Exception $e) {
             // If current slot fails, try previous slot (for clock skew tolerance)
             try {
@@ -692,7 +687,6 @@ class GA4_Encryption_Util
                 
                 error_log('GA4 Time-based JWT: Successfully decrypted with previous slot');
                 return $decrypted_data;
-                
             } catch (\Exception $e2) {
                 error_log('GA4 Time-based JWT Verification Error (both slots failed): Current=' . $e->getMessage() . ', Previous=' . $e2->getMessage());
                 return false;
@@ -702,7 +696,7 @@ class GA4_Encryption_Util
 
     /**
      * Generate time-based key for a specific time slot
-     * 
+     *
      * @param int $time_slot Specific 5-minute time slot
      * @return string 64-character hex key
      */
@@ -723,7 +717,7 @@ class GA4_Encryption_Util
     /**
      * Create time-based JWT token specifically for JS client requests
      * Uses time-based encryption with 5-minute expiry
-     * 
+     *
      * @param string $payload Data to encrypt as JWT payload
      * @return string JWT token with time-based encryption
      */
@@ -768,7 +762,7 @@ class GA4_Encryption_Util
     /**
      * Create permanent JWT token that doesn't expire
      * Uses permanent encryption key for long-term storage
-     * 
+     *
      * @param string $payload Data to encrypt as JWT payload
      * @param string $permanent_key_hex Permanent encryption key (64 chars hex)
      * @return string JWT token with permanent encryption
@@ -816,7 +810,7 @@ class GA4_Encryption_Util
 
     /**
      * Decrypt permanent JWT token that doesn't expire
-     * 
+     *
      * @param string $jwt_token Permanent JWT token to decrypt
      * @param string $permanent_key_hex Permanent encryption key (64 chars hex)
      * @return string|false Decrypted payload or false on failure
@@ -877,7 +871,7 @@ class GA4_Encryption_Util
             }
             
             // Decrypt the payload (permanent tokens use encrypted format)
-            if (isset($header['enc']) && $header['enc'] === 'A256GCM' && 
+            if (isset($header['enc']) && $header['enc'] === 'A256GCM' &&
                 isset($payload['enc_data']) && isset($payload['iv']) && isset($payload['tag'])) {
                 $encrypted_data = self::base64url_decode($payload['enc_data']);
                 $iv = self::base64url_decode($payload['iv']);
@@ -886,7 +880,6 @@ class GA4_Encryption_Util
             } else {
                 throw new \Exception('Invalid permanent JWT payload format');
             }
-            
         } catch (\Exception $e) {
             error_log('GA4 Permanent JWT Decryption Error: ' . $e->getMessage());
             return false;
@@ -931,7 +924,6 @@ class GA4_Encryption_Util
 
             // If encryption failed, return unencrypted JSON
             return wp_json_encode($headers);
-
         } catch (\Exception $e) {
             // Log encryption failure
             error_log('GA4 Headers Encryption Error: ' . $e->getMessage());
@@ -1008,7 +1000,6 @@ class GA4_Encryption_Util
 
             // Return original data if decryption fails or data is not encrypted
             return is_array($headers_data) ? $headers_data : array();
-
         } catch (\Exception $e) {
             // Log decryption failure
             error_log('GA4 Headers Decryption Error: ' . $e->getMessage());
@@ -1016,7 +1007,7 @@ class GA4_Encryption_Util
             return is_array($headers_data) ? $headers_data : array();
         }
     }
-      private static function looks_like_jwt_token($string)
+    private static function looks_like_jwt_token($string)
     {
         if (!is_string($string)) {
             return false;

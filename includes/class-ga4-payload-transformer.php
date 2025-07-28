@@ -90,7 +90,7 @@ class GA4_Payload_Transformer
             unset($ga4_payload['events'][0]['params']['user_id']);
         }
         
-        // Add timestamp_micros at top level if present  
+        // Add timestamp_micros at top level if present
         if (isset($actual_event['timestamp_micros'])) {
             $ga4_payload['timestamp_micros'] = $actual_event['timestamp_micros'];
         }
@@ -393,7 +393,6 @@ class GA4_Payload_Transformer
             if (isset($params['mobile_brand_name'])) {
                 $device['brand'] = $this->normalize_device_brand($params['mobile_brand_name']);
             }
-            
         } else {
             // Consent denied - use generalized device data only
             
@@ -617,13 +616,13 @@ class GA4_Payload_Transformer
         }
         
         // Anonymize campaign data for paid traffic
-        if (isset($params['campaign']) && 
+        if (isset($params['campaign']) &&
             !in_array($params['campaign'], array('(organic)', '(direct)', '(not set)', '(referral)'))) {
             $params['campaign'] = '(denied consent)';
         }
         
         // Anonymize original campaign data for paid traffic
-        if (isset($params['originalCampaign']) && 
+        if (isset($params['originalCampaign']) &&
             !in_array($params['originalCampaign'], array('(organic)', '(direct)', '(not set)', '(referral)'))) {
             $params['originalCampaign'] = '(denied consent)';
         }
@@ -665,12 +664,12 @@ class GA4_Payload_Transformer
     {
         $fields_to_remove = array(
             // Geographic data (moved to user_location)
-            'geo_city', 'geo_country', 'geo_region', 'geo_continent', 
+            'geo_city', 'geo_country', 'geo_region', 'geo_continent',
             'geo_city_tz', 'geo_country_tz', 'geo_latitude', 'geo_longitude',
             // Device data (moved to device object)
-            'device_type', 'is_mobile', 'is_tablet', 'is_desktop', 
+            'device_type', 'is_mobile', 'is_tablet', 'is_desktop',
             'browser_name', 'browser_version', 'screen_resolution', 'screen_width', 'screen_height',
-            'os_name', 'os_version', 'device_model', 'device_brand', 
+            'os_name', 'os_version', 'device_model', 'device_brand',
             'mobile_model_name', 'mobile_brand_name',
             'viewport_width', 'viewport_height', 'language', 'accept_language',
             // User identification (moved to top level)
@@ -778,10 +777,10 @@ class GA4_Payload_Transformer
                 'continent_id' => '150',
                 'subcontinent_id' => '155'
             ),
-            // Belgium  
+            // Belgium
             'Europe/Brussels' => array(
                 'country_id' => 'BE',
-                'continent_id' => '150', 
+                'continent_id' => '150',
                 'subcontinent_id' => '155'
             ),
             // Germany
