@@ -893,7 +893,9 @@ class GA4_Server_Side_Tagging_Public
             return $auth_key_available && $salt_available && $user_enabled;
         } catch (\Exception $e) {
             // Log the error and return false as safe default
-            error_log('GA4 Time-based encryption check failed: ' . $e->getMessage());
+            if (defined('WP_DEBUG') && WP_DEBUG) {
+                error_log('GA4 Time-based encryption check failed: ' . $e->getMessage());
+            }
             return false;
         }
     }

@@ -848,7 +848,9 @@ class GA4_Event_Logger
             return $payload;
         } catch (\Exception $e) {
             // Log processing failure but don't break the logging process
-            error_log('GA4 Event Logger: Failed to process encrypted payload - ' . $e->getMessage());
+            if (defined('WP_DEBUG') && WP_DEBUG) {
+                error_log('GA4 Event Logger: Failed to process encrypted payload - ' . $e->getMessage());
+            }
             return $payload; // Return original payload if processing fails
         }
     }
@@ -889,7 +891,9 @@ class GA4_Event_Logger
             return $data;
         } catch (\Exception $e) {
             // Log encryption failure but don't break the logging process
-            error_log('GA4 Event Logger: Failed to encrypt sensitive data for storage - ' . $e->getMessage());
+            if (defined('WP_DEBUG') && WP_DEBUG) {
+                error_log('GA4 Event Logger: Failed to encrypt sensitive data for storage - ' . $e->getMessage());
+            }
             return $data; // Return original data if encryption fails
         }
     }
@@ -938,7 +942,9 @@ class GA4_Event_Logger
             return $payload;
         } catch (\Exception $e) {
             // Log encryption failure but don't break the logging process
-            error_log('GA4 Event Logger: Failed to ensure payload encryption for storage - ' . $e->getMessage());
+            if (defined('WP_DEBUG') && WP_DEBUG) {
+                error_log('GA4 Event Logger: Failed to ensure payload encryption for storage - ' . $e->getMessage());
+            }
             return $payload; // Return original data if encryption fails
         }
     }
@@ -979,7 +985,9 @@ class GA4_Event_Logger
             return $payload;
         } catch (\Exception $e) {
             // Log decryption failure but don't break the display process
-            error_log('GA4 Event Logger: Failed to decrypt payload for display - ' . $e->getMessage());
+            if (defined('WP_DEBUG') && WP_DEBUG) {
+                error_log('GA4 Event Logger: Failed to decrypt payload for display - ' . $e->getMessage());
+            }
             return $payload; // Return original payload if decryption fails
         }
     }
@@ -1203,7 +1211,9 @@ class GA4_Event_Logger
                 $stored_headers = array('encrypted' => true, 'jwt' => $encrypted_headers);
             } catch (\Exception $e) {
                 // Continue with unencrypted headers
-                error_log('GA4 Event Logger: Failed to encrypt headers - ' . $e->getMessage());
+                if (defined('WP_DEBUG') && WP_DEBUG) {
+                    error_log('GA4 Event Logger: Failed to encrypt headers - ' . $e->getMessage());
+                }
             }
         }
         
@@ -1374,7 +1384,9 @@ class GA4_Event_Logger
                 return wp_json_encode(array('encrypted' => true, 'jwt' => $encrypted_headers));
             } catch (\Exception $e) {
                 // Continue with unencrypted headers if encryption fails
-                error_log('GA4 Event Logger: Failed to encrypt original headers - ' . $e->getMessage());
+                if (defined('WP_DEBUG') && WP_DEBUG) {
+                    error_log('GA4 Event Logger: Failed to encrypt original headers - ' . $e->getMessage());
+                }
             }
         }
         

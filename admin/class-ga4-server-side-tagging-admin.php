@@ -1026,31 +1026,43 @@ class GA4_Server_Side_Tagging_Admin
     private function save_admin_features()
     {
         // A/B Testing settings
-        error_log('A/B Testing enabled: ' . (isset($_POST['ga4_ab_tests_enabled']) ? 'yes' : 'no'));
+        if (defined('WP_DEBUG') && WP_DEBUG) {
+            error_log('A/B Testing enabled: ' . (isset($_POST['ga4_ab_tests_enabled']) ? 'yes' : 'no'));
+        }
         update_option('ga4_ab_tests_enabled', isset($_POST['ga4_ab_tests_enabled']));
         
         // Process A/B tests configuration from the hidden field
         if (isset($_POST['ga4_ab_tests_config'])) {
             $ab_tests_config = wp_unslash($_POST['ga4_ab_tests_config']);
-            error_log('A/B Tests config received: ' . $ab_tests_config);
+            if (defined('WP_DEBUG') && WP_DEBUG) {
+                error_log('A/B Tests config received: ' . $ab_tests_config);
+            }
             update_option('ga4_ab_tests_config', $this->sanitize_ab_tests_config($ab_tests_config));
         } else {
-            error_log('No A/B Tests config found in POST data');
+            if (defined('WP_DEBUG') && WP_DEBUG) {
+                error_log('No A/B Tests config found in POST data');
+            }
             // If no config provided, save empty array
             update_option('ga4_ab_tests_config', '[]');
         }
 
         // Click Tracking settings
-        error_log('Click Tracking enabled: ' . (isset($_POST['ga4_click_tracks_enabled']) ? 'yes' : 'no'));
+        if (defined('WP_DEBUG') && WP_DEBUG) {
+            error_log('Click Tracking enabled: ' . (isset($_POST['ga4_click_tracks_enabled']) ? 'yes' : 'no'));
+        }
         update_option('ga4_click_tracks_enabled', isset($_POST['ga4_click_tracks_enabled']));
         
         // Process Click tracks configuration from the hidden field
         if (isset($_POST['ga4_click_tracks_config'])) {
             $click_tracks_config = wp_unslash($_POST['ga4_click_tracks_config']);
-            error_log('Click Tracks config received: ' . $click_tracks_config);
+            if (defined('WP_DEBUG') && WP_DEBUG) {
+                error_log('Click Tracks config received: ' . $click_tracks_config);
+            }
             update_option('ga4_click_tracks_config', $this->sanitize_click_tracks_config($click_tracks_config));
         } else {
-            error_log('No Click Tracks config found in POST data');
+            if (defined('WP_DEBUG') && WP_DEBUG) {
+                error_log('No Click Tracks config found in POST data');
+            }
             // If no config provided, save empty array
             update_option('ga4_click_tracks_config', '[]');
         }

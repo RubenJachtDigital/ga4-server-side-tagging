@@ -123,7 +123,68 @@ jobs:
     - name: Check for required WordPress functions
       run: |
         # Ensure plugin doesn't use development-only functions
-        if grep -r "var_dump\|print_r\|error_log" --include="*.php" --exclude-dir=tests --exclude-dir=vendor .; then
+        # Allow error_log when wrapped in WP_DEBUG checks or when writing to log files
+        if grep -r "var_dump\|print_r" --include="*.php" --exclude-dir=tests --exclude-dir=vendor .; then
           echo "Found debug functions in production code"
           exit 1
         fi
+        
+        # Check for unwrapped error_log calls using a more sophisticated approach
+        # Create temp script to check for unwrapped error_log calls
+        cat > check_error_log.php << 'EOF'
+        <?php
+        $violations = [];
+        $allowed_patterns = [
+            'logs/ga4-server-side-tagging.log', // Writing to log file is ok
+            'if (defined(\'WP_DEBUG\') && WP_DEBUG)', // Wrapped in debug check is ok
+        ];
+        
+        function checkFile($file) {
+            global $violations, $allowed_patterns;
+            $content = file_get_contents($file);
+            $lines = explode("\n", $content);
+            
+            for ($i = 0; $i < count($lines); $i++) {
+                if (strpos($lines[$i], 'error_log') !== false) {
+                    $isAllowed = false;
+                    
+                    // Check if this line or nearby lines contain allowed patterns
+                    for ($j = max(0, $i-3); $j <= min(count($lines)-1, $i+3); $j++) {
+                        foreach ($allowed_patterns as $pattern) {
+                            if (strpos($lines[$j], $pattern) !== false) {
+                                $isAllowed = true;
+                                break 2;
+                            }
+                        }
+                    }
+                    
+                    if (!$isAllowed) {
+                        $violations[] = "$file:" . ($i+1) . ":" . trim($lines[$i]);
+                    }
+                }
+            }
+        }
+        
+        // Scan PHP files
+        $iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator('.'));
+        foreach ($iterator as $file) {
+            if ($file->isFile() && 
+                $file->getExtension() === 'php' && 
+                strpos($file->getPath(), '/vendor/') === false && 
+                strpos($file->getPath(), '/tests/') === false) {
+                checkFile($file->getPathname());
+            }
+        }
+        
+        if (!empty($violations)) {
+            echo "Found unwrapped error_log calls:\n";
+            foreach ($violations as $violation) {
+                echo "$violation\n";
+            }
+            exit(1);
+        } else {
+            echo "All error_log calls are properly wrapped or legitimate";
+        }
+        EOF
+        
+        php check_error_log.php

@@ -41,7 +41,9 @@ class GA4_Encryption_Util
             // Create JWT token with the plaintext as payload
             return self::create_jwt_token($plaintext, $key);
         } catch (\Exception $e) {
-            error_log('GA4 JWT Creation Error: ' . $e->getMessage());
+            if (defined('WP_DEBUG') && WP_DEBUG) {
+                error_log('GA4 JWT Creation Error: ' . $e->getMessage());
+            }
             return false;
         }
     }
@@ -70,7 +72,9 @@ class GA4_Encryption_Util
             // Verify and decode JWT token
             return self::verify_jwt_token($jwt_token, $key);
         } catch (\Exception $e) {
-            error_log('GA4 JWT Verification Error: ' . $e->getMessage());
+            if (defined('WP_DEBUG') && WP_DEBUG) {
+                error_log('GA4 JWT Verification Error: ' . $e->getMessage());
+            }
             return false;
         }
     }
@@ -456,7 +460,9 @@ class GA4_Encryption_Util
             
             return $decrypted_key;
         } catch (\Exception $e) {
-            error_log('GA4 Key Decryption Error: ' . $e->getMessage());
+            if (defined('WP_DEBUG') && WP_DEBUG) {
+                error_log('GA4 Key Decryption Error: ' . $e->getMessage());
+            }
             return false;
         }
     }
@@ -500,7 +506,9 @@ class GA4_Encryption_Util
             // No format validation for general keys - return as-is
             return $decrypted_key;
         } catch (\Exception $e) {
-            error_log('GA4 General Key Decryption Error: ' . $e->getMessage());
+            if (defined('WP_DEBUG') && WP_DEBUG) {
+                error_log('GA4 General Key Decryption Error: ' . $e->getMessage());
+            }
             return false;
         }
     }
@@ -560,7 +568,9 @@ class GA4_Encryption_Util
             }
             return update_option($option_name, $encrypted_key);
         } catch (\Exception $e) {
-            error_log('GA4 Key Storage Error: ' . $e->getMessage());
+            if (defined('WP_DEBUG') && WP_DEBUG) {
+                error_log('GA4 Key Storage Error: ' . $e->getMessage());
+            }
             return false;
         }
     }
@@ -674,7 +684,9 @@ class GA4_Encryption_Util
         } catch (\Exception $e) {
             // If current slot fails, try previous slot (for clock skew tolerance)
             try {
-                error_log('GA4 Time-based JWT: Current slot failed, trying previous slot. Error: ' . $e->getMessage());
+                if (defined('WP_DEBUG') && WP_DEBUG) {
+                    error_log('GA4 Time-based JWT: Current slot failed, trying previous slot. Error: ' . $e->getMessage());
+                }
                 
                 $previous_slot_key = self::generate_time_based_key_for_slot(floor(time() / 300) * 300 - 300);
                 $decrypted_json = self::verify_jwt_token($jwt_token, hex2bin($previous_slot_key));
@@ -685,10 +697,14 @@ class GA4_Encryption_Util
                     throw new \Exception('Failed to parse decrypted JSON from previous slot');
                 }
                 
-                error_log('GA4 Time-based JWT: Successfully decrypted with previous slot');
+                if (defined('WP_DEBUG') && WP_DEBUG) {
+                    error_log('GA4 Time-based JWT: Successfully decrypted with previous slot');
+                }
                 return $decrypted_data;
             } catch (\Exception $e2) {
-                error_log('GA4 Time-based JWT Verification Error (both slots failed): Current=' . $e->getMessage() . ', Previous=' . $e2->getMessage());
+                if (defined('WP_DEBUG') && WP_DEBUG) {
+                    error_log('GA4 Time-based JWT Verification Error (both slots failed): Current=' . $e->getMessage() . ', Previous=' . $e2->getMessage());
+                }
                 return false;
             }
         }
@@ -881,7 +897,9 @@ class GA4_Encryption_Util
                 throw new \Exception('Invalid permanent JWT payload format');
             }
         } catch (\Exception $e) {
-            error_log('GA4 Permanent JWT Decryption Error: ' . $e->getMessage());
+            if (defined('WP_DEBUG') && WP_DEBUG) {
+                error_log('GA4 Permanent JWT Decryption Error: ' . $e->getMessage());
+            }
             return false;
         }
     }
@@ -926,7 +944,9 @@ class GA4_Encryption_Util
             return wp_json_encode($headers);
         } catch (\Exception $e) {
             // Log encryption failure
-            error_log('GA4 Headers Encryption Error: ' . $e->getMessage());
+            if (defined('WP_DEBUG') && WP_DEBUG) {
+                error_log('GA4 Headers Encryption Error: ' . $e->getMessage());
+            }
             // Return unencrypted JSON if encryption fails
             return wp_json_encode($headers);
         }
@@ -1002,7 +1022,9 @@ class GA4_Encryption_Util
             return is_array($headers_data) ? $headers_data : array();
         } catch (\Exception $e) {
             // Log decryption failure
-            error_log('GA4 Headers Decryption Error: ' . $e->getMessage());
+            if (defined('WP_DEBUG') && WP_DEBUG) {
+                error_log('GA4 Headers Decryption Error: ' . $e->getMessage());
+            }
             // Return original data if decryption fails
             return is_array($headers_data) ? $headers_data : array();
         }
