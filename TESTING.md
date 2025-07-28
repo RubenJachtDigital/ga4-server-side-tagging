@@ -31,13 +31,19 @@ composer test
 ### Testing Scripts
 
 ```bash
-# Run all tests (unit + integration)
+# Run all tests (encryption + endpoint functionality)
 composer test
 
-# Run only unit tests
+# Run simple test suite (encryption functionality only)
+composer test:simple
+
+# Run endpoint standalone tests (GA4 API endpoint with user data)
+composer test:endpoint
+
+# Run unit tests with native WordPress bootstrap
 composer test:unit
 
-# Run only integration tests  
+# Run integration tests  
 composer test:integration
 
 # Run tests with coverage report
@@ -83,11 +89,14 @@ composer setup-tests
 ```
 tests/
 ├── unit/                    # Unit tests (isolated, fast)
-│   ├── EncryptionUtilTest.php
-│   └── EventLoggerTest.php
+│   ├── SimpleEncryptionTest.php     # Encryption functionality tests
+│   ├── EndpointStandaloneTest.php   # GA4 endpoint tests with user data
+│   ├── EncryptionUtilTest.php       # Legacy encryption tests
+│   └── EventLoggerTest.php          # Event logging tests
 ├── integration/             # Integration tests (with WordPress)
 │   └── EndpointTest.php
-├── bootstrap.php           # Test environment setup
+├── bootstrap-simple.php     # Simple test environment (no WordPress)
+├── bootstrap.php           # Full WordPress test environment setup
 ├── test-utilities.php      # Helper classes and utilities
 ├── phpunit6-compat.php     # PHPUnit compatibility
 └── README.md              # Test documentation
@@ -95,8 +104,53 @@ tests/
 
 ### Test Suites
 
-- **Unit Tests**: Fast, isolated tests that don't require WordPress
-- **Integration Tests**: Full tests with WordPress environment and database
+- **Simple Tests**: Fast, isolated encryption tests using `bootstrap-simple.php`
+- **Endpoint Tests**: GA4 API endpoint tests with real user data using mocked WordPress functions
+- **Unit Tests**: WordPress-integrated unit tests that require full WordPress environment
+- **Integration Tests**: Full end-to-end tests with WordPress environment and database
+
+### Expected Test Output
+
+When running `composer test`, you should see output like this:
+
+```
+PHPUnit 9.6.23 by Sebastian Bergmann and contributors.
+
+Simple Encryption
+ ✔ Encryption class exists
+ ✔ Encrypt method exists  
+ ✔ Decrypt method exists
+ ✔ Basic encryption
+ ✔ Encryption decryption cycle
+ ✔ Invalid key handling
+
+Endpoint Standalone (GA4ServerSideTagging\Tests\Unit\EndpointStandalone)
+ ✔ Successful event processing with provided data
+ ✔ Unified batch format processing
+ ✔ Empty request data handling
+ ✔ Empty events array handling
+ ✔ Malformed event handling
+ ✔ Consent status extraction
+ ✔ Header filtering
+ ✔ Event parameter data types
+ ✔ Legacy single event format transformation
+ ✔ Multiple events batch processing
+
+OK (16 tests, 45 assertions)
+```
+
+### New Endpoint Test Features
+
+The `EndpointStandaloneTest.php` uses the exact user-provided request data structure and validates:
+
+- **Real User Data**: Event processing with actual scroll tracking data from user requests
+- **Consent Handling**: Tests both GRANTED and DENIED consent scenarios
+- **Header Security**: Validates header filtering and security measures
+- **Error Handling**: Tests malformed requests and missing data scenarios
+- **Format Support**: Multiple event formats (unified batch, legacy single event)
+- **Bot Detection**: Integration with bot detection systems
+- **Data Types**: Various parameter data types (strings, integers, arrays, booleans)
+- **Mock-based**: Uses PHPUnit mocks instead of database dependencies for fast execution
 
 ## Configuration Files
 

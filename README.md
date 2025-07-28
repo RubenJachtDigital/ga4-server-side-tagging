@@ -507,95 +507,37 @@ Optimize for high-traffic sites:
 
 ## Testing
 
-The plugin includes a comprehensive Composer-based testing infrastructure:
+The plugin includes a comprehensive Composer-based testing infrastructure with both encryption tests and endpoint functionality tests.
 
-### **Available Test Commands:**
+### **Quick Start:**
 ```bash
-# Run all tests (default - simple encryption tests)
-composer test
-
-# Run simple test suite (encryption functionality)
-composer test:simple
-
-# Run unit tests with native bootstrap  
-composer test:unit
-
-# Run integration tests
-composer test:integration
-
-# Run tests with coverage report
-composer test:coverage
-
-# Check code style against WordPress standards
-composer cs:check
-
-# Fix code style issues automatically  
-composer cs:fix
-
-# Run PHPStan static analysis
-composer stan
-
-# Run PHP Mess Detector
-composer md
-
-# Check PHP syntax across all files
-composer lint
-```
-
-### **Test Features:**
-- ✅ **Standalone testing**: No WordPress installation required
-- ✅ **Encryption validation**: Tests JWT encryption/decryption functionality  
-- ✅ **WordPress-style autoloading**: Supports both PSR-4 and classmap autoloading
-- ✅ **Code quality tools**: PHPStan, PHPCS, PHPMD integration
-- ✅ **CI/CD ready**: GitHub Actions workflow included
-- ✅ **Coverage reports**: HTML and text coverage output
-- ✅ **Git integration**: Comprehensive .gitignore for development workflow
-
-### **Development Setup:**
-```bash
-# Clone and setup the development environment
-git clone <repository-url>
-cd ga4-server-side-tagging
-
-# Install Composer dependencies
+# Install dependencies
 composer install
 
-# Run the test suite  
+# Run all tests (16 tests, 45 assertions)
 composer test
 
-# Check code quality
-composer cs:check
-composer stan
+# Run specific test suites
+composer test:simple      # Encryption tests only
+composer test:endpoint    # GA4 endpoint tests with user data
+composer test:unit        # WordPress-integrated tests
 ```
 
-### **File Structure:**
+### **Key Features:**
+- ✅ **Standalone testing**: No WordPress installation required for basic tests
+- ✅ **Real user data**: Tests GA4 `/send-events` endpoint with actual user request data
+- ✅ **Mock-based testing**: PHPUnit mocks instead of database dependencies
+- ✅ **Comprehensive coverage**: 16 tests covering encryption, endpoints, consent, security
+- ✅ **Code quality tools**: PHPStan, PHPCS, PHPMD integration
+
+### **Expected Output:**
 ```
-ga4-server-side-tagging/
-├── .gitignore              # Git ignore rules for dev environment
-├── composer.json           # Dependencies and scripts
-├── phpunit.xml            # PHPUnit configuration
-├── tests/                 # Test files and bootstraps
-│   ├── bootstrap-simple.php
-│   ├── unit/
-│   └── integration/
-├── vendor/                # Composer dependencies (ignored)
-└── ...                    # Plugin files
+Simple Encryption (6 tests)
+Endpoint Standalone (10 tests) - Uses real user scroll tracking data
+OK (16 tests, 45 assertions)
 ```
 
-Expected output:
-```
-PHPUnit 9.6.23 by Sebastian Bergmann and contributors.
-
-Simple Encryption
- ✔ Encryption class exists
- ✔ Encrypt method exists  
- ✔ Decrypt method exists
- ✔ Basic encryption
- ✔ Encryption decryption cycle
- ✔ Invalid key handling
-
-OK (6 tests, 9 assertions)
-```
+For detailed testing documentation, setup instructions, advanced usage, and troubleshooting, see **[TESTING.md](TESTING.md)**.
 
 ## License
 
