@@ -40,7 +40,7 @@ class GA4_Server_Side_Tagging_Cron
      * @since    1.0.0
      * @param    GA4_Server_Side_Tagging_Logger    $logger    The logger instance.
      */
-    public function __construct(GA4_Server_Side_Tagging_Logger $logger = null)
+    public function __construct(?GA4_Server_Side_Tagging_Logger $logger = null)
     {
         $this->logger = $logger ?: new GA4_Server_Side_Tagging_Logger();
     }

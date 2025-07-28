@@ -323,7 +323,7 @@ class EndpointTest extends WP_UnitTestCase
         $data = $response->get_data();
         $this->assertTrue($data['success']);
         $this->assertGreaterThan(0, $data['events_queued']);
-        $this->assertStringContains('queued for batch processing', $data['message']);
+        $this->assertStringContainsString('queued for batch processing', $data['message']);
         
         // Verify event was stored in database
         global $wpdb;
@@ -481,7 +481,7 @@ class EndpointTest extends WP_UnitTestCase
         $this->assertEquals(403, $response->get_status());
         $data = $response->get_data();
         $this->assertArrayHasKey('error', $data);
-        $this->assertStringContains('blocked', $data['error']);
+        $this->assertStringContainsString('blocked', $data['error']);
         
         // Verify bot detection was logged
         global $wpdb;
@@ -515,7 +515,7 @@ class EndpointTest extends WP_UnitTestCase
                 $this->assertEquals(429, $response->get_status());
                 $data = $response->get_data();
                 $this->assertArrayHasKey('error', $data);
-                $this->assertStringContains('Rate limit exceeded', $data['error']);
+                $this->assertStringContainsString('Rate limit exceeded', $data['error']);
                 break;
             }
         }
@@ -611,7 +611,7 @@ class EndpointTest extends WP_UnitTestCase
         $this->assertEquals(400, $response->get_status());
         $data = $response->get_data();
         $this->assertArrayHasKey('error', $data);
-        $this->assertStringContains('Missing event name', $data['error']);
+        $this->assertStringContainsString('Missing event name', $data['error']);
     }
 
     /**

@@ -30,13 +30,7 @@
             "includes/",
             "admin/", 
             "public/"
-        ],
-        "psr-4": {
-            "GA4ServerSideTagging\\Utilities\\": "includes/",
-            "GA4ServerSideTagging\\Core\\": "includes/",
-            "GA4ServerSideTagging\\Admin\\": "admin/",
-            "GA4ServerSideTagging\\Public\\": "public/"
-        }
+        ]
     },
     "autoload-dev": {
         "psr-4": {
