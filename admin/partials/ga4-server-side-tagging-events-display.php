@@ -140,64 +140,20 @@ $current_page = floor($offset / $limit) + 1;
         <?php endif; ?>
     </div>
 
-    <!-- Filters Section -->
-    <div class="ga4-admin-section">
-        <h2><?php echo esc_html__('Filters & Search', 'ga4-server-side-tagging'); ?></h2>
-        <form method="get" action="">
-            <input type="hidden" name="page" value="ga4-server-side-tagging-events">
-            
-            <div style="display: flex; gap: 15px; flex-wrap: wrap; align-items: end; margin-bottom: 15px;">
-                <!-- Search -->
-                <div>
-                    <label for="search"><?php echo esc_html__('Search:', 'ga4-server-side-tagging'); ?></label><br>
-                    <input type="text" id="search" name="search" value="<?php echo esc_attr($search); ?>" 
-                           placeholder="ID, event name, IP, reason, user agent, payload..." style="width: 250px;">
-                </div>
-
-                <!-- Status Filter -->
-                <div>
-                    <label for="filter_status"><?php echo esc_html__('Status:', 'ga4-server-side-tagging'); ?></label><br>
-                    <select id="filter_status" name="filter_status">
-                        <option value=""><?php echo esc_html__('All Statuses', 'ga4-server-side-tagging'); ?></option>
-                        <option value="allowed" <?php selected($filter_status, 'allowed'); ?>><?php echo esc_html__('✅ Allowed', 'ga4-server-side-tagging'); ?></option>
-                        <option value="denied" <?php selected($filter_status, 'denied'); ?>><?php echo esc_html__('🚫 Denied', 'ga4-server-side-tagging'); ?></option>
-                        <option value="bot_detected" <?php selected($filter_status, 'bot_detected'); ?>><?php echo esc_html__('🤖 Bot Detected', 'ga4-server-side-tagging'); ?></option>
-                        <option value="error" <?php selected($filter_status, 'error'); ?>><?php echo esc_html__('⚠️ Error', 'ga4-server-side-tagging'); ?></option>
-                    </select>
-                </div>
-
-                <!-- Event Name Filter -->
-                <div>
-                    <label for="filter_event"><?php echo esc_html__('Event Type:', 'ga4-server-side-tagging'); ?></label><br>
-                    <select id="filter_event" name="filter_event">
-                        <option value=""><?php echo esc_html__('All Events', 'ga4-server-side-tagging'); ?></option>
-                        <?php foreach ($unique_events as $event_name) : ?>
-                            <option value="<?php echo esc_attr($event_name); ?>" <?php selected($filter_event, $event_name); ?>>
-                                <?php echo esc_html($event_name); ?>
-                            </option>
-                        <?php endforeach; ?>
-                    </select>
-                </div>
-
-                <!-- Per Page -->
-                <div>
-                    <label for="limit"><?php echo esc_html__('Per Page:', 'ga4-server-side-tagging'); ?></label><br>
-                    <select id="limit" name="limit">
-                        <option value="25" <?php selected($limit, 25); ?>>25</option>
-                        <option value="50" <?php selected($limit, 50); ?>>50</option>
-                        <option value="100" <?php selected($limit, 100); ?>>100</option>
-                        <option value="200" <?php selected($limit, 200); ?>>200</option>
-                    </select>
-                </div>
-
-                <!-- Submit -->
-                <div>
-                    <input type="submit" class="button button-primary" value="<?php echo esc_attr__('Filter', 'ga4-server-side-tagging'); ?>">
-                    <a href="<?php echo admin_url('admin.php?page=ga4-server-side-tagging-events'); ?>" class="button"><?php echo esc_html__('Clear', 'ga4-server-side-tagging'); ?></a>
-                </div>
-            </div>
-        </form>
-    </div>
+    <?php
+    // Prepare variables for search template
+    $page_slug = 'ga4-server-side-tagging-events';
+    $status_options = array(
+        'allowed' => '✅ Allowed',
+        'denied' => '🚫 Denied',
+        'bot_detected' => '🤖 Bot Detected',
+        'error' => '⚠️ Error'
+    );
+    $search_placeholder = 'ID, event name, IP, reason, user agent, payload...';
+    
+    // Include the reusable search template
+    include plugin_dir_path(__FILE__) . 'ga4-search-template.php';
+    ?>
 
     <!-- Management Section -->
     <div class="ga4-admin-section">
@@ -213,57 +169,6 @@ $current_page = floor($offset / $limit) + 1;
         </form>
     </div>
 
-    <!-- Results Info -->
-    <div class="ga4-admin-section">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
-            <div>
-                <strong><?php echo esc_html__('Results:', 'ga4-server-side-tagging'); ?></strong>
-                <?php echo sprintf(
-                    esc_html__('Showing %d-%d of %s events', 'ga4-server-side-tagging'),
-                    $offset + 1,
-                    min($offset + $limit, $total_events),
-                    number_format($total_events)
-                ); ?>
-                <?php if ($filter_status || $filter_event || $search) : ?>
-                    <span style="color: #666;"><?php echo esc_html__('(filtered)', 'ga4-server-side-tagging'); ?></span>
-                <?php endif; ?>
-            </div>
-            
-            <!-- Pagination -->
-            <?php if ($total_pages > 1) : ?>
-            <div class="tablenav-pages">
-                <?php
-                $base_url = admin_url('admin.php?page=ga4-server-side-tagging-events');
-                $query_args = array_filter(array(
-                    'filter_status' => $filter_status,
-                    'filter_event' => $filter_event,
-                    'search' => $search,
-                    'limit' => $limit
-                ));
-                
-                if ($current_page > 1) : ?>
-                    <a class="button" href="<?php echo esc_url(add_query_arg(array_merge($query_args, array('offset' => 0)), $base_url)); ?>">
-                        <?php echo esc_html__('« First', 'ga4-server-side-tagging'); ?>
-                    </a>
-                    <a class="button" href="<?php echo esc_url(add_query_arg(array_merge($query_args, array('offset' => ($current_page - 2) * $limit)), $base_url)); ?>">
-                        <?php echo esc_html__('‹ Previous', 'ga4-server-side-tagging'); ?>
-                    </a>
-                <?php endif; ?>
-                
-                <span style="margin: 0 10px;"><?php echo sprintf(esc_html__('Page %d of %d', 'ga4-server-side-tagging'), $current_page, $total_pages); ?></span>
-                
-                <?php if ($current_page < $total_pages) : ?>
-                    <a class="button" href="<?php echo esc_url(add_query_arg(array_merge($query_args, array('offset' => $current_page * $limit)), $base_url)); ?>">
-                        <?php echo esc_html__('Next ›', 'ga4-server-side-tagging'); ?>
-                    </a>
-                    <a class="button" href="<?php echo esc_url(add_query_arg(array_merge($query_args, array('offset' => ($total_pages - 1) * $limit)), $base_url)); ?>">
-                        <?php echo esc_html__('Last »', 'ga4-server-side-tagging'); ?>
-                    </a>
-                <?php endif; ?>
-            </div>
-            <?php endif; ?>
-        </div>
-    </div>
 
     <!-- Events Table -->
     <div class="ga4-admin-section">
