@@ -3,6 +3,7 @@
 namespace GA4ServerSideTagging\Core;
 
 use GA4ServerSideTagging\Core\GA4_Server_Side_Tagging_Logger;
+use GA4ServerSideTagging\Core\GA4_Cronjob_Manager;
 use GA4ServerSideTagging\API\GA4_Server_Side_Tagging_Endpoint;
 
 /**
@@ -168,76 +169,47 @@ class GA4_Server_Side_Tagging_Cron
 
     /**
      * Handle cleanup of old completed events.
+     * Updated to use unified table architecture.
      *
      * @since    1.0.0
      */
     public function handle_event_cleanup()
     {
-        global $wpdb;
-        
         try {
-            $table_name = $wpdb->prefix . 'ga4_event_queue';
+            // Get cleanup settings - use unified setting
+            $cleanup_days = get_option('ga4_event_cleanup_days', 7); // Default 7 days
             
-            // Get cleanup settings
-            $cleanup_days = get_option('ga4_queue_cleanup_days', 7); // Default 7 days
-            $max_completed_events = get_option('ga4_queue_max_completed', 10000); // Default 10k events
-            
-            // Clean up old completed events (older than X days)
-            $date_threshold = date('Y-m-d H:i:s', strtotime("-{$cleanup_days} days"));
-            
-            $deleted_old = $wpdb->query(
-                $wpdb->prepare(
-                    "DELETE FROM {$table_name} WHERE status = 'completed' AND processed_at < %s",
-                    $date_threshold
-                )
-            );
-            
-            // Clean up excess completed events (keep only the most recent X events)
-            $excess_events = $wpdb->get_var(
-                $wpdb->prepare(
-                    "SELECT COUNT(*) - %d FROM {$table_name} WHERE status = 'completed'",
-                    $max_completed_events
-                )
-            );
-            
-            $deleted_excess = 0;
-            if ($excess_events > 0) {
-                $wpdb->query(
-                    $wpdb->prepare(
-                        "DELETE FROM {$table_name} WHERE status = 'completed' ORDER BY processed_at ASC LIMIT %d",
-                        $excess_events
-                    )
-                );
-                $deleted_excess = $excess_events;
+            // Migrate from old separate settings if they exist
+            if ($cleanup_days === false || $cleanup_days == 7) {
+                $old_queue_days = get_option('ga4_queue_cleanup_days', 7);
+                $old_logs_days = get_option('ga4_event_logs_cleanup_days', 30);
+                
+                // Use the more conservative (lower) value for safety
+                $cleanup_days = min($old_queue_days, $old_logs_days);
+                
+                // Save the unified setting
+                update_option('ga4_event_cleanup_days', $cleanup_days);
             }
             
-            // Clean up very old failed events (older than 30 days)
-            $failed_date_threshold = date('Y-m-d H:i:s', strtotime('-30 days'));
-            $deleted_failed = $wpdb->query(
-                $wpdb->prepare(
-                    "DELETE FROM {$table_name} WHERE status = 'failed' AND created_at < %s",
-                    $failed_date_threshold
-                )
-            );
-            
-            $total_deleted = $deleted_old + $deleted_excess + $deleted_failed;
+            // Use the Cronjob Manager's cleanup method for unified table handling
+            $cronjob_manager = new GA4_Cronjob_Manager();
+            $total_deleted = $cronjob_manager->cleanup_old_events($cleanup_days);
             
             if ($total_deleted > 0) {
                 $this->logger->info(sprintf(
-                    'Event cleanup completed: %d old completed, %d excess completed, %d old failed events removed',
-                    $deleted_old,
-                    $deleted_excess,
-                    $deleted_failed
+                    'Automatic event cleanup completed: %d old events removed (older than %d days)',
+                    $total_deleted,
+                    $cleanup_days
+                ));
+            } else {
+                $this->logger->info(sprintf(
+                    'Automatic event cleanup completed: No events older than %d days found',
+                    $cleanup_days
                 ));
             }
             
-            // Optimize table if significant cleanup occurred
-            if ($total_deleted > 1000) {
-                $wpdb->query("OPTIMIZE TABLE {$table_name}");
-                $this->logger->info('Event queue table optimized after cleanup');
-            }
         } catch (\Exception $e) {
-            $this->logger->error('Event cleanup failed: ' . $e->getMessage());
+            $this->logger->error('Automatic event cleanup failed: ' . $e->getMessage());
         }
     }
 
