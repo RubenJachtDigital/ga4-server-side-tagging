@@ -132,12 +132,15 @@ class GA4_Server_Side_Tagging_Public
             return;
         }
 
+        // Add cache-busting for development/debug mode to ensure fresh script loading for all JS files
+        $script_version = get_option('ga4_server_side_tagging_debug_mode', false) ? time() : GA4_SERVER_SIDE_TAGGING_VERSION;
+
         // 1. First enqueue the utilities library (dependency for other scripts)
         wp_enqueue_script(
             'ga4-utilities',
             GA4_SERVER_SIDE_TAGGING_PLUGIN_URL . 'public/js/ga4-utilities.js',
             array('jquery'),
-            GA4_SERVER_SIDE_TAGGING_VERSION,
+            $script_version,
             false
         );
 
@@ -146,12 +149,9 @@ class GA4_Server_Side_Tagging_Public
             'ga4-server-side-tagging-consent-management',
             GA4_SERVER_SIDE_TAGGING_PLUGIN_URL . 'public/js/ga4-consent-manager.js',
             array('jquery', 'ga4-utilities'),
-            GA4_SERVER_SIDE_TAGGING_VERSION,
+            $script_version,
             false
         );
-
-        // Add cache-busting for development/debug mode to ensure fresh script loading
-        $script_version = (defined('WP_DEBUG') && WP_DEBUG) ? time() : GA4_SERVER_SIDE_TAGGING_VERSION;
         
         // 3. Enqueue the main tracking script (depends on both utilities and consent)
         wp_enqueue_script(

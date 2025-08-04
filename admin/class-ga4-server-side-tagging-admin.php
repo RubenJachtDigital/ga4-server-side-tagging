@@ -103,11 +103,14 @@ class GA4_Server_Side_Tagging_Admin
             return;
         }
 
+        // Add cache-busting for development/debug mode to ensure fresh script loading
+        $script_version = get_option('ga4_server_side_tagging_debug_mode', false) ? time() : GA4_SERVER_SIDE_TAGGING_VERSION;
+
         wp_enqueue_script(
             'ga4-server-side-tagging-admin',
             GA4_SERVER_SIDE_TAGGING_PLUGIN_URL . 'admin/js/ga4-server-side-tagging-admin.js',
             array('jquery'),
-            GA4_SERVER_SIDE_TAGGING_VERSION,
+            $script_version,
             false
         );
         
