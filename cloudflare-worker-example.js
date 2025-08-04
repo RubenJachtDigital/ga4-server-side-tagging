@@ -1779,8 +1779,9 @@ async function handleGA4Event(payload, request) {
   
   // Other potential internal fields that shouldn't reach GA4
   const internalFieldsToRemove = [
-    'session_id', 'batch', 'timestamp', 'client_ip', 'isCompleteData',
+    'batch', 'timestamp', 'client_ip', 'isCompleteData',
     'encryption_enabled', 'transmission_method', 'worker_api_key'
+    // NOTE: session_id is intentionally NOT removed - it should remain in event params for GA4
   ];
   
   internalFieldsToRemove.forEach(field => {

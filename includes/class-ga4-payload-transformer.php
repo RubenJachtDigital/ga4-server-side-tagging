@@ -656,6 +656,8 @@ class GA4_Payload_Transformer
 
     /**
      * Clean up params by removing fields that have been moved to top level
+     * 
+     * IMPORTANT: session_id should NEVER be removed - it stays in params for GA4 tracking
      *
      * @since    3.0.0
      * @param    array    $params    Event parameters to clean.
@@ -674,6 +676,7 @@ class GA4_Payload_Transformer
             'viewport_width', 'viewport_height', 'language', 'accept_language',
             // User identification (moved to top level)
             'user_id'
+            // NOTE: session_id is intentionally NOT removed - it should remain in event params
         );
         
         foreach ($fields_to_remove as $field) {
