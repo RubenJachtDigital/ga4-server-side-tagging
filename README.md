@@ -74,8 +74,8 @@ Browser JavaScript → WordPress REST API → Event Queue → Cloudflare Worker 
 ```
 
 **Encryption**:
-- Permanent JWT tokens (no expiry) for database storage
-- Event data encrypted with permanent keys
+- Permanent JWT tokens for secure database storage
+- Event data encrypted with strong permanent keys
 - Headers stored separately
 - Final payload can be encrypted before sending to Cloudflare
 
@@ -130,9 +130,8 @@ Browser JavaScript → WordPress REST API → Event Queue → Google Analytics
 ### Security & Privacy
 
 **JWT Encryption**:
-- Time-based JWTs: Short-lived tokens for direct transmission
-- Permanent JWTs: Long-term storage encryption for database (Methods 2 & 3)
-- Rotation-based encryption keys prevent replay attacks
+- Permanent JWTs: Long-term storage encryption for database and secure transmission
+- Strong encryption keys protect sensitive data
 - Headers never encrypted (performance optimization)
 
 **Data Privacy**:
