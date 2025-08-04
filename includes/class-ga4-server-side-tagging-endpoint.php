@@ -610,6 +610,7 @@ class GA4_Server_Side_Tagging_Endpoint
         if (!isset($original_body['events']) || !is_array($original_body['events'])) {
             $client_ip = $this->get_client_ip($request);
             $this->logger->warning('Encrypted endpoint accessed without valid events payload from IP: ' . $client_ip);
+            $event_name = $this->extract_event_name_from_request($original_body);
             
             $this->event_logger->create_event_record(
                 $request->get_body(),
@@ -617,8 +618,9 @@ class GA4_Server_Side_Tagging_Endpoint
                 $this->get_essential_headers($request),
                 false,
                 array(
-                    'event_name' => 'endpoint_access_violation',
+                    'event_name' => $event_name,
                     'reason' => 'Encrypted endpoint accessed without valid events payload',
+                    'error_type' => 'endpoint_access_violation',
                     'ip_address' => $client_ip,
                     'user_agent' => $request->get_header('user-agent'),
                     'url' => $request->get_header('origin'),
@@ -714,14 +716,16 @@ class GA4_Server_Side_Tagging_Endpoint
             // Perform bot detection for all requests (no authentication bypass for client requests)
             if ($this->is_bot_request($request)) {
                 // Log comprehensive bot detection details (single-row approach)
+                $event_name = $this->extract_event_name_from_request($request->get_json_params());
                 $this->event_logger->create_event_record(
                     $request->get_body(),
                     'bot_detected', // monitor_status
                     $this->get_essential_headers($request),
                     false,
                     array(
-                        'event_name' => 'unknown_request',
+                        'event_name' => $event_name,
                         'reason' => 'Multi-factor bot detection triggered',
+                        'error_type' => 'bot_request_blocked',
                         'ip_address' => $client_ip,
                         'user_agent' => $request->get_header('user-agent'),
                         'url' => $request->get_header('origin'),
@@ -745,14 +749,16 @@ class GA4_Server_Side_Tagging_Endpoint
             $rate_limit_check = $this->check_rate_limit($request);
             if (!$rate_limit_check['allowed']) {
                 // Log rate limiting event (single-row approach)
+                $event_name = $this->extract_event_name_from_request($request->get_json_params());
                 $this->event_logger->create_event_record(
                     substr($request->get_body(), 0, 1000) . '...', // Truncate large payloads
                     'denied', // monitor_status
                     $this->get_essential_headers($request),
                     false,
                     array(
-                        'event_name' => 'batch_request',
+                        'event_name' => $event_name,
                         'reason' => 'Rate limit exceeded: ' . $rate_limit_check['retry_after'] . 's retry',
+                        'error_type' => 'rate_limit_exceeded',
                         'ip_address' => $client_ip,
                         'user_agent' => $request->get_header('user-agent'),
                         'url' => $request->get_header('origin'),
@@ -780,6 +786,7 @@ class GA4_Server_Side_Tagging_Endpoint
             // Validate batch request structure
             if (empty($request_data)) {
                 $this->logger->error("Empty request data received");
+                $event_name = $this->extract_event_name_from_request($request->get_json_params());
                 
                 $this->event_logger->create_event_record(
                     $request->get_body(),
@@ -787,8 +794,9 @@ class GA4_Server_Side_Tagging_Endpoint
                     $this->get_essential_headers($request),
                     false,
                     array(
-                        'event_name' => 'data_validation_error',
+                        'event_name' => $event_name,
                         'reason' => 'Empty request data received',
+                        'error_type' => 'data_validation_error',
                         'ip_address' => $client_ip,
                         'user_agent' => $request->get_header('user-agent'),
                         'url' => $request->get_header('origin'),
@@ -804,14 +812,16 @@ class GA4_Server_Side_Tagging_Endpoint
             if (isset($request_data['events']) && is_array($request_data['events'])) {
                 // Unified batch structure - validate it
                 if (empty($request_data['events'])) {
+                    $event_name = $this->extract_event_name_from_request($request_data);
                     $this->event_logger->create_event_record(
                         $request->get_body(),
                         'error', // monitor_status
                         $this->get_essential_headers($request),
                         false,
                         array(
-                            'event_name' => 'data_validation_error',
+                            'event_name' => $event_name,
                             'reason' => 'Empty events array received',
+                            'error_type' => 'data_validation_error',
                             'ip_address' => $client_ip,
                             'user_agent' => $request->get_header('user-agent'),
                             'url' => $request->get_header('origin'),
@@ -826,14 +836,16 @@ class GA4_Server_Side_Tagging_Endpoint
                 // Validate each event in the batch
                 foreach ($request_data['events'] as $index => $event) {
                     if (!is_array($event)) {
+                        $event_name = $this->extract_event_name_from_request($request_data);
                         $this->event_logger->create_event_record(
                             $request->get_body(),
                             'error', // monitor_status
                             $this->get_essential_headers($request),
                             false,
                             array(
-                                'event_name' => 'data_validation_error',
+                                'event_name' => $event_name,
                                 'reason' => "Event at index {$index} is not an array",
+                                'error_type' => 'data_validation_error',
                                 'ip_address' => $client_ip,
                                 'user_agent' => $request->get_header('user-agent'),
                                 'url' => $request->get_header('origin'),
@@ -846,14 +858,16 @@ class GA4_Server_Side_Tagging_Endpoint
                     }
                     
                     if (!isset($event['name']) || empty($event['name'])) {
+                        $event_name = isset($event['name']) ? $event['name'] : 'unknown';
                         $this->event_logger->create_event_record(
                             $request->get_body(),
                             'error', // monitor_status
                             $this->get_essential_headers($request),
                             false,
                             array(
-                                'event_name' => 'data_validation_error',
+                                'event_name' => $event_name,
                                 'reason' => "Missing event name at index {$index}",
+                                'error_type' => 'data_validation_error',
                                 'ip_address' => $client_ip,
                                 'user_agent' => $request->get_header('user-agent'),
                                 'url' => $request->get_header('origin'),
@@ -902,14 +916,16 @@ class GA4_Server_Side_Tagging_Endpoint
                     $request_data['consent'] = $consent_data;
                 }
             } else {
+                $event_name = $this->extract_event_name_from_request($request_data);
                 $this->event_logger->create_event_record(
                     $request->get_body(),
                     'error', // monitor_status
                     $this->get_essential_headers($request),
                     false,
                     array(
-                        'event_name' => 'data_validation_error',
+                        'event_name' => $event_name,
                         'reason' => 'Missing events array or single event data',
+                        'error_type' => 'data_validation_error',
                         'ip_address' => $client_ip,
                         'user_agent' => $request->get_header('user-agent'),
                         'url' => $request->get_header('origin'),
@@ -1061,14 +1077,16 @@ class GA4_Server_Side_Tagging_Endpoint
             $processing_time = round((microtime(true) - $start_time) * 1000, 2);
             $this->logger->error("Failed to process batch events request for session: {$session_id} after {$processing_time}ms: " . $e->getMessage());
             
+            $event_name = $this->extract_event_name_from_request($request->get_json_params());
             $this->event_logger->create_event_record(
                 $request->get_body(),
                 'error', // monitor_status
                 $this->get_essential_headers($request),
                 false,
                 array(
-                    'event_name' => 'system_error',
+                    'event_name' => $event_name,
                     'reason' => 'Processing exception: ' . $e->getMessage(),
+                    'error_type' => 'system_error',
                     'ip_address' => $client_ip,
                     'user_agent' => $request->get_header('user-agent'),
                     'url' => $request->get_header('origin'),
@@ -1102,6 +1120,7 @@ class GA4_Server_Side_Tagging_Endpoint
         
         if (empty($cloudflare_url)) {
             $client_ip = $this->get_client_ip($request);
+            $event_name = isset($request_data['events'][0]['name']) ? $request_data['events'][0]['name'] : 'unknown';
             
             $this->event_logger->create_event_record(
                 $request->get_body(),
@@ -1109,8 +1128,9 @@ class GA4_Server_Side_Tagging_Endpoint
                 $this->get_essential_headers($request),
                 false,
                 array(
-                    'event_name' => 'configuration_error',
+                    'event_name' => $event_name,
                     'reason' => 'Cloudflare Worker URL not configured',
+                    'error_type' => 'configuration_error',
                     'ip_address' => $client_ip,
                     'user_agent' => $request->get_header('user-agent'),
                     'url' => $request->get_header('origin'),
@@ -1153,7 +1173,28 @@ class GA4_Server_Side_Tagging_Endpoint
                 }
                 return new \WP_REST_Response($response_data, 200);
             } else {
-                // Events failed to send - logging handled by main flow to prevent duplicate entries
+                // Events failed to send - log with payload for debugging
+                $client_ip = $this->get_client_ip($request);
+                $event_name = isset($batch_payload['events'][0]['name']) ? $batch_payload['events'][0]['name'] : 'unknown';
+                
+                $this->event_logger->create_event_record(
+                    json_encode($batch_payload, JSON_PRETTY_PRINT),
+                    'error', // monitor_status
+                    $this->get_essential_headers($request),
+                    false,
+                    array(
+                        'event_name' => $event_name,
+                        'reason' => 'Failed to send batch events to Cloudflare: ' . $result['error'],
+                        'error_type' => 'cloudflare_send_failed',
+                        'ip_address' => $client_ip,
+                        'user_agent' => $request->get_header('user-agent'),
+                        'url' => $request->get_header('origin'),
+                        'referrer' => $request->get_header('referer'),
+                        'session_id' => $session_id,
+                        'event_count' => $event_count,
+                        'processing_time_ms' => $processing_time
+                    )
+                );
 
                 $this->logger->error("Failed to send batch events to Cloudflare for session: {$session_id} after {$processing_time}ms: " . $result['error']);
                 return new \WP_REST_Response(array(
@@ -1372,6 +1413,25 @@ class GA4_Server_Side_Tagging_Endpoint
         $encryption_key = GA4_Encryption_Util::retrieve_encrypted_key('ga4_jwt_encryption_key') ?: '';
 
         if (empty($encryption_key)) {
+            $client_ip = $this->get_client_ip($request);
+            $event_name = $this->extract_event_name_from_request($request_body);
+            
+            $this->event_logger->create_event_record(
+                $request->get_body(),
+                'error', // monitor_status
+                $this->get_essential_headers($request),
+                false,
+                array(
+                    'event_name' => $event_name,
+                    'reason' => 'Encryption is enabled but no permanent encryption key is configured',
+                    'error_type' => 'encryption_key_missing',
+                    'ip_address' => $client_ip,
+                    'user_agent' => $request->get_header('user-agent'),
+                    'url' => $request->get_header('origin'),
+                    'referrer' => $request->get_header('referer')
+                )
+            );
+            
             throw new \Exception('Encryption is enabled but no permanent encryption key is configured');
         }
 
@@ -1379,7 +1439,26 @@ class GA4_Server_Side_Tagging_Endpoint
             $decrypted_data = GA4_Encryption_Util::parse_encrypted_request($request_body, $encryption_key);
             return $decrypted_data;
         } catch (\Exception $e) {
-            $this->logger->error('Failed to verify permanent JWT request from IP ' . $this->get_client_ip($request) . ': ' . $e->getMessage());
+            $client_ip = $this->get_client_ip($request);
+            $this->logger->error('Failed to verify permanent JWT request from IP ' . $client_ip . ': ' . $e->getMessage());
+            $event_name = $this->extract_event_name_from_request($request_body);
+            
+            $this->event_logger->create_event_record(
+                $request->get_body(),
+                'error', // monitor_status
+                $this->get_essential_headers($request),
+                false,
+                array(
+                    'event_name' => $event_name,
+                    'reason' => 'Permanent JWT request verification failed: ' . $e->getMessage(),
+                    'error_type' => 'jwt_decryption_failed',
+                    'ip_address' => $client_ip,
+                    'user_agent' => $request->get_header('user-agent'),
+                    'url' => $request->get_header('origin'),
+                    'referrer' => $request->get_header('referer')
+                )
+            );
+            
             throw new \Exception('Permanent JWT request verification failed: ' . $e->getMessage());
         }
     }
@@ -2141,5 +2220,52 @@ class GA4_Server_Side_Tagging_Endpoint
             'timestamp' => current_time('mysql'),
             'detection_threshold' => 2
         );
+    }
+
+    /**
+     * Extract event name from request data for error logging
+     *
+     * @since    3.0.0
+     * @param    array    $request_data    The request data (could be encrypted or decrypted).
+     * @return   string                   The event name or 'unknown'.
+     */
+    private function extract_event_name_from_request($request_data)
+    {
+        if (empty($request_data) || !is_array($request_data)) {
+            return 'unknown';
+        }
+
+        // Try to extract from events array (batch format)
+        if (isset($request_data['events']) && is_array($request_data['events']) && !empty($request_data['events'])) {
+            if (isset($request_data['events'][0]['name'])) {
+                return $request_data['events'][0]['name'];
+            }
+        }
+
+        // Try legacy single event format
+        if (isset($request_data['event_name'])) {
+            return $request_data['event_name'];
+        }
+        if (isset($request_data['name'])) {
+            return $request_data['name'];
+        }
+
+        // For encrypted JWT payloads, try to get from 'jwt' field by parsing it
+        if (isset($request_data['jwt']) && is_string($request_data['jwt'])) {
+            try {
+                // Try to decode the JWT payload section (without verification for event name extraction)
+                $jwt_parts = explode('.', $request_data['jwt']);
+                if (count($jwt_parts) >= 2) {
+                    $payload = json_decode(base64_decode($jwt_parts[1]), true);
+                    if (is_array($payload)) {
+                        return $this->extract_event_name_from_request($payload);
+                    }
+                }
+            } catch (\Exception $e) {
+                // Ignore JWT parsing errors for event name extraction
+            }
+        }
+
+        return 'unknown';
     }
 }
