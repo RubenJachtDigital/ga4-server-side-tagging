@@ -294,7 +294,8 @@ class GA4_Encryption_Util
             throw new \Exception('No JWT token found in request');
         }
         
-        $decrypted_json = self::decrypt($request_data['jwt'], $encryption_key);
+        // Use permanent JWT decryption for server-side encrypted payloads
+        $decrypted_json = self::decrypt_permanent_jwt_token($request_data['jwt'], $encryption_key);
         
         if ($decrypted_json === false) {
             throw new \Exception('Failed to verify JWT token');

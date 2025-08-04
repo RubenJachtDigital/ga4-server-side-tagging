@@ -663,7 +663,9 @@ class GA4_Server_Side_Tagging_Endpoint
             $new_request->set_body(wp_json_encode($encrypted_body));
             $new_request->set_header('content-type', 'application/json');
             
-            // Add a header to indicate this was encrypted server-side
+            // Add header to indicate this is encrypted (so it gets decrypted properly)
+            $new_request->set_header('X-Encrypted', 'true');
+            // Also add a header to indicate this was encrypted server-side for debugging
             $new_request->set_header('X-Server-Side-Encrypted', 'true');
             
             // Delegate to the main send_events method with encrypted payload
