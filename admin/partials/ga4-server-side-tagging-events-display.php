@@ -179,21 +179,6 @@ $current_page = floor($offset / $limit) + 1;
         </div>
     </div>
 
-    <?php
-    // Prepare variables for search template
-    $page_slug = 'ga4-server-side-tagging-events';
-    $status_options = array(
-        'allowed' => '✅ Allowed',
-        'denied' => '🚫 Denied',
-        'bot_detected' => '🤖 Bot Detected',
-        'error' => '⚠️ Error'
-    );
-    $search_placeholder = 'ID, event name, IP, reason, user agent, payload...';
-    
-    // Include the reusable search template
-    include plugin_dir_path(__FILE__) . 'ga4-search-template.php';
-    ?>
-
     <!-- Management Section -->
     <div class="ga4-admin-section">
         <h2><?php echo esc_html__('Management', 'ga4-server-side-tagging'); ?></h2>
@@ -207,6 +192,21 @@ $current_page = floor($offset / $limit) + 1;
             <p class="description"><?php echo esc_html__('Remove event logs older than the specified number of days to keep the database clean.', 'ga4-server-side-tagging'); ?></p>
         </form>
     </div>
+
+    <?php
+    // Prepare variables for search template
+    $page_slug = 'ga4-server-side-tagging-events';
+    $status_options = array(
+        'allowed' => '✅ Allowed',
+        'denied' => '🚫 Denied',
+        'bot_detected' => '🤖 Bot Detected',
+        'error' => '⚠️ Error'
+    );
+    $search_placeholder = 'ID, event name, IP, reason, user agent, URL, referrer, session ID, payload data...';
+    
+    // Include the reusable search template
+    include plugin_dir_path(__FILE__) . 'ga4-search-template.php';
+    ?>
 
 
     <!-- Events Table -->
