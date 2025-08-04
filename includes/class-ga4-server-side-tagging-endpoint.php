@@ -715,25 +715,28 @@ class GA4_Server_Side_Tagging_Endpoint
         try {
             // Perform bot detection for all requests (no authentication bypass for client requests)
             if ($this->is_bot_request($request)) {
-                // Log comprehensive bot detection details (single-row approach)
-                $event_name = $this->extract_event_name_from_request($request->get_json_params());
-                $this->event_logger->create_event_record(
-                    $request->get_body(),
-                    'bot_detected', // monitor_status
-                    $this->get_essential_headers($request),
-                    false,
-                    array(
-                        'event_name' => $event_name,
-                        'reason' => 'Multi-factor bot detection triggered',
-                        'error_type' => 'bot_request_blocked',
-                        'ip_address' => $client_ip,
-                        'user_agent' => $request->get_header('user-agent'),
-                        'url' => $request->get_header('origin'),
-                        'referrer' => $request->get_header('referer'),
-                        'session_id' => $session_id,
-                        'bot_detection_rules' => $this->get_bot_detection_details($request)
-                    )
-                );
+                // Log comprehensive bot detection details only if extensive error logging is enabled
+                $extensive_error_logging = get_option('ga4_extensive_error_logging', false);
+                if ($extensive_error_logging) {
+                    $event_name = $this->extract_event_name_from_request($request->get_json_params());
+                    $this->event_logger->create_event_record(
+                        $request->get_body(),
+                        'bot_detected', // monitor_status
+                        $this->get_essential_headers($request),
+                        false,
+                        array(
+                            'event_name' => $event_name,
+                            'reason' => 'Multi-factor bot detection triggered',
+                            'error_type' => 'bot_request_blocked',
+                            'ip_address' => $client_ip,
+                            'user_agent' => $request->get_header('user-agent'),
+                            'url' => $request->get_header('origin'),
+                            'referrer' => $request->get_header('referer'),
+                            'session_id' => $session_id,
+                            'bot_detection_rules' => $this->get_bot_detection_details($request)
+                        )
+                    );
+                }
 
                 $this->logger->warning("Bot detected attempting to send events - blocked from database storage. IP: {$client_ip}, User-Agent: " . $request->get_header('user-agent') . ", Referer: " . $request->get_header('referer'));
                 return new \WP_REST_Response(
@@ -748,24 +751,27 @@ class GA4_Server_Side_Tagging_Endpoint
             // Rate limiting check - 100 requests per minute per IP
             $rate_limit_check = $this->check_rate_limit($request);
             if (!$rate_limit_check['allowed']) {
-                // Log rate limiting event (single-row approach)
-                $event_name = $this->extract_event_name_from_request($request->get_json_params());
-                $this->event_logger->create_event_record(
-                    substr($request->get_body(), 0, 1000) . '...', // Truncate large payloads
-                    'denied', // monitor_status
-                    $this->get_essential_headers($request),
-                    false,
-                    array(
-                        'event_name' => $event_name,
-                        'reason' => 'Rate limit exceeded: ' . $rate_limit_check['retry_after'] . 's retry',
-                        'error_type' => 'rate_limit_exceeded',
-                        'ip_address' => $client_ip,
-                        'user_agent' => $request->get_header('user-agent'),
-                        'url' => $request->get_header('origin'),
-                        'referrer' => $request->get_header('referer'),
-                        'session_id' => $session_id
-                    )
-                );
+                // Log rate limiting event only if extensive error logging is enabled
+                $extensive_error_logging = get_option('ga4_extensive_error_logging', false);
+                if ($extensive_error_logging) {
+                    $event_name = $this->extract_event_name_from_request($request->get_json_params());
+                    $this->event_logger->create_event_record(
+                        substr($request->get_body(), 0, 1000) . '...', // Truncate large payloads
+                        'denied', // monitor_status
+                        $this->get_essential_headers($request),
+                        false,
+                        array(
+                            'event_name' => $event_name,
+                            'reason' => 'Rate limit exceeded: ' . $rate_limit_check['retry_after'] . 's retry',
+                            'error_type' => 'rate_limit_exceeded',
+                            'ip_address' => $client_ip,
+                            'user_agent' => $request->get_header('user-agent'),
+                            'url' => $request->get_header('origin'),
+                            'referrer' => $request->get_header('referer'),
+                            'session_id' => $session_id
+                        )
+                    );
+                }
 
                 $this->logger->warning("Rate limit exceeded for IP: {$client_ip} - rejected batch request");
                 return new \WP_REST_Response(
@@ -949,25 +955,29 @@ class GA4_Server_Side_Tagging_Endpoint
             // WordPress-side bot detection (mirrors Cloudflare Worker logic)
             $bot_detection_result = $this->detect_bot_from_event_data($request, $request_data);
             if ($bot_detection_result['is_bot']) {
-                    // Log each event as bot detected
-                foreach ($request_data['events'] as $event) {
-                    $this->event_logger->create_event_record(
-                        json_encode($request_data, JSON_PRETTY_PRINT),
-                        'bot_detected', // monitor_status
-                        $this->get_essential_headers($request),
-                        false,
-                        array(
-                            'event_name' => $event['name'] ?? 'unknown',
-                            'reason' => 'WordPress-side bot detection: Score ' . $bot_detection_result['score'] . '/100',
-                            'ip_address' => $client_ip,
-                            'user_agent' => $request->get_header('user-agent'),
-                            'url' => $request->get_header('origin'),
-                            'referrer' => $request->get_header('referer'),
-                            'session_id' => $session_id,
-                            'consent_given' => $this->extract_consent_status($request_data),
-                            'bot_detection_rules' => array_merge($this->get_bot_detection_details($request), $bot_detection_result)
-                        )
-                    );
+                // Log each event as bot detected only if extensive error logging is enabled
+                $extensive_error_logging = get_option('ga4_extensive_error_logging', false);
+                if ($extensive_error_logging) {
+                    foreach ($request_data['events'] as $event) {
+                        $this->event_logger->create_event_record(
+                            json_encode($request_data, JSON_PRETTY_PRINT),
+                            'bot_detected', // monitor_status
+                            $this->get_essential_headers($request),
+                            false,
+                            array(
+                                'event_name' => $event['name'] ?? 'unknown',
+                                'reason' => 'WordPress-side bot detection: Score ' . $bot_detection_result['score'] . '/100',
+                                'error_type' => 'wordpress_bot_detection',
+                                'ip_address' => $client_ip,
+                                'user_agent' => $request->get_header('user-agent'),
+                                'url' => $request->get_header('origin'),
+                                'referrer' => $request->get_header('referer'),
+                                'session_id' => $session_id,
+                                'consent_given' => $this->extract_consent_status($request_data),
+                                'bot_detection_rules' => array_merge($this->get_bot_detection_details($request), $bot_detection_result)
+                            )
+                        );
+                    }
                 }
 
                     $this->logger->warning("Bot detected via WordPress endpoint - blocked from processing. IP: {$client_ip}, User-Agent: " . $request->get_header('user-agent') . ", Bot Score: {$bot_detection_result['score']}, Reasons: " . implode(', ', $bot_detection_result['reasons']) . ", Event Count: " . count($request_data['events']));
@@ -1245,7 +1255,35 @@ class GA4_Server_Side_Tagging_Endpoint
             'timestamp' => current_time('mysql')
         );
 
+        // Always log to file-based logger
         $this->logger->log_data($failure_data, 'Security Failure');
+        
+        // Also log to Event Monitor database if extensive error logging is enabled
+        $extensive_error_logging = get_option('ga4_extensive_error_logging', false);
+        if ($extensive_error_logging) {
+            $event_name = $this->extract_event_name_from_request($request->get_json_params());
+            
+            // Map failure types to monitor status
+            $monitor_status = ($failure_type === 'BOT_DETECTED') ? 'bot_detected' : 'denied';
+            
+            $this->event_logger->create_event_record(
+                $request->get_body(),
+                $monitor_status, // monitor_status
+                $this->get_essential_headers($request),
+                false,
+                array(
+                    'event_name' => $event_name,
+                    'reason' => $message,
+                    'error_type' => strtolower($failure_type),
+                    'ip_address' => $client_ip,
+                    'user_agent' => $user_agent,
+                    'url' => $request->get_header('origin'),
+                    'referrer' => $request->get_header('referer'),
+                    'endpoint' => $endpoint,
+                    'security_failure_type' => $failure_type
+                )
+            );
+        }
     }
 
 

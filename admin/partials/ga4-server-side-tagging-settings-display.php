@@ -28,6 +28,7 @@ $worker_api_key = \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::retrieve_
 $measurement_id = get_option('ga4_measurement_id', '');
 $api_secret = get_option('ga4_api_secret', '');
 $debug_mode = get_option('ga4_server_side_tagging_debug_mode', false);
+$extensive_error_logging = get_option('ga4_extensive_error_logging', false);
 $ecommerce_tracking = get_option('ga4_ecommerce_tracking', true);
 $track_logged_in_users = get_option('ga4_track_logged_in_users', true);
 $yith_raq_form_id = get_option('ga4_yith_raq_form_id', '');
@@ -196,6 +197,16 @@ $batch_size = get_option('ga4_event_batch_size', 1000);
                                     Enable debug logging
                                 </label>
                                 <p class="description">Enable detailed logging for troubleshooting. Logs can be viewed in the Tagging Logs page.</p>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th scope="row">Extensive Error Logging</th>
+                            <td>
+                                <label for="ga4_extensive_error_logging">
+                                    <input type="checkbox" id="ga4_extensive_error_logging" name="ga4_extensive_error_logging" <?php checked($extensive_error_logging); ?> />
+                                    Log all errors to database (including bot detection and rate limiting)
+                                </label>
+                                <p class="description">When enabled, all errors including bot detection, rate limiting, and other filtered events will be stored in the Event Monitor database for analysis. <strong>Warning:</strong> This can generate large amounts of data with high bot traffic.</p>
                             </td>
                         </tr>
                         <tr>

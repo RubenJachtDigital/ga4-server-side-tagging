@@ -29,6 +29,17 @@ if (isset($_POST['cleanup_logs']) && wp_verify_nonce($_POST['_wpnonce'], 'ga4_cl
     echo '<div class="notice notice-success is-dismissible"><p>Cleaned up ' . $cleaned . ' event logs older than ' . $days . ' days.</p></div>';
 }
 
+// Handle extensive error logging toggle
+if (isset($_POST['toggle_extensive_error_logging']) && wp_verify_nonce($_POST['_wpnonce'], 'ga4_toggle_extensive_logging')) {
+    $current_setting = get_option('ga4_extensive_error_logging', false);
+    $new_setting = !$current_setting;
+    update_option('ga4_extensive_error_logging', $new_setting);
+    
+    $status = $new_setting ? 'enabled' : 'disabled';
+    $message = sprintf('Extensive error logging has been %s. This affects bot detection and rate limiting event storage.', $status);
+    echo '<div class="notice notice-success is-dismissible"><p>' . esc_html($message) . '</p></div>';
+}
+
 // Get the unified cleanup days setting (default: 7 days)
 // Migrate from old separate settings if they exist
 $event_cleanup_days = get_option('ga4_event_cleanup_days');
@@ -138,6 +149,34 @@ $current_page = floor($offset / $limit) + 1;
             </div>
         </div>
         <?php endif; ?>
+    </div>
+
+    <!-- Extensive Error Logging Section -->
+    <div class="ga4-admin-section">
+        <h2><?php echo esc_html__('Extensive Error Logging Settings', 'ga4-server-side-tagging'); ?></h2>
+        <?php $extensive_error_logging = get_option('ga4_extensive_error_logging', false); ?>
+        <div style="display: flex; align-items: center; gap: 15px; padding: 15px; background: <?php echo $extensive_error_logging ? '#d4edda' : '#f8f9fa'; ?>; border-radius: 5px; border-left: 4px solid <?php echo $extensive_error_logging ? '#28a745' : '#6c757d'; ?>;">
+            <div>
+                <strong><?php echo esc_html__('Status:', 'ga4-server-side-tagging'); ?></strong>
+                <span style="color: <?php echo $extensive_error_logging ? '#28a745' : '#dc3545'; ?>; font-weight: bold;">
+                    <?php echo $extensive_error_logging ? 'ENABLED' : 'DISABLED'; ?>
+                </span>
+            </div>
+            <form method="post" style="margin: 0;">
+                <?php wp_nonce_field('ga4_toggle_extensive_logging'); ?>
+                <input type="submit" name="toggle_extensive_error_logging" 
+                       class="button <?php echo $extensive_error_logging ? 'button-secondary' : 'button-primary'; ?>" 
+                       value="<?php echo $extensive_error_logging ? 'Disable Extensive Logging' : 'Enable Extensive Logging'; ?>" />
+            </form>
+        </div>
+        <div style="margin-top: 10px; font-size: 13px; color: #666;">
+            <p><strong><?php echo esc_html__('What is Extensive Error Logging?', 'ga4-server-side-tagging'); ?></strong></p>
+            <ul style="margin: 5px 0 0 20px;">
+                <li><?php echo esc_html__('When ENABLED: All errors including bot detection, rate limiting, and blocked requests are stored in the database for analysis.', 'ga4-server-side-tagging'); ?></li>
+                <li><?php echo esc_html__('When DISABLED: Only critical errors (validation failures, system errors, etc.) are stored. Bot and rate limit blocks are not logged to save database space.', 'ga4-server-side-tagging'); ?></li>
+                <li style="color: #dc3545;"><strong><?php echo esc_html__('Warning:', 'ga4-server-side-tagging'); ?></strong> <?php echo esc_html__('Enabling this with high bot traffic can generate large amounts of data.', 'ga4-server-side-tagging'); ?></li>
+            </ul>
+        </div>
     </div>
 
     <?php
