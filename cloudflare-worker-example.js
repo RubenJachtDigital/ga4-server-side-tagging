@@ -1409,16 +1409,16 @@ async function handleRequest(request, env) {
         try {
           // Handle different JWT formats based on request type
           if (requestType === "wp_encrypted") {
-            // WordPress encrypted requests use time_jwt format
-            if (payload.time_jwt) {
-              const decryptedData = await decrypt(payload.time_jwt, ENCRYPTION_KEY);
+            // WordPress encrypted requests use permanent JWT format
+            if (payload.jwt) {
+              const decryptedData = await decrypt(payload.jwt, ENCRYPTION_KEY);
               payload = JSON.parse(decryptedData);
               
               if (DEBUG_MODE) {
                 console.log("Decrypted WordPress payload:", JSON.stringify(payload));
               }
             } else {
-              console.warn("❌ WordPress encrypted request but no time_jwt token found");
+              console.warn("❌ WordPress encrypted request but no JWT token found");
               if (DEBUG_MODE) {
                 console.log("Available payload fields:", Object.keys(payload));
                 console.log("Full payload:", JSON.stringify(payload));

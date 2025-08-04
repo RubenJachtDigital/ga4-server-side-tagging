@@ -783,8 +783,7 @@ class GA4_Event_Logger
 
     /**
      * Process encrypted payload for database storage
-     * - Decrypt time_jwt if present
-     * - Re-encrypt with permanent key if encryption is enabled
+     * - Handle permanent JWT encryption if present
      * - Store encrypted or plain data based on settings
      *
      * @since    2.1.0
@@ -808,25 +807,6 @@ class GA4_Event_Logger
             
             // Try to parse as JSON first to see if it might be encrypted
             $payload_data = json_decode($payload, true);
-            $decrypted_data = null;
-            
-            // Check for time-based JWT encryption first
-            if (is_array($payload_data) && isset($payload_data['time_jwt']) && !empty($payload_data['time_jwt'])) {
-                $decrypted_data = \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::verify_time_based_jwt($payload_data['time_jwt']);
-                if ($decrypted_data !== false) {
-                    // Successfully decrypted time_jwt
-                    if ($encryption_enabled && $encryption_key) {
-                        // Re-encrypt with permanent key for database storage
-                        $payload_to_encrypt = is_array($decrypted_data) ? json_encode($decrypted_data) : $decrypted_data;
-                        $re_encrypted = \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::encrypt($payload_to_encrypt, $encryption_key);
-                        if ($re_encrypted !== false) {
-                            return $re_encrypted; // Store re-encrypted data
-                        }
-                    }
-                    // If re-encryption fails or is disabled, store decrypted data
-                    return is_array($decrypted_data) ? json_encode($decrypted_data, JSON_PRETTY_PRINT) : $decrypted_data;
-                }
-            }
 
             // Try regular JWT with stored encryption key (already encrypted with permanent key)
             if ($encryption_enabled && $encryption_key) {

@@ -597,8 +597,7 @@ class GA4_Server_Side_Tagging_Endpoint
      */
     public function send_events_encrypted($request)
     {
-        // Force the request to be treated as encrypted for processing
-        // This allows sendBeacon to work without X-Encrypted header
+        // This endpoint receives unencrypted payloads and encrypts them server-side using permanent encryption
         $original_body = $request->get_json_params();
         
         // SECURITY: For encrypted endpoint, we use enhanced session validation instead of URL nonces
@@ -607,10 +606,10 @@ class GA4_Server_Side_Tagging_Endpoint
         // The session-based validation happens in check_strong_permission() which is already
         // applied to this route, providing adequate security for encrypted requests
         
-        // Additional validation: Ensure request contains encrypted JWT data
-        if (!isset($original_body['time_jwt']) || empty($original_body['time_jwt'])) {
+        // Validate that we have a valid payload structure (events array expected)
+        if (!isset($original_body['events']) || !is_array($original_body['events'])) {
             $client_ip = $this->get_client_ip($request);
-            $this->logger->warning('Encrypted endpoint accessed without encrypted payload from IP: ' . $client_ip);
+            $this->logger->warning('Encrypted endpoint accessed without valid events payload from IP: ' . $client_ip);
             
             $this->event_logger->create_event_record(
                 $request->get_body(),
@@ -619,7 +618,7 @@ class GA4_Server_Side_Tagging_Endpoint
                 false,
                 array(
                     'event_name' => 'endpoint_access_violation',
-                    'reason' => 'Encrypted endpoint accessed without encrypted payload',
+                    'reason' => 'Encrypted endpoint accessed without valid events payload',
                     'ip_address' => $client_ip,
                     'user_agent' => $request->get_header('user-agent'),
                     'url' => $request->get_header('origin'),
@@ -632,9 +631,68 @@ class GA4_Server_Side_Tagging_Endpoint
                 400
             );
         }
-      
-        // Delegate to the main send_events method - it already handles encrypted requests
-        return $this->send_events($request);
+        
+        // Check if encryption is enabled
+        $encryption_enabled = get_option('ga4_jwt_encryption_enabled', false);
+        if (!$encryption_enabled) {
+            // If encryption is not enabled, treat as regular unencrypted request
+            return $this->send_events($request);
+        }
+        
+        try {
+            // Get encryption key
+            $encryption_key = GA4_Encryption_Util::retrieve_encrypted_key('ga4_jwt_encryption_key');
+            if (!$encryption_key) {
+                throw new \Exception('Encryption is enabled but no encryption key is configured');
+            }
+            
+            // Encrypt the payload using permanent JWT encryption
+            $payload_json = wp_json_encode($original_body);
+            $encrypted_jwt = GA4_Encryption_Util::create_permanent_jwt_token($payload_json, $encryption_key);
+            
+            if ($encrypted_jwt === false) {
+                throw new \Exception('Failed to encrypt payload with permanent key');
+            }
+            
+            // Create a new request with the encrypted payload in the expected format
+            $encrypted_body = array('jwt' => $encrypted_jwt);
+            
+            // Create a new request object with the encrypted body
+            $new_request = new \WP_REST_Request($request->get_method(), $request->get_route());
+            $new_request->set_headers($request->get_headers());
+            $new_request->set_body(wp_json_encode($encrypted_body));
+            $new_request->set_header('content-type', 'application/json');
+            
+            // Add a header to indicate this was encrypted server-side
+            $new_request->set_header('X-Server-Side-Encrypted', 'true');
+            
+            // Delegate to the main send_events method with encrypted payload
+            return $this->send_events($new_request);
+            
+        } catch (\Exception $e) {
+            $client_ip = $this->get_client_ip($request);
+            $this->logger->error('Failed to encrypt payload at encrypted endpoint: ' . $e->getMessage() . ' from IP: ' . $client_ip);
+            
+            $this->event_logger->create_event_record(
+                $request->get_body(),
+                'error', // monitor_status
+                $this->get_essential_headers($request),
+                false,
+                array(
+                    'event_name' => 'encryption_error',
+                    'reason' => 'Failed to encrypt payload: ' . $e->getMessage(),
+                    'ip_address' => $client_ip,
+                    'user_agent' => $request->get_header('user-agent'),
+                    'url' => $request->get_header('origin'),
+                    'referrer' => $request->get_header('referer')
+                )
+            );
+            
+            return new \WP_REST_Response(
+                array('error' => 'Failed to process encrypted request'),
+                500
+            );
+        }
     }
 
     /**
@@ -934,10 +992,10 @@ class GA4_Server_Side_Tagging_Endpoint
             // Check if encryption is enabled for storing in database
             $encryption_enabled = (bool) get_option('ga4_jwt_encryption_enabled', false);
             
-            // Determine if the original request was encrypted (time-based JWT or regular JWT)
+            // Determine if the original request was encrypted (regular JWT or server-side encrypted)
             $original_request_body = $request->get_json_params();
-            $was_originally_encrypted = (isset($original_request_body['time_jwt']) && !empty($original_request_body['time_jwt'])) ||
-                                       (isset($original_request_body['encrypted']) && $original_request_body['encrypted'] === true);
+            $was_originally_encrypted = (isset($original_request_body['encrypted']) && $original_request_body['encrypted'] === true) ||
+                                       $request->get_header('X-Server-Side-Encrypted') === 'true';
             
             // Process each event for queuing
             foreach ($request_data['events'] as $event) {
@@ -1284,11 +1342,6 @@ class GA4_Server_Side_Tagging_Endpoint
     {
         $request_body = $request->get_json_params();
 
-        // Check for time-based JWT encryption first (for JS client requests)
-        if (isset($request_body['time_jwt']) && !empty($request_body['time_jwt'])) {
-            return $this->handle_time_based_jwt($request_body['time_jwt'], $request);
-        }
-
         // Check for permanent JWT encryption (for backend/stored requests)
         $encryption_enabled = get_option('ga4_jwt_encryption_enabled', false);
         $is_encrypted = GA4_Encryption_Util::is_encrypted_request($request);
@@ -1301,29 +1354,6 @@ class GA4_Server_Side_Tagging_Endpoint
         return $request_body;
     }
 
-    /**
-     * Handle time-based JWT requests from JavaScript clients
-     * Uses 5-minute rotating encryption keys
-     *
-     * @param string $time_jwt Time-based JWT token
-     * @param \WP_REST_Request $request Request object for logging
-     * @return array Decrypted request data
-     * @throws \Exception If decryption fails
-     */
-    private function handle_time_based_jwt($time_jwt, $request)
-    {
-        try {
-            $decrypted_data = GA4_Encryption_Util::verify_time_based_jwt($time_jwt);
-            if ($decrypted_data === false) {
-                throw new \Exception('Time-based JWT verification failed');
-            }
-
-            return $decrypted_data;
-        } catch (\Exception $e) {
-            $this->logger->error('Failed to verify time-based JWT request from IP ' . $this->get_client_ip($request) . ': ' . $e->getMessage());
-            throw new \Exception('Failed to verify time-based JWT request: ' . $e->getMessage());
-        }
-    }
 
     /**
      * Handle permanent JWT requests (backend/stored data)

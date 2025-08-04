@@ -2197,7 +2197,7 @@
         const isEncryptedEndpoint = endpoint.includes('/send-events/encrypted');
         const shouldEncrypt = (endpoint.includes('/send-events') && 
                             transmissionMethod === 'wp_rest_endpoint' && 
-                            config.encryptionEnabled) || isEncryptedEndpoint;
+                            config.encryptionEnabled);
         
         // Try sendBeacon first for better reliability
         if (navigator.sendBeacon) {
@@ -2212,27 +2212,17 @@
               const beaconUrl = endpoint;
              
               
-              // For encrypted endpoints, encrypt the payload before sending
-              if (shouldEncrypt && isEncryptedEndpoint) {
-                try {
-                  // Generate encrypted JWT payload for encrypted endpoint
-                  const timeBasedJWT = await GA4Utils.encryption.createSelfGeneratedTimeBasedJWT(payload);
-                  beaconData = new Blob([JSON.stringify({ time_jwt: timeBasedJWT })], { type: 'application/json' });
-                  
-                  GA4Utils.helpers.log(logPrefix + " Attempting sendBeacon to encrypted WordPress endpoint", {
-                    endpoint: beaconUrl,
-                    encrypted: true,
-                    payloadSize: timeBasedJWT.length,
-                    security_method: 'session_based_validation'
-                  });
-                } catch (encryptError) {
-                  GA4Utils.helpers.log(logPrefix + " ⚠️ Encryption failed for sendBeacon, falling back to fetch", {
-                    error: encryptError.message,
-                    endpoint: endpoint
-                  });
-                  // Skip sendBeacon and go directly to fetch
-                  beaconData = null;
-                }
+              // For encrypted endpoints, send unencrypted payload (encryption handled server-side)
+              if (isEncryptedEndpoint) {
+                beaconData = new Blob([JSON.stringify(payload)], { type: 'application/json' });
+                
+                GA4Utils.helpers.log(logPrefix + " Attempting sendBeacon to encrypted WordPress endpoint", {
+                  endpoint: beaconUrl,
+                  encrypted: false,
+                  server_side_encryption: true,
+                  payloadSize: JSON.stringify(payload).length,
+                  security_method: 'session_based_validation'
+                });
               } else {
                 // Standard unencrypted payload
                 beaconData = new Blob([JSON.stringify(payload)], { type: 'application/json' });
@@ -2343,63 +2333,18 @@
           // Use refreshed nonce if available, fallback to original config nonce
           
           // Check if this is the send-event endpoint and encryption is enabled
-          // Encrypt when using wp_rest_endpoint method with encryption enabled OR when using encrypted endpoint
           const transmissionMethod = config.transmissionMethod || 'direct_to_cf';
           const isEncryptedEndpoint = endpoint.includes('/send-events/encrypted');
-          const shouldEncrypt = (endpoint.includes('/send-events') && 
-                              transmissionMethod === 'wp_rest_endpoint' && 
-                              config.encryptionEnabled) || isEncryptedEndpoint;
           
-          if (shouldEncrypt) {
-            try {
-              // Generate time-based JWT token using site URL and current time
-              const timeBasedJWT = await GA4Utils.encryption.createSelfGeneratedTimeBasedJWT(payload);
-              
-              requestBody = JSON.stringify({
-                time_jwt: timeBasedJWT
-              });
-              
-              // Add encryption header only for standard endpoint, not for encrypted endpoint
-              if (!isEncryptedEndpoint) {
-                headers["X-Encrypted"] = "true";
-              }
-              
-              GA4Utils.helpers.log(
-                "🔐 Payload encrypted with self-generated time-based JWT",
-                { jwt_length: timeBasedJWT.length },
-                config,
-                logPrefix
-              );
-              
-              // Additional console logging for encryption visibility
-              GA4Utils.helpers.log("🔐 [GA4 Encryption] Successfully encrypted event payload", {
-                originalPayloadKeys: Object.keys(payload),
-                encryptedJwtLength: timeBasedJWT.length,
-                endpoint: endpoint,
-                usingEncryptedEndpoint: isEncryptedEndpoint,
-                hasXEncryptedHeader: !isEncryptedEndpoint,
-                timestamp: new Date().toISOString(),
-                status: "ENCRYPTED"
-              });
-              
-            } catch (encryptError) {
-              GA4Utils.helpers.log(
-                "⚠️ Time-based JWT encryption failed, sending unencrypted",
-                encryptError,
-                config,
-                logPrefix
-              );
-              
-              // Additional console logging for encryption failure
-              console.warn("⚠️ [GA4 Encryption] Encryption failed, sending unencrypted", {
-                error: encryptError.message,
-                endpoint: endpoint,
-                timestamp: new Date().toISOString(),
-                status: "ENCRYPTION_FAILED"
-              });
-              
-              // Continue with unencrypted payload if encryption fails
-            }
+          // For encrypted endpoint, send unencrypted payload (encryption handled server-side)
+          if (isEncryptedEndpoint) {
+            GA4Utils.helpers.log("📡 Sending unencrypted payload to encrypted endpoint", {
+              endpoint: endpoint,
+              server_side_encryption: true,
+              payloadSize: JSON.stringify(payload).length,
+              timestamp: new Date().toISOString(),
+              status: "SERVER_SIDE_ENCRYPTION"
+            });
           }
         }
 
@@ -3554,90 +3499,9 @@
         };
       },
 
-      /**
-       * Generate time-based key for client-server encryption (5-minute slots)
-       * Same function used on both client and server side
-       * @param {string} siteUrl - Site URL for key derivation
-       * @param {string} authKey - WordPress option value for auth key
-       * @param {string} salt - WordPress option value for salt
-       * @returns {Promise<string>} - 64-character hex key
-       */
-      generateTimeBasedKey: async function(siteUrl, authKey, salt) {
-        // Get current 5-minute slot (same logic as PHP)
-        const fiveMinuteSlot = Math.floor(Date.now() / 1000 / 300) * 300;
-        
-        // Create deterministic key from time slot and site-specific data
-        const keyMaterial = authKey + siteUrl + fiveMinuteSlot + salt;
-        
-        // Use SHA-256 to generate the key (same as PHP)
-        const hashBuffer = await this.sha256(keyMaterial);
-        return this.arrayBufferToHex(hashBuffer);
-      },
 
-      /**
-       * Create time-based JWT token for client-server communication
-       * @param {Object} payload - Data to encrypt
-       * @param {string} siteUrl - Site URL for key derivation
-       * @param {string} authKey - WordPress option value for auth key
-       * @param {string} salt - WordPress option value for salt
-       * @returns {Promise<string>} - JWT token
-       */
-      createTimeBasedJWT: async function(payload, siteUrl, authKey, salt) {
-        const timeBasedKey = await this.generateTimeBasedKey(siteUrl, authKey, salt);
-        const jsonPayload = JSON.stringify(payload);
-        
-        return await this.createJWTToken(jsonPayload, timeBasedKey);
-      },
 
-      /**
-       * Normalize site URL to match PHP get_site_url() format
-       * @returns {string} - Normalized site URL without trailing slash
-       */
-      normalizeSiteUrl: function() {
-        let siteUrl = window.location.origin;
-        
-        // Remove trailing slash to match PHP get_site_url() behavior
-        if (siteUrl.endsWith('/')) {
-          siteUrl = siteUrl.slice(0, -1);
-        }
-        
-        return siteUrl;
-      },
 
-      /**
-       * Generate self-contained time-based key using window location and current time
-       * Same algorithm used on both client and server
-       * @returns {Promise<string>} - 64-character hex key
-       */
-      generateSelfGeneratedTimeBasedKey: async function() {
-        // Get current 5-minute slot (same logic as PHP)
-        const fiveMinuteSlot = Math.floor(Date.now() / 1000 / 300) * 300;
-        
-        // Use normalized site URL and fixed values
-        const siteUrl = this.normalizeSiteUrl();
-        const authKey = 'ga4_time_based_auth_2024'; // Fixed auth key
-        const salt = 'ga4_time_based_salt_2024'; // Fixed salt
-        
-        // Create deterministic key from time slot and site-specific data
-        const keyMaterial = authKey + siteUrl + fiveMinuteSlot + salt;
-        
-        // Use SHA-256 to generate the key (same as PHP)
-        const hashBuffer = await this.sha256(keyMaterial);
-        return this.arrayBufferToHex(hashBuffer);
-      },
-
-      /**
-       * Create self-generated time-based JWT token for client-server communication
-       * @param {Object} payload - Data to encrypt
-       * @returns {Promise<string>} - JWT token
-       */
-      createSelfGeneratedTimeBasedJWT: async function(payload) {
-        const timeBasedKey = await this.generateSelfGeneratedTimeBasedKey();
-        
-        const jsonPayload = JSON.stringify(payload);
-                
-        return await this.createJWTToken(jsonPayload, timeBasedKey);
-      },
 
   
 
