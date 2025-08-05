@@ -151,6 +151,18 @@ if (isset($_POST['cleanup_events']) && wp_verify_nonce($_POST['_wpnonce'], 'ga4_
     echo '<div class="notice notice-success is-dismissible"><p>Cleaned up ' . $cleaned . ' old events.</p></div>';
 }
 
+// Handle direct sending setting
+if (isset($_POST['save_direct_sending']) && wp_verify_nonce($_POST['_wpnonce'], 'ga4_save_direct_sending')) {
+    $send_events_directly = isset($_POST['ga4_send_events_directly']) ? true : false;
+    update_option('ga4_send_events_directly', $send_events_directly);
+    
+    $message = $send_events_directly 
+        ? 'Direct event sending has been enabled. Events will now be sent immediately.'
+        : 'Direct event sending has been disabled. Events will be queued for batch processing.';
+    
+    echo '<div class="notice notice-success is-dismissible"><p>' . esc_html($message) . '</p></div>';
+}
+
 // Get the unified cleanup days setting (default: 7 days)
 // Migrate from old separate settings if they exist
 $event_cleanup_days = get_option('ga4_event_cleanup_days');
@@ -466,6 +478,36 @@ $current_page = floor($offset / $limit) + 1;
     <!-- Configuration Section -->
     <div class="ga4-admin-section">
         <h2><?php echo esc_html__('Cronjob Configuration', 'ga4-server-side-tagging'); ?></h2>
+        
+        <!-- Send Events Directly Setting -->
+        <form method="post" style="margin-bottom: 20px;">
+            <?php wp_nonce_field('ga4_save_direct_sending'); ?>
+            <table class="widefat">
+                <tbody>
+                    <tr>
+                        <td><strong><?php echo esc_html__('Send Events Directly:', 'ga4-server-side-tagging'); ?></strong></td>
+                        <td>
+                            <?php
+                            $send_events_directly = get_option('ga4_send_events_directly', false);
+                            ?>
+                            <label>
+                                <input type="checkbox" name="ga4_send_events_directly" value="1" <?php checked($send_events_directly, true); ?>>
+                                <?php echo esc_html__('Send events immediately instead of queuing for cron processing', 'ga4-server-side-tagging'); ?>
+                            </label>
+                            <p class="description">
+                                <?php echo esc_html__('When enabled, events will be sent directly to the destination (Cloudflare/GA4) immediately instead of being queued for batch processing.', 'ga4-server-side-tagging'); ?>
+                                <br><strong><?php echo esc_html__('Note:', 'ga4-server-side-tagging'); ?></strong> 
+                                <?php echo esc_html__('This may impact page load times but provides real-time event transmission.', 'ga4-server-side-tagging'); ?>
+                            </p>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+            <p class="submit">
+                <input type="submit" name="save_direct_sending" class="button button-primary" value="<?php echo esc_attr__('Save Direct Sending Setting', 'ga4-server-side-tagging'); ?>">
+            </p>
+        </form>
+        
         <table class="widefat">
             <tbody>
                 <tr>

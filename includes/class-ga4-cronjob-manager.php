@@ -701,4 +701,219 @@ class GA4_Cronjob_Manager
     {
         return $this->event_logger->get_queue_events_for_table($args);
     }
+
+    /**
+     * Send events directly without queuing - uses same logic as cron processing
+     *
+     * @since    3.0.0
+     * @param    array     $event_data              The complete event payload as received.
+     * @param    boolean   $is_encrypted            Whether the event data is encrypted.
+     * @param    array     $original_headers        Original request headers.
+     * @param    boolean   $was_originally_encrypted Whether the original request was encrypted.
+     * @return   array     Result array with success status and message.
+     */
+    public function send_events_directly($event_data, $is_encrypted = false, $original_headers = array(), $was_originally_encrypted = false)
+    {
+        try {
+            // Extract first event name for logging purposes
+            $event_name = 'unknown';
+            if (isset($event_data['events']) && is_array($event_data['events']) && !empty($event_data['events'])) {
+                $event_name = $event_data['events'][0]['name'] ?? 'unknown';
+            }
+
+            // Extract consent status for logging
+            $consent_given = null;
+            if (isset($event_data['consent']['ad_user_data'])) {
+                $consent_given = ($event_data['consent']['ad_user_data'] === 'GRANTED') ? 1 : 0;
+            }
+
+            // Create event record using the same approach as the main endpoint
+            $logged_event_id = $this->event_logger->create_event_record(
+                $event_data,
+                'allowed', // monitor_status
+                $original_headers,
+                $was_originally_encrypted,
+                array(
+                    'event_name' => $event_name,
+                    'reason' => 'Direct sending processed immediately',
+                    'original_payload' => $event_data,  // Pass array data - encryption handled by create_event_record
+                    'ip_address' => $_SERVER['REMOTE_ADDR'] ?? '',
+                    'user_agent' => $_SERVER['HTTP_USER_AGENT'] ?? '',
+                    'url' => $_SERVER['REQUEST_URI'] ?? '',
+                    'referrer' => $_SERVER['HTTP_REFERER'] ?? '',
+                    'session_id' => $event_data['session_id'] ?? null,
+                    'consent_given' => $consent_given,
+                    'batch_size' => count($event_data['events']),
+                    'is_encrypted' => $is_encrypted || get_option('ga4_jwt_encryption_enabled', false)
+                )
+            );
+
+            if (!$logged_event_id) {
+                return array(
+                    'success' => false,
+                    'message' => 'Failed to log event for direct sending',
+                    'processing_method' => 'direct'
+                );
+            }
+
+            // Determine transmission method (same logic as cron processing)
+            $disable_cf_proxy = get_option('ga4_disable_cf_proxy', false);
+            
+            $success = false;
+            $transmission_method = '';
+            $error_message = '';
+            $final_payload = null;
+            $final_headers = array();
+
+            if ($disable_cf_proxy) {
+                // Send directly to GA4 - need to transform the payload
+                $transmission_method = 'ga4_direct';
+                $measurement_id = get_option('ga4_measurement_id', '');
+                $api_secret = get_option('ga4_api_secret', '');
+                
+                if (empty($measurement_id) || empty($api_secret)) {
+                    $error_message = "Missing GA4 measurement ID or API secret for direct transmission";
+                } else {
+                    // For GA4, we need to send individual events, so process each one
+                    $all_events_success = true;
+                    $events_processed = 0;
+                    
+                    foreach ($event_data['events'] as $individual_event) {
+                        // Create a temp event object for the transformer
+                        $temp_event = (object) array(
+                            'id' => $logged_event_id,
+                            'original_headers' => GA4_Encryption_Util::encrypt_headers_for_storage($original_headers),
+                            'was_originally_encrypted' => $was_originally_encrypted
+                        );
+                        
+                        // Transform individual event to GA4 format
+                        $final_payload = $this->transformer->transform_event_for_ga4($individual_event, $temp_event, $event_data['consent'] ?? null);
+                        
+                        // Send to GA4
+                        $result = $this->send_single_event_to_ga4($final_payload, $measurement_id, $api_secret, $original_headers);
+                        $final_headers = $result['headers'];
+                        
+                        if ($result['success']) {
+                            $events_processed++;
+                        } else {
+                            $all_events_success = false;
+                            $error_message = "Direct GA4 transmission failed" . (isset($result['error_details']) ? ": " . $result['error_details'] : "");
+                        }
+                    }
+                    
+                    $success = $all_events_success && $events_processed > 0;
+                }
+            } else {
+                // Send to Cloudflare Worker - send the original payload structure unchanged
+                $transmission_method = 'cloudflare';
+                $worker_url = get_option('ga4_cloudflare_worker_url');
+                
+                if (empty($worker_url)) {
+                    $error_message = "Missing Cloudflare Worker URL";
+                } else {
+                    // Prepare the payload exactly as it would be for Cloudflare
+                    $payload = $event_data; // Use original structure
+                    $payload['batch'] = false; // Mark as direct sending
+                    $payload['timestamp'] = time();
+                    
+                    // Add original headers to the payload for Cloudflare worker to use
+                    $payload['headers'] = $original_headers;
+                    
+                    // Check if secured transmission is enabled
+                    $secured_transmission = get_option('ga4_jwt_encryption_enabled', false);
+                    if ($secured_transmission) {
+                        $encryption_key = GA4_Encryption_Util::retrieve_encrypted_key('ga4_jwt_encryption_key');
+                        if ($encryption_key) {
+                            try {
+                                // Use permanent JWT encryption for direct payloads
+                                $encrypted_payload = GA4_Encryption_Util::create_permanent_jwt_token(wp_json_encode($payload), $encryption_key);
+                                $payload = array(
+                                    'encrypted' => true,
+                                    'jwt' => $encrypted_payload
+                                );
+                            } catch (\Exception $e) {
+                                if ($this->logger) {
+                                    $this->logger->error("Failed to encrypt direct payload: " . $e->getMessage());
+                                }
+                                // Continue with unencrypted payload
+                            }
+                        }
+                    }
+                    
+                    // Prepare headers with Worker API key authentication
+                    $headers = array(
+                        'Content-Type' => 'application/json',
+                        'User-Agent' => 'GA4-Server-Side-Tagging-Direct/3.0.0'
+                    );
+                    
+                    // Add Worker API key authentication header
+                    $worker_api_key = GA4_Encryption_Util::retrieve_encrypted_key('ga4_worker_api_key');
+                    if (!empty($worker_api_key)) {
+                        $headers['Authorization'] = 'Bearer ' . $worker_api_key;
+                    }
+                    
+                    $final_payload = $payload;
+                    $final_headers = $headers;
+                    
+                    // Send request to Cloudflare Worker
+                    $response = wp_remote_post($worker_url, array(
+                        'headers' => $headers,
+                        'body' => wp_json_encode($payload),
+                        'timeout' => 30,
+                        'sslverify' => true
+                    ));
+                    
+                    if (is_wp_error($response)) {
+                        $error_message = "Failed to send to Cloudflare: " . $response->get_error_message();
+                    } else {
+                        $response_code = wp_remote_retrieve_response_code($response);
+                        if ($response_code >= 200 && $response_code < 300) {
+                            $success = true;
+                        } else {
+                            $response_body = wp_remote_retrieve_body($response);
+                            $error_message = "Cloudflare returned error code $response_code" . (!empty($response_body) ? ": " . $response_body : "");
+                        }
+                    }
+                }
+            }
+
+            // Store final payload and headers for monitoring using the proper function
+            if ($final_payload) {
+                $payload_encrypted = (isset($final_payload['encrypted']) && $final_payload['encrypted'] === true);
+                $this->event_logger->update_event_final_data($logged_event_id, $final_payload, $final_headers, $transmission_method, $was_originally_encrypted, $payload_encrypted);
+            }
+
+            // Update event status based on result
+            if ($success) {
+                $this->event_logger->update_event_status(array($logged_event_id), 'completed');
+                
+                return array(
+                    'success' => true,
+                    'message' => 'Event sent successfully',
+                    'processing_method' => 'direct',
+                    'transmission_method' => $transmission_method
+                );
+            } else {
+                $this->event_logger->mark_event_failed($logged_event_id, $error_message);
+                
+                return array(
+                    'success' => false,
+                    'message' => $error_message,
+                    'processing_method' => 'direct',
+                    'transmission_method' => $transmission_method
+                );
+            }
+
+        } catch (\Exception $e) {
+            if ($this->logger) {
+                $this->logger->error("Direct event sending failed: " . $e->getMessage());
+            }
+            
+            return array(
+                'success' => false,
+                'message' => 'Direct sending failed: ' . $e->getMessage(),
+                'processing_method' => 'direct'
+            );
+        }
+    }
 }

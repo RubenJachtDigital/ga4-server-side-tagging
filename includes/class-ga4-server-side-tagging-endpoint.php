@@ -1001,13 +1001,16 @@ class GA4_Server_Side_Tagging_Endpoint
             // Log batch info with type distinction
             $event_count = count($request_data['events']);
 
-            // Check if cronjob batching is enabled and WP-Cron is available
+            // Check if direct sending is enabled or cronjob batching is disabled or WP-Cron is unavailable
+            $send_events_directly = get_option('ga4_send_events_directly', false);
             $cronjob_enabled = true;
             $wp_cron_disabled = defined('DISABLE_WP_CRON') && DISABLE_WP_CRON;
             
-            if (!$cronjob_enabled || $wp_cron_disabled) {
-                // Fall back to direct sending if cronjobs disabled or WP-Cron is disabled
-                if ($wp_cron_disabled) {
+            if ($send_events_directly || !$cronjob_enabled || $wp_cron_disabled) {
+                // Use direct sending if enabled or if cronjobs disabled or WP-Cron is disabled
+                if ($send_events_directly) {
+                    $this->logger->info('Direct event sending is enabled, bypassing queue processing');
+                } elseif ($wp_cron_disabled) {
                     $this->logger->info('WP-Cron is disabled (DISABLE_WP_CRON=true), using direct sending instead of queue');
                 }
                 return $this->send_events_directly($request_data, $start_time, $session_id, $request);
@@ -1122,110 +1125,49 @@ class GA4_Server_Side_Tagging_Endpoint
     private function send_events_directly($request_data, $start_time, $session_id, $request)
     {
         $event_count = count($request_data['events']);
-
-        // Get configuration from database
-        $cloudflare_url = get_option('ga4_cloudflare_worker_url', '');
+        $processing_time = round((microtime(true) - $start_time) * 1000, 2);
+        
+        // Determine if the original request was encrypted
+        $original_request_body = $request->get_json_params();
+        $was_originally_encrypted = (isset($original_request_body['encrypted']) && $original_request_body['encrypted'] === true) ||
+                                   $request->get_header('X-Server-Side-Encrypted') === 'true';
+        
+        // Check if encryption is enabled for processing
         $encryption_enabled = (bool) get_option('ga4_jwt_encryption_enabled', false);
-        $encryption_key = GA4_Encryption_Util::retrieve_encrypted_key('ga4_jwt_encryption_key') ?: '';
         
-        if (empty($cloudflare_url)) {
-            $client_ip = $this->get_client_ip($request);
-            $event_name = isset($request_data['events'][0]['name']) ? $request_data['events'][0]['name'] : 'unknown';
-            
-            $this->event_logger->create_event_record(
-                $request->get_body(),
-                'error', // monitor_status
-                $this->get_essential_headers($request),
-                false,
-                array(
-                    'event_name' => $event_name,
-                    'reason' => 'Cloudflare Worker URL not configured',
-                    'error_type' => 'configuration_error',
-                    'ip_address' => $client_ip,
-                    'user_agent' => $request->get_header('user-agent'),
-                    'url' => $request->get_header('origin'),
-                    'referrer' => $request->get_header('referer'),
-                    'session_id' => $session_id
-                )
-            );
-            
-            return new \WP_REST_Response(array('error' => 'Cloudflare Worker URL not configured'), 500);
-        }
-
-        // Forward the complete batch payload to Cloudflare
-        $batch_payload = $request_data;
+        // Get original request headers
+        $original_headers = $this->get_essential_headers($request);
         
-        // Clean botData from all events before sending to Cloudflare (direct mode)
-        foreach ($batch_payload['events'] as $index => $event) {
-            if (isset($event['params']['botData'])) {
-                unset($batch_payload['events'][$index]['params']['botData']);
-            }
-        }
+        // Add session_id to the request data for logging
+        $request_data['session_id'] = $session_id;
         
-        // Check if debug mode is enabled
-        $debug_mode = get_option('ga4_server_side_tagging_debug_mode', false);
+        // Send the complete payload structure as-is to the cronjob manager
+        $result = $this->cronjob_manager->send_events_directly(
+            $request_data, // Send the complete original payload structure
+            $encryption_enabled,
+            $original_headers,
+            $was_originally_encrypted
+        );
         
-        if ($debug_mode) {
-            // Debug mode: Wait for response from Cloudflare for debugging
-            $result = $this->forward_to_cloudflare($batch_payload, $cloudflare_url, $encryption_enabled, $encryption_key, null);
-            $processing_time = round((microtime(true) - $start_time) * 1000, 2);
-
-            if ($result['success']) {
-                // Events successfully sent - logging handled by main flow to prevent duplicate entries
-
-                $response_data = array(
-                    'success' => true,
-                    'events_processed' => $event_count,
-                        'mode' => 'direct_sending'
-                );
-                if (isset($result['worker_response'])) {
-                    $response_data['worker_response'] = $result['worker_response'];
-                }
-                return new \WP_REST_Response($response_data, 200);
-            } else {
-                // Events failed to send - log with payload for debugging
-                $client_ip = $this->get_client_ip($request);
-                $event_name = isset($batch_payload['events'][0]['name']) ? $batch_payload['events'][0]['name'] : 'unknown';
-                
-                $this->event_logger->create_event_record(
-                    json_encode($batch_payload, JSON_PRETTY_PRINT),
-                    'error', // monitor_status
-                    $this->get_essential_headers($request),
-                    false,
-                    array(
-                        'event_name' => $event_name,
-                        'reason' => 'Failed to send batch events to Cloudflare: ' . $result['error'],
-                        'error_type' => 'cloudflare_send_failed',
-                        'ip_address' => $client_ip,
-                        'user_agent' => $request->get_header('user-agent'),
-                        'url' => $request->get_header('origin'),
-                        'referrer' => $request->get_header('referer'),
-                        'session_id' => $session_id,
-                        'event_count' => $event_count,
-                        'processing_time_ms' => $processing_time
-                    )
-                );
-
-                $this->logger->error("Failed to send batch events to Cloudflare for session: {$session_id} after {$processing_time}ms: " . $result['error']);
-                return new \WP_REST_Response(array(
-                    'error' => 'Batch event sending failed',
-                    'details' => $result['error'],
-                    'events_failed' => $event_count,
-                    'mode' => 'direct_sending'
-                ), 500);
-            }
-        } else {
-            // Production mode: Fire and forget for maximum performance
-            $this->forward_to_cloudflare_async($batch_payload, $cloudflare_url, $encryption_enabled, $encryption_key, null);
-            $processing_time = round((microtime(true) - $start_time) * 1000, 2);
-            
-            // Async events sent - logging handled by main flow to prevent duplicate entries
-            
+        // Return appropriate response based on results
+        if ($result['success']) {
             return new \WP_REST_Response(array(
                 'success' => true,
                 'events_processed' => $event_count,
-                'mode' => 'direct_sending'
+                'processing_method' => 'direct',
+                'transmission_method' => $result['transmission_method'] ?? 'unknown',
+                'processing_time_ms' => $processing_time
             ), 200);
+        } else {
+            return new \WP_REST_Response(array(
+                'success' => false,
+                'events_failed' => $event_count,
+                'processing_method' => 'direct',
+                'transmission_method' => $result['transmission_method'] ?? 'unknown',
+                'processing_time_ms' => $processing_time,
+                'error' => $result['message'],
+                'details' => $result['message']
+            ), 500);
         }
     }
 
