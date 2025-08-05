@@ -1895,7 +1895,8 @@
       var self = this;
 
       // Check if order was already sent (PHP session-based duplicate prevention)
-      if (this.config.orderSent === true) {
+      // WordPress wp_localize_script converts boolean true to string "1"
+      if (this.config.orderSent === true || this.config.orderSent === "1" || this.config.orderSent === 1) {
         self.log("Order already tracked in PHP session - skipping duplicate tracking");
         return;
       }

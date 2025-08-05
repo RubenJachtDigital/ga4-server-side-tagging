@@ -316,7 +316,7 @@
         localStorage.removeItem("server_side_ga4_last_term");
         localStorage.removeItem("server_side_ga4_last_gclid");
 
-        // Clear purchase tracking data (30 min expiry)
+        // Clear purchase tracking data (uses configurable expiration from settings)
         this._clearExpiredPurchaseTracking();
 
         // Clear expired user data
@@ -332,7 +332,13 @@
 
         var keysToRemove = [];
         var now = Date.now();
-        var thirtyMinutes = 30 * 60 * 1000; // 30 minutes in milliseconds
+        
+        // Use the same expiration as PHP system (configurable hours, default 24)
+        var expirationHours = 24; // Default
+        if (window.ga4ServerSideTagging && window.ga4ServerSideTagging.consentSettings) {
+          expirationHours = window.ga4ServerSideTagging.consentSettings.storageExpirationHours || 24;
+        }
+        var expirationMs = expirationHours * 60 * 60 * 1000; // Convert hours to milliseconds
 
         // Loop through all localStorage keys to find purchase tracking entries
         for (var i = 0; i < localStorage.length; i++) {
@@ -342,8 +348,8 @@
             try {
               var data = JSON.parse(localStorage.getItem(key) || "{}");
 
-              // Check if the entry has expired (older than 30 minutes)
-              if (data.timestamp && now - data.timestamp > thirtyMinutes) {
+              // Check if the entry has expired (older than configured hours)
+              if (data.timestamp && now - data.timestamp > expirationMs) {
                 keysToRemove.push(key);
               }
             } catch (e) {
@@ -455,7 +461,7 @@
           }
         });
 
-        // Clean up purchase tracking data (separate expiration - 30 minutes)
+        // Clean up purchase tracking data (uses same expiration as PHP system)
         this._clearExpiredPurchaseTracking();
 
         // Clean up session storage (queued events)
@@ -1952,10 +1958,16 @@
         try {
           var data = JSON.parse(trackedData);
           var now = Date.now();
-          var thirtyMinutes = 30 * 60 * 1000; // 30 minutes in milliseconds
+          
+          // Use the same expiration as PHP system (configurable hours, default 24)
+          var expirationHours = 24; // Default
+          if (window.ga4ServerSideTagging && window.ga4ServerSideTagging.consentSettings) {
+            expirationHours = window.ga4ServerSideTagging.consentSettings.storageExpirationHours || 24;
+          }
+          var expirationMs = expirationHours * 60 * 60 * 1000; // Convert hours to milliseconds
 
-          // Check if the tracking record is still valid (within 30 minutes)
-          if (data.timestamp && now - data.timestamp < thirtyMinutes) {
+          // Check if the tracking record is still valid (within configured hours)
+          if (data.timestamp && now - data.timestamp < expirationMs) {
             return true;
           } else {
             // Expired, remove it
