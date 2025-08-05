@@ -52,7 +52,7 @@ class GA4_Server_Side_Tagging_Public
     }
 
     /**
-     * Check if an order has already been tracked in this session
+     * Check if an order has already been tracked
      *
      * @since    1.0.0
      * @param    int    $order_id    The order ID to check
@@ -60,39 +60,92 @@ class GA4_Server_Side_Tagging_Public
      */
     private function is_order_already_tracked($order_id)
     {
-        if (!isset($_SESSION['ga4_tracked_orders'])) {
-            $_SESSION['ga4_tracked_orders'] = array();
-        }
+        // Create a unique key based on order ID, IP, and user agent hash for security
+        $user_fingerprint = $this->get_user_fingerprint();
+        $transient_key = "ga4_tracked_order_{$order_id}_{$user_fingerprint}";
         
-        return in_array($order_id, $_SESSION['ga4_tracked_orders']);
+        // Check if this specific order was already tracked by this user
+        $tracked_time = get_transient($transient_key);
+        
+        return $tracked_time !== false;
     }
 
     /**
-     * Mark an order as tracked in this session
+     * Mark an order as tracked
      *
      * @since    1.0.0
      * @param    int    $order_id    The order ID to mark as tracked
      */
     private function mark_order_as_tracked($order_id)
     {
-        if (!isset($_SESSION['ga4_tracked_orders'])) {
-            $_SESSION['ga4_tracked_orders'] = array();
-        }
+        // Create a unique key based on order ID, IP, and user agent hash for security
+        $user_fingerprint = $this->get_user_fingerprint();
+        $transient_key = "ga4_tracked_order_{$order_id}_{$user_fingerprint}";
         
-        if (!in_array($order_id, $_SESSION['ga4_tracked_orders'])) {
-            $_SESSION['ga4_tracked_orders'][] = $order_id;
-        }
+        // Get the user-configured storage expiration hours (default 24 hours)
+        $storage_expiration_hours = (int) get_option('ga4_storage_expiration_hours', 24);
+        
+        // Store the tracking timestamp using the configured expiration
+        // This prevents duplicate tracking even if sessions are recreated
+        set_transient($transient_key, time(), $storage_expiration_hours * HOUR_IN_SECONDS);
     }
 
     /**
-     * Clean up old tracked orders from session (keep only last 10 orders)
+     * Generate a user fingerprint for tracking purposes
+     * Uses IP address and user agent hash for uniqueness while maintaining privacy
+     *
+     * @since    1.0.0
+     * @return   string   A hashed fingerprint of the user
+     */
+    private function get_user_fingerprint()
+    {
+        $ip_address = $this->get_client_ip();
+        $user_agent = isset($_SERVER['HTTP_USER_AGENT']) ? $_SERVER['HTTP_USER_AGENT'] : '';
+        
+        // Create a hash using IP and user agent for privacy
+        return substr(md5($ip_address . $user_agent), 0, 8);
+    }
+
+    /**
+     * Get the client's real IP address
+     *
+     * @since    1.0.0
+     * @return   string   The client's IP address
+     */
+    private function get_client_ip()
+    {
+        $ip_keys = array('HTTP_CF_CONNECTING_IP', 'HTTP_X_FORWARDED_FOR', 'HTTP_X_REAL_IP', 'REMOTE_ADDR');
+        
+        foreach ($ip_keys as $key) {
+            if (array_key_exists($key, $_SERVER) === true) {
+                $ip = $_SERVER[$key];
+                if (strpos($ip, ',') !== false) {
+                    $ip = explode(',', $ip)[0];
+                }
+                $ip = trim($ip);
+                if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)) {
+                    return $ip;
+                }
+            }
+        }
+        
+        return isset($_SERVER['REMOTE_ADDR']) ? $_SERVER['REMOTE_ADDR'] : '0.0.0.0';
+    }
+
+    /**
+     * Clean up old tracked orders (WordPress transients will auto-expire)
+     * This method is kept for backward compatibility but transients handle cleanup automatically
      *
      * @since    1.0.0
      */
     private function cleanup_tracked_orders()
     {
-        if (isset($_SESSION['ga4_tracked_orders']) && count($_SESSION['ga4_tracked_orders']) > 10) {
-            $_SESSION['ga4_tracked_orders'] = array_slice($_SESSION['ga4_tracked_orders'], -10);
+        // Transients automatically expire based on ga4_storage_expiration_hours setting
+        // This method is kept for backward compatibility
+        
+        // Optional: Clean up any remaining session data from old implementation
+        if (isset($_SESSION['ga4_tracked_orders'])) {
+            unset($_SESSION['ga4_tracked_orders']);
         }
     }
 
