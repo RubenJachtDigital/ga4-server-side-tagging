@@ -716,8 +716,8 @@ class GA4_Server_Side_Tagging_Endpoint
             // Perform bot detection for all requests (no authentication bypass for client requests)
             if ($this->is_bot_request($request)) {
                 // Log comprehensive bot detection details only if extensive error logging is enabled
-                $extensive_error_logging = get_option('ga4_extensive_error_logging', false);
-                if ($extensive_error_logging) {
+                $extensive_logging = get_option('ga4_extensive_logging', false);
+                if ($extensive_logging) {
                     $event_name = $this->extract_event_name_from_request($request->get_json_params());
                     $this->event_logger->create_event_record(
                         $request->get_body(),
@@ -752,8 +752,8 @@ class GA4_Server_Side_Tagging_Endpoint
             $rate_limit_check = $this->check_rate_limit($request);
             if (!$rate_limit_check['allowed']) {
                 // Log rate limiting event only if extensive error logging is enabled
-                $extensive_error_logging = get_option('ga4_extensive_error_logging', false);
-                if ($extensive_error_logging) {
+                $extensive_logging = get_option('ga4_extensive_logging', false);
+                if ($extensive_logging) {
                     $event_name = $this->extract_event_name_from_request($request->get_json_params());
                     $this->event_logger->create_event_record(
                         substr($request->get_body(), 0, 1000) . '...', // Truncate large payloads
@@ -956,8 +956,8 @@ class GA4_Server_Side_Tagging_Endpoint
             $bot_detection_result = $this->detect_bot_from_event_data($request, $request_data);
             if ($bot_detection_result['is_bot']) {
                 // Log each event as bot detected only if extensive error logging is enabled
-                $extensive_error_logging = get_option('ga4_extensive_error_logging', false);
-                if ($extensive_error_logging) {
+                $extensive_logging = get_option('ga4_extensive_logging', false);
+                if ($extensive_logging) {
                     foreach ($request_data['events'] as $event) {
                         $this->event_logger->create_event_record(
                             json_encode($request_data, JSON_PRETTY_PRINT),
@@ -1201,8 +1201,8 @@ class GA4_Server_Side_Tagging_Endpoint
         $this->logger->log_data($failure_data, 'Security Failure');
         
         // Also log to Event Monitor database if extensive error logging is enabled
-        $extensive_error_logging = get_option('ga4_extensive_error_logging', false);
-        if ($extensive_error_logging) {
+        $extensive_logging = get_option('ga4_extensive_logging', false);
+        if ($extensive_logging) {
             $event_name = $this->extract_event_name_from_request($request->get_json_params());
             
             // Map failure types to monitor status

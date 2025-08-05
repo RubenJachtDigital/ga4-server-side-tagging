@@ -229,7 +229,7 @@ class GA4_Server_Side_Tagging_Admin
 
         register_setting(
             'ga4_server_side_tagging_settings',
-            'ga4_extensive_error_logging',
+            'ga4_extensive_logging',
             array(
                 'type' => 'boolean',
                 'description' => 'Enable extensive error logging',
@@ -964,7 +964,7 @@ class GA4_Server_Side_Tagging_Admin
 
         // GA4 Checkbox options
         update_option('ga4_server_side_tagging_debug_mode', isset($_POST['ga4_server_side_tagging_debug_mode']));
-        update_option('ga4_extensive_error_logging', isset($_POST['ga4_extensive_error_logging']));
+        update_option('ga4_extensive_logging', isset($_POST['ga4_extensive_logging']));
         update_option('ga4_track_logged_in_users', isset($_POST['ga4_track_logged_in_users']));
         update_option('ga4_ecommerce_tracking', isset($_POST['ga4_ecommerce_tracking']));
         update_option('ga4_simple_requests_enabled', isset($_POST['ga4_simple_requests_enabled']));

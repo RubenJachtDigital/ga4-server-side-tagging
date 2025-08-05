@@ -30,10 +30,10 @@ if (isset($_POST['cleanup_logs']) && wp_verify_nonce($_POST['_wpnonce'], 'ga4_cl
 }
 
 // Handle extensive error logging toggle
-if (isset($_POST['toggle_extensive_error_logging']) && wp_verify_nonce($_POST['_wpnonce'], 'ga4_toggle_extensive_logging')) {
-    $current_setting = get_option('ga4_extensive_error_logging', false);
+if (isset($_POST['toggle_extensive_logging']) && wp_verify_nonce($_POST['_wpnonce'], 'ga4_toggle_extensive_logging')) {
+    $current_setting = get_option('ga4_extensive_logging', false);
     $new_setting = !$current_setting;
-    update_option('ga4_extensive_error_logging', $new_setting);
+    update_option('ga4_extensive_logging', $new_setting);
     
     $status = $new_setting ? 'enabled' : 'disabled';
     $message = sprintf('Extensive error logging has been %s. This affects bot detection and rate limiting event storage.', $status);
@@ -154,19 +154,19 @@ $current_page = floor($offset / $limit) + 1;
     <!-- Extensive Error Logging Section -->
     <div class="ga4-admin-section">
         <h2><?php echo esc_html__('Extensive Error Logging Settings', 'ga4-server-side-tagging'); ?></h2>
-        <?php $extensive_error_logging = get_option('ga4_extensive_error_logging', false); ?>
-        <div style="display: flex; align-items: center; gap: 15px; padding: 15px; background: <?php echo $extensive_error_logging ? '#d4edda' : '#f8f9fa'; ?>; border-radius: 5px; border-left: 4px solid <?php echo $extensive_error_logging ? '#28a745' : '#6c757d'; ?>;">
+        <?php $extensive_logging = get_option('ga4_extensive_logging', false); ?>
+        <div style="display: flex; align-items: center; gap: 15px; padding: 15px; background: <?php echo $extensive_logging ? '#d4edda' : '#f8f9fa'; ?>; border-radius: 5px; border-left: 4px solid <?php echo $extensive_logging ? '#28a745' : '#6c757d'; ?>;">
             <div>
                 <strong><?php echo esc_html__('Status:', 'ga4-server-side-tagging'); ?></strong>
-                <span style="color: <?php echo $extensive_error_logging ? '#28a745' : '#dc3545'; ?>; font-weight: bold;">
-                    <?php echo $extensive_error_logging ? 'ENABLED' : 'DISABLED'; ?>
+                <span style="color: <?php echo $extensive_logging ? '#28a745' : '#dc3545'; ?>; font-weight: bold;">
+                    <?php echo $extensive_logging ? 'ENABLED' : 'DISABLED'; ?>
                 </span>
             </div>
             <form method="post" style="margin: 0;">
                 <?php wp_nonce_field('ga4_toggle_extensive_logging'); ?>
-                <input type="submit" name="toggle_extensive_error_logging" 
-                       class="button <?php echo $extensive_error_logging ? 'button-secondary' : 'button-primary'; ?>" 
-                       value="<?php echo $extensive_error_logging ? 'Disable Extensive Logging' : 'Enable Extensive Logging'; ?>" />
+                <input type="submit" name="toggle_extensive_logging" 
+                       class="button <?php echo $extensive_logging ? 'button-secondary' : 'button-primary'; ?>" 
+                       value="<?php echo $extensive_logging ? 'Disable Extensive Logging' : 'Enable Extensive Logging'; ?>" />
             </form>
         </div>
         <div style="margin-top: 10px; font-size: 13px; color: #666;">
