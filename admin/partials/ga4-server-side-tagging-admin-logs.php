@@ -18,6 +18,18 @@ if (! defined('WPINC')) {
     <h1><?php echo esc_html(get_admin_page_title()); ?></h1>
     
     <?php settings_errors(); ?>
+
+    <?php
+    // Test mode warning banner
+    $test_mode_enabled = get_option('ga4_test_mode_enabled', false);
+    if ($test_mode_enabled): ?>
+        <div class="notice notice-warning" style="padding: 15px; margin: 20px 0; border-left: 4px solid #dc3545; background-color: #fff3cd;">
+            <p style="margin: 0; font-size: 14px; font-weight: 600; color: #856404;">
+                🧪 <strong>Test Mode Active:</strong> Events are being processed but NOT sent to external services (Cloudflare/Google Analytics). 
+                <a href="<?php echo admin_url('admin.php?page=ga4-server-side-tagging-settings'); ?>" style="color: #856404; text-decoration: underline;">Disable in Settings</a>
+            </p>
+        </div>
+    <?php endif; ?>
     
     <div class="ga4-server-side-tagging-admin">
         <div class="ga4-server-side-tagging-admin-header">

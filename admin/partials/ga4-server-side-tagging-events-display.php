@@ -143,6 +143,18 @@ $current_page = floor($offset / $limit) + 1;
 
 <div class="wrap">
     <h1><?php echo esc_html__('Event Monitor & Queue Management', 'ga4-server-side-tagging'); ?></h1>
+
+    <?php
+    // Test mode warning banner
+    $test_mode_enabled = get_option('ga4_test_mode_enabled', false);
+    if ($test_mode_enabled): ?>
+        <div class="notice notice-warning" style="padding: 15px; margin: 20px 0; border-left: 4px solid #dc3545; background-color: #fff3cd;">
+            <p style="margin: 0; font-size: 14px; font-weight: 600; color: #856404;">
+                🧪 <strong>Test Mode Active:</strong> Events are being processed but NOT sent to external services (Cloudflare/Google Analytics). 
+                <a href="<?php echo admin_url('admin.php?page=ga4-server-side-tagging-settings'); ?>" style="color: #856404; text-decoration: underline;">Disable in Settings</a>
+            </p>
+        </div>
+    <?php endif; ?>
     
     <!-- Tab Navigation -->
     <div class="nav-tab-wrapper" style="margin-bottom: 20px;">
@@ -339,7 +351,7 @@ $current_page = floor($offset / $limit) + 1;
                             <th style="width: 100px;"><?php echo esc_html__('Status', 'ga4-server-side-tagging'); ?></th>
                             <th><?php echo esc_html__('Reason', 'ga4-server-side-tagging'); ?></th>
                             <th style="width: 120px;"><?php echo esc_html__('IP Address', 'ga4-server-side-tagging'); ?></th>
-                            <th style="width: 140px;"><?php echo esc_html__('Created At', 'ga4-server-side-tagging'); ?></th>
+                            <th style="width: 140px;"><?php echo esc_html__('Date & Time', 'ga4-server-side-tagging'); ?></th>
                             <th style="width: 80px;"><?php echo esc_html__('Details', 'ga4-server-side-tagging'); ?></th>
                         </tr>
                     </thead>
@@ -393,9 +405,16 @@ $current_page = floor($offset / $limit) + 1;
                                 </td>
                                 <td style="font-size: 11px;">
                                     <?php
-                                    $date = new DateTime($event->created_at);
+                                    // Use processed_at if available (more accurate timezone), otherwise use created_at
+                                    $timestamp = (!empty($event->processed_at)) ? $event->processed_at : $event->created_at;
+                                    $date = new DateTime($timestamp);
                                     echo esc_html($date->format('M j, Y'));
                                     echo '<br>' . esc_html($date->format('H:i:s'));
+                                    
+                                    // Show indicator if using processed time
+                                    if (!empty($event->processed_at)) {
+                                        echo '<br><small style="color: #666;">(processed)</small>';
+                                    }
                                     ?>
                                 </td>
                                 <td>
@@ -435,6 +454,7 @@ $current_page = floor($offset / $limit) + 1;
                                             data-batch-size="<?php echo esc_attr($event->batch_size ?? ''); ?>"
                                             data-transmission="<?php echo esc_attr($event->transmission_method ?? ''); ?>"
                                             data-created-at="<?php echo esc_attr($event->created_at); ?>"
+                                            data-processed-at="<?php echo esc_attr($event->processed_at ?? ''); ?>"
                                             style="font-size: 10px; padding: 3px 8px;">
                                         <?php echo esc_html__('View', 'ga4-server-side-tagging'); ?>
                                     </button>
@@ -477,12 +497,38 @@ jQuery(document).ready(function($) {
         content += '<div><strong>ID:</strong> ' + data.eventId + '</div>';
         content += '<div><strong>Event:</strong> <code>' + htmlEscape(data.eventName) + '</code></div>';
         content += '<div><strong>Status:</strong> ' + getStatusDisplay(data.eventStatus) + '</div>';
-        content += '<div><strong>Date:</strong> ' + htmlEscape(data.createdAt) + '</div>';
+        // Use processed time if available (more accurate timezone), otherwise created time
+        var displayTime = data.processedAt && data.processedAt !== '' ? data.processedAt : data.createdAt;
+        var timeLabel = data.processedAt && data.processedAt !== '' ? 'Processed:' : 'Created:';
+        content += '<div><strong>' + timeLabel + '</strong> ' + htmlEscape(displayTime) + '</div>';
         if (data.batchSize > 1) {
             content += '<div><strong>Batch Size:</strong> ' + data.batchSize + ' events</div>';
         }
         if (data.transmission) {
-            content += '<div><strong>Method:</strong> ' + htmlEscape(data.transmission) + '</div>';
+            // Format transmission method with colors and icons
+            var transmissionFormatted = '';
+            var methodColor = '#6c757d';
+            var methodLabel = data.transmission;
+            
+            switch(data.transmission) {
+                case 'cloudflare':
+                    methodColor = '#f48120';
+                    methodLabel = 'Cloudflare';
+                    break;
+                case 'ga4_direct':
+                    methodColor = '#4285f4';
+                    methodLabel = 'GA4 Direct';
+                    break;
+                case 'test_mode':
+                    methodColor = '#dc3545';
+                    methodLabel = '🧪 Test Mode';
+                    break;
+                default:
+                    methodLabel = data.transmission.charAt(0).toUpperCase() + data.transmission.slice(1);
+            }
+            
+            transmissionFormatted = '<span style="color: ' + methodColor + '; font-weight: bold;">' + htmlEscape(methodLabel) + '</span>';
+            content += '<div><strong>Method:</strong> ' + transmissionFormatted + '</div>';
         }
         content += '</div>';
         if (data.reason) {

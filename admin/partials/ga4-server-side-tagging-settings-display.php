@@ -28,6 +28,7 @@ $worker_api_key = \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::retrieve_
 $measurement_id = get_option('ga4_measurement_id', '');
 $api_secret = get_option('ga4_api_secret', '');
 $debug_mode = get_option('ga4_server_side_tagging_debug_mode', false);
+$test_mode = get_option('ga4_test_mode_enabled', false);
 $extensive_logging = get_option('ga4_extensive_logging', false);
 $ecommerce_tracking = get_option('ga4_ecommerce_tracking', true);
 $track_logged_in_users = get_option('ga4_track_logged_in_users', true);
@@ -41,6 +42,17 @@ $batch_size = get_option('ga4_event_batch_size', 1000);
     <h1><?php echo esc_html(get_admin_page_title()); ?></h1>
 
     <?php settings_errors(); ?>
+
+    <?php
+    // Test mode warning banner - check the current value being displayed rather than saved option
+    if ($test_mode): ?>
+        <div class="notice notice-warning" style="padding: 15px; margin: 20px 0; border-left: 4px solid #dc3545; background-color: #fff3cd;">
+            <p style="margin: 0; font-size: 14px; font-weight: 600; color: #856404;">
+                🧪 <strong>Test Mode Active:</strong> Events are being processed but NOT sent to external services (Cloudflare/Google Analytics). 
+                Uncheck "Test Mode" below and save to disable.
+            </p>
+        </div>
+    <?php endif; ?>
 
     <div class="ga4-server-side-tagging-admin">
         <div class="ga4-server-side-tagging-admin-header">
@@ -197,6 +209,16 @@ $batch_size = get_option('ga4_event_batch_size', 1000);
                                     Enable debug logging
                                 </label>
                                 <p class="description">Enable detailed logging for troubleshooting. Logs can be viewed in the Tagging Logs page.</p>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th scope="row">Test Mode</th>
+                            <td>
+                                <label for="ga4_test_mode_enabled">
+                                    <input type="checkbox" id="ga4_test_mode_enabled" name="ga4_test_mode_enabled" <?php checked($test_mode); ?> />
+                                    Enable test mode (prevent sending to external services)
+                                </label>
+                                <p class="description">When enabled, events will be processed normally but will NOT be sent to Cloudflare or Google Analytics. All other functionality (validation, logging, queueing) remains active.</p>
                             </td>
                         </tr>
                         <tr>

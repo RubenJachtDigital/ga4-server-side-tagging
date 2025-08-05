@@ -214,6 +214,18 @@ $current_page = floor($offset / $limit) + 1;
 
 <div class="wrap">
     <h1><?php echo esc_html__('Event Monitor & Queue Management', 'ga4-server-side-tagging'); ?></h1>
+
+    <?php
+    // Test mode warning banner
+    $test_mode_enabled = get_option('ga4_test_mode_enabled', false);
+    if ($test_mode_enabled): ?>
+        <div class="notice notice-warning" style="padding: 15px; margin: 20px 0; border-left: 4px solid #dc3545; background-color: #fff3cd;">
+            <p style="margin: 0; font-size: 14px; font-weight: 600; color: #856404;">
+                🧪 <strong>Test Mode Active:</strong> Events are being processed but NOT sent to external services (Cloudflare/Google Analytics). 
+                <a href="<?php echo admin_url('admin.php?page=ga4-server-side-tagging-settings'); ?>" style="color: #856404; text-decoration: underline;">Disable in Settings</a>
+            </p>
+        </div>
+    <?php endif; ?>
     
     <!-- Tab Navigation -->
     <div class="nav-tab-wrapper" style="margin-bottom: 20px;">
@@ -361,11 +373,13 @@ $current_page = floor($offset / $limit) + 1;
                                     $transmission_method = $event->transmission_method ?? 'cloudflare';
                                     $method_colors = array(
                                         'cloudflare' => '#f48120',
-                                        'ga4_direct' => '#4285f4'
+                                        'ga4_direct' => '#4285f4',
+                                        'test_mode' => '#dc3545'
                                     );
                                     $method_labels = array(
                                         'cloudflare' => 'Cloudflare',
-                                        'ga4_direct' => 'GA4 Direct'
+                                        'ga4_direct' => 'GA4 Direct',
+                                        'test_mode' => '🧪 Test Mode'
                                     );
                                     $method_color = $method_colors[$transmission_method] ?? '#6c757d';
                                     $method_label = $method_labels[$transmission_method] ?? ucfirst($transmission_method);

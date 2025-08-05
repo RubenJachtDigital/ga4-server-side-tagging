@@ -227,16 +227,42 @@ class GA4_Cronjob_Manager
         }
 
         
-        // Simple check: if disable CF proxy is enabled, use direct GA4
-        $disable_cf_proxy = get_option('ga4_disable_cf_proxy', false);
+        // Check for test mode - if enabled, skip sending to external services
+        $test_mode_enabled = get_option('ga4_test_mode_enabled', false);
         
-        if ($disable_cf_proxy) {
-            // Send events individually to GA4 (bypass Cloudflare) - NO FALLBACK
-            $success = $this->send_events_to_ga4($events, $batch_events, $batch_consent);
-            $transmission_error_message = "Failed to send events directly to Google Analytics";
+        if ($test_mode_enabled) {
+            // Test mode: mark events as completed without sending
+            $success = true;
+            
+            // Update final data for all events to show test mode transmission
+            if ($events) {
+                foreach ($events as $event) {
+                    $this->event_logger->update_event_final_data(
+                        $event->id, 
+                        $batch_events, // Use the batch events as final payload
+                        array(), // Empty headers for test mode
+                        'test_mode', // Set transmission method to test_mode
+                        $event->was_originally_encrypted ?? false, 
+                        false // final payload not encrypted in test mode
+                    );
+                }
+            }
+            
+            if ($this->logger && get_option('ga4_server_side_tagging_debug_mode')) {
+                $this->logger->info("Test mode enabled - events processed but not sent to external services. Processed " . count($batch_events) . " events.");
+            }
         } else {
-            $success = $this->send_batch_to_cloudflare($batch_events, $batch_consent, $events);
-            $transmission_error_message = "Failed to send events to Cloudflare Worker";
+            // Normal processing: check if disable CF proxy is enabled, use direct GA4
+            $disable_cf_proxy = get_option('ga4_disable_cf_proxy', false);
+            
+            if ($disable_cf_proxy) {
+                // Send events individually to GA4 (bypass Cloudflare) - NO FALLBACK
+                $success = $this->send_events_to_ga4($events, $batch_events, $batch_consent);
+                $transmission_error_message = "Failed to send events directly to Google Analytics";
+            } else {
+                $success = $this->send_batch_to_cloudflare($batch_events, $batch_consent, $events);
+                $transmission_error_message = "Failed to send events to Cloudflare Worker";
+            }
         }
 
         if ($success) {
@@ -244,12 +270,13 @@ class GA4_Cronjob_Manager
             $this->event_logger->update_event_status($event_ids, 'completed');
         } else {
             // Mark events as failed with specific error message for chosen transmission method
+            $error_message = $test_mode_enabled ? "Test mode processing failed" : $transmission_error_message;
             foreach ($event_ids as $event_id) {
-                $this->event_logger->mark_event_failed($event_id, $transmission_error_message);
+                $this->event_logger->mark_event_failed($event_id, $error_message);
             }
             
             if ($this->logger) {
-                $this->logger->error($transmission_error_message . " - " . count($event_ids) . " events marked as failed");
+                $this->logger->error($error_message . " - " . count($event_ids) . " events marked as failed");
             }
         }
     }
@@ -756,16 +783,30 @@ class GA4_Cronjob_Manager
                 );
             }
 
-            // Determine transmission method (same logic as cron processing)
-            $disable_cf_proxy = get_option('ga4_disable_cf_proxy', false);
+            // Check for test mode first - if enabled, skip sending to external services
+            $test_mode_enabled = get_option('ga4_test_mode_enabled', false);
             
-            $success = false;
-            $transmission_method = '';
-            $error_message = '';
-            $final_payload = null;
-            $final_headers = array();
+            if ($test_mode_enabled) {
+                // Test mode: mark as successful without sending to external services
+                $success = true;
+                $transmission_method = 'test_mode';
+                $final_payload = $event_data; // Keep original for logging
+                $final_headers = $original_headers;
+                
+                if ($this->logger && get_option('ga4_server_side_tagging_debug_mode')) {
+                    $this->logger->info("Test mode enabled - direct event processed but not sent to external services. Event: " . $event_name);
+                }
+            } else {
+                // Determine transmission method (same logic as cron processing)
+                $disable_cf_proxy = get_option('ga4_disable_cf_proxy', false);
+                
+                $success = false;
+                $transmission_method = '';
+                $error_message = '';
+                $final_payload = null;
+                $final_headers = array();
 
-            if ($disable_cf_proxy) {
+                if ($disable_cf_proxy) {
                 // Send directly to GA4 - need to transform the payload
                 $transmission_method = 'ga4_direct';
                 $measurement_id = get_option('ga4_measurement_id', '');
@@ -876,6 +917,7 @@ class GA4_Cronjob_Manager
                     }
                 }
             }
+            } // End of else block for test mode
 
             // Store final payload and headers for monitoring using the proper function
             if ($final_payload) {
