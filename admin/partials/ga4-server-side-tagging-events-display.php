@@ -21,12 +21,59 @@ $event_logger = new GA4_Event_Logger();
 // Handle cleanup action
 if (isset($_POST['cleanup_logs']) && wp_verify_nonce($_POST['_wpnonce'], 'ga4_cleanup_logs')) {
     $days = intval($_POST['cleanup_days']) ?: 30;
+    $preserve_purchases = isset($_POST['preserve_purchases']) ? (bool) $_POST['preserve_purchases'] : true;
+    $delete_all = isset($_POST['delete_all_events']) ? (bool) $_POST['delete_all_events'] : false;
     
     // Save the unified cleanup days setting
     update_option('ga4_event_cleanup_days', $days);
+    update_option('ga4_preserve_purchases_cleanup', $preserve_purchases);
     
-    $cleaned = $event_logger->cleanup_old_logs($days);
-    echo '<div class="notice notice-success is-dismissible"><p>Cleaned up ' . $cleaned . ' event logs older than ' . $days . ' days.</p></div>';
+    // Check if the enhanced method exists
+    if (method_exists($event_logger, 'cleanup_old_logs') && 
+        (new ReflectionMethod($event_logger, 'cleanup_old_logs'))->getNumberOfParameters() >= 2) {
+        // New enhanced method with preserve_purchases parameter
+        $results = $event_logger->cleanup_old_logs($days, $preserve_purchases, $delete_all);
+        
+        if ($results['success']) {
+            echo '<div class="notice notice-success is-dismissible"><p>' . esc_html($results['message']) . '</p></div>';
+        } else {
+            echo '<div class="notice notice-error is-dismissible"><p>Error: ' . esc_html($results['message']) . '</p></div>';
+        }
+    } else {
+        // Fallback to old method
+        $cleaned = $event_logger->cleanup_old_logs($days);
+        $message = 'Cleaned up ' . intval($cleaned) . ' event logs older than ' . $days . ' days.';
+        if ($preserve_purchases) {
+            $message .= ' (Note: Purchase preservation requires plugin update)';
+        }
+        echo '<div class="notice notice-success is-dismissible"><p>' . esc_html($message) . '</p></div>';
+    }
+}
+
+// Handle delete all events action
+if (isset($_POST['delete_all_events_confirm']) && wp_verify_nonce($_POST['_wpnonce'], 'ga4_delete_all_events')) {
+    $confirm_text = sanitize_text_field($_POST['confirm_delete_text']);
+    
+    if ($confirm_text === 'DELETE ALL EVENTS') {
+        // Check if the delete_all_events method exists
+        if (method_exists($event_logger, 'delete_all_events')) {
+            $results = $event_logger->delete_all_events();
+            
+            if ($results['success']) {
+                echo '<div class="notice notice-success is-dismissible"><p>' . esc_html($results['message']) . '</p></div>';
+            } else {
+                echo '<div class="notice notice-error is-dismissible"><p>Error: ' . esc_html($results['message']) . '</p></div>';
+            }
+        } else {
+            // Fallback: Manual deletion
+            global $wpdb;
+            $table_name = $wpdb->prefix . 'ga4_event_logs';
+            $deleted = $wpdb->query("DELETE FROM $table_name");
+            echo '<div class="notice notice-success is-dismissible"><p>Deleted all ' . intval($deleted) . ' events from database.</p></div>';
+        }
+    } else {
+        echo '<div class="notice notice-error is-dismissible"><p>Confirmation text did not match. No events were deleted.</p></div>';
+    }
 }
 
 // Handle extensive error logging toggle
@@ -43,6 +90,8 @@ if (isset($_POST['toggle_extensive_logging']) && wp_verify_nonce($_POST['_wpnonc
 // Get the unified cleanup days setting (default: 7 days)
 // Migrate from old separate settings if they exist
 $event_cleanup_days = get_option('ga4_event_cleanup_days');
+$preserve_purchases = get_option('ga4_preserve_purchases_cleanup', true); // Default: preserve purchases
+
 if ($event_cleanup_days === false) {
     // Check for old separate settings and use them as migration
     $old_event_logs_days = get_option('ga4_event_logs_cleanup_days');
@@ -181,15 +230,80 @@ $current_page = floor($offset / $limit) + 1;
 
     <!-- Management Section -->
     <div class="ga4-admin-section">
-        <h2><?php echo esc_html__('Management', 'ga4-server-side-tagging'); ?></h2>
-        <form method="post" style="display: inline-block;">
+        <h2><?php echo esc_html__('Event Management', 'ga4-server-side-tagging'); ?></h2>
+        
+        <!-- Cleanup Preview -->
+        <?php 
+        // Check if the method exists (for backward compatibility)
+        if (method_exists($event_logger, 'get_cleanup_preview')) {
+            $cleanup_preview = $event_logger->get_cleanup_preview($event_cleanup_days);
+        } else {
+            // Fallback: Get basic stats manually
+            global $wpdb;
+            $table_name = $wpdb->prefix . 'ga4_event_logs';
+            $cutoff_date = date('Y-m-d H:i:s', strtotime("-{$event_cleanup_days} days"));
+            
+            $cleanup_preview = array(
+                'total_events' => intval($wpdb->get_var("SELECT COUNT(*) FROM $table_name")),
+                'total_purchase_events' => intval($wpdb->get_var("SELECT COUNT(*) FROM $table_name WHERE event_name = 'purchase'")),
+                'total_old_events' => intval($wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM $table_name WHERE created_at < %s", $cutoff_date))),
+                'old_purchase_events' => intval($wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM $table_name WHERE created_at < %s AND event_name = 'purchase'", $cutoff_date))),
+                'cutoff_date' => $cutoff_date
+            );
+            $cleanup_preview['old_non_purchase_events'] = $cleanup_preview['total_old_events'] - $cleanup_preview['old_purchase_events'];
+        }
+        ?>
+        <div style="background: #f9f9f9; padding: 15px; margin-bottom: 20px; border-left: 4px solid #0073aa;">
+            <h3><?php echo esc_html__('Database Status', 'ga4-server-side-tagging'); ?></h3>
+            <p><strong><?php echo esc_html__('Total Events:', 'ga4-server-side-tagging'); ?></strong> <?php echo number_format($cleanup_preview['total_events']); ?></p>
+            <p><strong><?php echo esc_html__('Purchase Events:', 'ga4-server-side-tagging'); ?></strong> <?php echo number_format($cleanup_preview['total_purchase_events']); ?></p>
+            <p><strong><?php echo esc_html__('Events older than ' . $event_cleanup_days . ' days:', 'ga4-server-side-tagging'); ?></strong> <?php echo number_format($cleanup_preview['total_old_events']); ?>
+               (<?php echo number_format($cleanup_preview['old_purchase_events']); ?> purchases, <?php echo number_format($cleanup_preview['old_non_purchase_events']); ?> others)</p>
+        </div>
+        
+        <!-- Standard Cleanup Form -->
+        <form method="post" style="display: inline-block; margin-right: 20px;">
             <?php wp_nonce_field('ga4_cleanup_logs'); ?>
-            <label for="cleanup_days"><?php echo esc_html__('Clean up logs older than:', 'ga4-server-side-tagging'); ?></label>
-            <input type="number" id="cleanup_days" name="cleanup_days" value="<?php echo esc_attr($event_cleanup_days); ?>" min="1" max="365" style="width: 60px;">
-            <span><?php echo esc_html__('days', 'ga4-server-side-tagging'); ?></span>
+            <h3><?php echo esc_html__('Standard Cleanup', 'ga4-server-side-tagging'); ?></h3>
+            
+            <p>
+                <label for="cleanup_days"><?php echo esc_html__('Clean up logs older than:', 'ga4-server-side-tagging'); ?></label>
+                <input type="number" id="cleanup_days" name="cleanup_days" value="<?php echo esc_attr($event_cleanup_days); ?>" min="1" max="365" style="width: 60px;">
+                <span><?php echo esc_html__('days', 'ga4-server-side-tagging'); ?></span>
+            </p>
+            
+            <p>
+                <label>
+                    <input type="checkbox" name="preserve_purchases" value="1" <?php checked($preserve_purchases, true); ?>>
+                    <?php echo esc_html__('Preserve all purchase events (recommended)', 'ga4-server-side-tagging'); ?>
+                </label>
+            </p>
+            
+            <p class="description">
+                <?php echo esc_html__('Purchase events contain critical business data and should typically be preserved. Other events (page_view, click, etc.) will be cleaned up normally.', 'ga4-server-side-tagging'); ?>
+            </p>
+            
             <input type="submit" name="cleanup_logs" class="button" value="<?php echo esc_attr__('Cleanup Old Logs', 'ga4-server-side-tagging'); ?>"
                    onclick="return confirm('<?php echo esc_js(__('Are you sure you want to delete old event logs?', 'ga4-server-side-tagging')); ?>');">
-            <p class="description"><?php echo esc_html__('Remove event logs older than the specified number of days to keep the database clean.', 'ga4-server-side-tagging'); ?></p>
+        </form>
+        
+        <!-- Delete All Events Form -->
+        <form method="post" style="display: inline-block; vertical-align: top; background: #ffeeee; padding: 15px; border: 1px solid #ff6666;">
+            <?php wp_nonce_field('ga4_delete_all_events'); ?>
+            <h3 style="color: #d63638;"><?php echo esc_html__('⚠️ DANGER ZONE', 'ga4-server-side-tagging'); ?></h3>
+            
+            <p><strong><?php echo esc_html__('Delete ALL Events (Including Purchases)', 'ga4-server-side-tagging'); ?></strong></p>
+            <p><?php echo esc_html__('This will permanently delete ALL event data from the database, including purchase transactions. This action cannot be undone!', 'ga4-server-side-tagging'); ?></p>
+            
+            <p>
+                <label for="confirm_delete_text"><?php echo esc_html__('Type "DELETE ALL EVENTS" to confirm:', 'ga4-server-side-tagging'); ?></label><br>
+                <input type="text" id="confirm_delete_text" name="confirm_delete_text" style="width: 200px;" required>
+            </p>
+            
+            <input type="submit" name="delete_all_events_confirm" class="button button-secondary" 
+                   style="background: #d63638; border-color: #d63638; color: white;"
+                   value="<?php echo esc_attr__('Delete All Events', 'ga4-server-side-tagging'); ?>"
+                   onclick="return confirm('<?php echo esc_js(__('THIS WILL DELETE ALL EVENTS INCLUDING PURCHASES! Are you absolutely sure?', 'ga4-server-side-tagging')); ?>');">
         </form>
     </div>
 

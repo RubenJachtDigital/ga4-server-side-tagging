@@ -989,6 +989,45 @@ class GA4_Server_Side_Tagging_Endpoint
             
             // Process each event for queuing
             foreach ($request_data['events'] as $event) {
+                // Check for duplicate transaction_id for purchase events
+                if (isset($event['name']) && $event['name'] === 'purchase' && 
+                    isset($event['params']['transaction_id'])) {
+                    
+                    $transaction_id = $event['params']['transaction_id'];
+                    
+                    if ($this->event_logger->transaction_exists($transaction_id)) {
+                        // Log the duplicate attempt
+                        $this->event_logger->create_event_record(
+                            array(
+                                'event' => $event,
+                                'consent' => $request_data['consent'] ?? null,
+                                'batch' => $request_data['batch'] ?? false,
+                                'timestamp' => time()
+                            ),
+                            'denied', // monitor_status - denied due to duplicate
+                            $this->get_essential_headers($request),
+                            $was_originally_encrypted,
+                            array(
+                                'event_name' => $event['name'],
+                                'reason' => "Duplicate transaction_id: {$transaction_id}",
+                                'error_type' => 'duplicate_transaction',
+                                'ip_address' => $client_ip,
+                                'user_agent' => $request->get_header('user-agent'),
+                                'url' => $request->get_header('origin'),
+                                'referrer' => $request->get_header('referer'),
+                                'session_id' => $session_id,
+                                'consent_given' => $this->extract_consent_status($request_data),
+                                'batch_size' => count($request_data['events']),
+                                'duplicate_transaction_id' => $transaction_id
+                            )
+                        );
+                        
+                        $this->logger->warning("Duplicate purchase transaction blocked: {$transaction_id} from IP: {$client_ip}");
+                        $failed_events++;
+                        continue; // Skip processing this event
+                    }
+                }
+                
                 // Prepare event data with context
                 $event_data = array(
                     'event' => $event,
@@ -1097,6 +1136,70 @@ class GA4_Server_Side_Tagging_Endpoint
         // Get original request headers
         $original_headers = $this->get_essential_headers($request);
         
+        // Check for duplicate transactions in direct sending mode
+        $client_ip = $this->get_client_ip($request);
+        $events_to_process = array();
+        $duplicate_count = 0;
+        
+        foreach ($request_data['events'] as $event) {
+            // Check for duplicate transaction_id for purchase events
+            if (isset($event['name']) && $event['name'] === 'purchase' && 
+                isset($event['params']['transaction_id'])) {
+                
+                $transaction_id = $event['params']['transaction_id'];
+                
+                if ($this->event_logger->transaction_exists($transaction_id)) {
+                    // Log the duplicate attempt
+                    $this->event_logger->create_event_record(
+                        array(
+                            'event' => $event,
+                            'consent' => $request_data['consent'] ?? null,
+                            'batch' => $request_data['batch'] ?? false,
+                            'timestamp' => time()
+                        ),
+                        'denied', // monitor_status - denied due to duplicate
+                        $original_headers,
+                        $was_originally_encrypted,
+                        array(
+                            'event_name' => $event['name'],
+                            'reason' => "Duplicate transaction_id: {$transaction_id} (direct mode)",
+                            'error_type' => 'duplicate_transaction',
+                            'ip_address' => $client_ip,
+                            'user_agent' => $request->get_header('user-agent'),
+                            'url' => $request->get_header('origin'),
+                            'referrer' => $request->get_header('referer'),
+                            'session_id' => $session_id,
+                            'consent_given' => $this->extract_consent_status($request_data),
+                            'duplicate_transaction_id' => $transaction_id
+                        )
+                    );
+                    
+                    $this->logger->warning("Duplicate purchase transaction blocked (direct mode): {$transaction_id} from IP: {$client_ip}");
+                    $duplicate_count++;
+                    continue; // Skip this event
+                }
+            }
+            
+            // Add event to processing list
+            $events_to_process[] = $event;
+        }
+        
+        // If all events were duplicates, return error
+        if (empty($events_to_process)) {
+            return new \WP_REST_Response(array(
+                'success' => false,
+                'events_failed' => $event_count,
+                'duplicates_blocked' => $duplicate_count,
+                'processing_method' => 'direct',
+                'processing_time_ms' => $processing_time,
+                'error' => 'All events were duplicate transactions',
+                'message' => 'All purchase events have already been processed'
+            ), 400);
+        }
+        
+        // Update request data with filtered events
+        $request_data['events'] = $events_to_process;
+        
         // Add session_id to the request data for logging
         $request_data['session_id'] = $session_id;
         
@@ -1110,17 +1213,27 @@ class GA4_Server_Side_Tagging_Endpoint
         
         // Return appropriate response based on results
         if ($result['success']) {
-            return new \WP_REST_Response(array(
+            $response_data = array(
                 'success' => true,
-                'events_processed' => $event_count,
+                'events_processed' => count($events_to_process),
                 'processing_method' => 'direct',
                 'transmission_method' => $result['transmission_method'] ?? 'unknown',
                 'processing_time_ms' => $processing_time
-            ), 200);
+            );
+            
+            // Include duplicate information if any were blocked
+            if ($duplicate_count > 0) {
+                $response_data['duplicates_blocked'] = $duplicate_count;
+                $response_data['total_events_received'] = $event_count;
+            }
+            
+            return new \WP_REST_Response($response_data, 200);
         } else {
             return new \WP_REST_Response(array(
                 'success' => false,
-                'events_failed' => $event_count,
+                'events_failed' => count($events_to_process),
+                'duplicates_blocked' => $duplicate_count,
+                'total_events_received' => $event_count,
                 'processing_method' => 'direct',
                 'transmission_method' => $result['transmission_method'] ?? 'unknown',
                 'processing_time_ms' => $processing_time,

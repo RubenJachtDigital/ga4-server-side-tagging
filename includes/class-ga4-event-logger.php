@@ -774,22 +774,285 @@ class GA4_Event_Logger
     }
 
     /**
-     * Clean old logs (keep last 30 days by default)
+     * Clean old logs with options to preserve purchase events
      *
      * @since    2.1.0
-     * @param    int    $days    Number of days to keep.
-     * @return   int|false       Number of deleted rows or false on error.
+     * @param    int     $days                Number of days to keep.
+     * @param    bool    $preserve_purchases  Whether to preserve purchase events (default: true).
+     * @param    bool    $delete_all_events   Whether to delete all events regardless of age (default: false).
+     * @return   array   Array with deletion results and counts.
      */
-    public function cleanup_old_logs($days = 30)
+    public function cleanup_old_logs($days = 30, $preserve_purchases = true, $delete_all_events = false)
+    {
+        global $wpdb;
+
+        $results = array(
+            'total_deleted' => 0,
+            'non_purchase_deleted' => 0,
+            'purchase_deleted' => 0,
+            'success' => true,
+            'message' => ''
+        );
+
+        try {
+            if ($delete_all_events) {
+                // Delete everything - nuclear option
+                $deleted = $wpdb->query("DELETE FROM $this->table_name");
+                $results['total_deleted'] = $deleted !== false ? $deleted : 0;
+                $results['message'] = "Deleted all events from database";
+                
+            } else {
+                $cutoff_date = date('Y-m-d H:i:s', strtotime("-{$days} days"));
+                
+                if ($preserve_purchases) {
+                    // Delete old events but preserve purchase events
+                    $query = "DELETE FROM $this->table_name 
+                             WHERE created_at < %s 
+                             AND event_name != 'purchase'";
+                    
+                    $non_purchase_deleted = $wpdb->query($wpdb->prepare($query, $cutoff_date));
+                    $results['non_purchase_deleted'] = $non_purchase_deleted !== false ? $non_purchase_deleted : 0;
+                    $results['total_deleted'] = $results['non_purchase_deleted'];
+                    $results['message'] = "Deleted {$results['non_purchase_deleted']} old non-purchase events (preserved all purchase events)";
+                    
+                } else {
+                    // Delete all old events including purchases
+                    $deleted = $wpdb->query($wpdb->prepare(
+                        "DELETE FROM $this->table_name WHERE created_at < %s",
+                        $cutoff_date
+                    ));
+                    $results['total_deleted'] = $deleted !== false ? $deleted : 0;
+                    $results['message'] = "Deleted {$results['total_deleted']} old events including purchases";
+                }
+            }
+            
+        } catch (\Exception $e) {
+            $results['success'] = false;
+            $results['message'] = 'Error during cleanup: ' . $e->getMessage();
+        }
+
+        return $results;
+    }
+
+    /**
+     * Delete all events (nuclear option) - use with extreme caution
+     *
+     * @since    3.0.0
+     * @return   array   Array with deletion results.
+     */
+    public function delete_all_events()
+    {
+        return $this->cleanup_old_logs(30, false, true);
+    }
+
+    /**
+     * Get count of events by type for cleanup preview
+     *
+     * @since    3.0.0
+     * @param    int    $days    Number of days to check.
+     * @return   array  Counts of different event types that would be deleted.
+     */
+    public function get_cleanup_preview($days = 30)
     {
         global $wpdb;
 
         $cutoff_date = date('Y-m-d H:i:s', strtotime("-{$days} days"));
         
-        return $wpdb->query($wpdb->prepare(
-            "DELETE FROM $this->table_name WHERE created_at < %s",
-            $cutoff_date
+        $results = array(
+            'total_old_events' => 0,
+            'old_purchase_events' => 0,
+            'old_non_purchase_events' => 0,
+            'total_events' => 0,
+            'total_purchase_events' => 0,
+            'cutoff_date' => $cutoff_date
+        );
+
+        // Get total events
+        $results['total_events'] = intval($wpdb->get_var("SELECT COUNT(*) FROM $this->table_name"));
+        
+        // Get total purchase events
+        $results['total_purchase_events'] = intval($wpdb->get_var(
+            "SELECT COUNT(*) FROM $this->table_name WHERE event_name = 'purchase'"
         ));
+
+        // Get old events count
+        $results['total_old_events'] = intval($wpdb->get_var($wpdb->prepare(
+            "SELECT COUNT(*) FROM $this->table_name WHERE created_at < %s",
+            $cutoff_date
+        )));
+
+        // Get old purchase events count
+        $results['old_purchase_events'] = intval($wpdb->get_var($wpdb->prepare(
+            "SELECT COUNT(*) FROM $this->table_name WHERE created_at < %s AND event_name = 'purchase'",
+            $cutoff_date
+        )));
+
+        // Calculate old non-purchase events
+        $results['old_non_purchase_events'] = $results['total_old_events'] - $results['old_purchase_events'];
+
+        return $results;
+    }
+
+    /**
+     * Clean up only specific event types
+     *
+     * @since    3.0.0
+     * @param    array  $event_types  Array of event types to delete.
+     * @param    int    $days         Number of days to keep (optional).
+     * @return   array  Deletion results.
+     */
+    public function cleanup_specific_events($event_types = array(), $days = null)
+    {
+        global $wpdb;
+
+        if (empty($event_types)) {
+            return array(
+                'total_deleted' => 0,
+                'success' => false,
+                'message' => 'No event types specified'
+            );
+        }
+
+        $results = array(
+            'total_deleted' => 0,
+            'success' => true,
+            'message' => ''
+        );
+
+        try {
+            // Build placeholders for IN clause
+            $placeholders = implode(',', array_fill(0, count($event_types), '%s'));
+            
+            if ($days !== null) {
+                // Delete specific event types older than specified days
+                $cutoff_date = date('Y-m-d H:i:s', strtotime("-{$days} days"));
+                $query = "DELETE FROM $this->table_name 
+                         WHERE event_name IN ($placeholders) 
+                         AND created_at < %s";
+                $params = array_merge($event_types, array($cutoff_date));
+                
+            } else {
+                // Delete all events of specified types regardless of age
+                $query = "DELETE FROM $this->table_name WHERE event_name IN ($placeholders)";
+                $params = $event_types;
+            }
+
+            $deleted = $wpdb->query($wpdb->prepare($query, $params));
+            $results['total_deleted'] = $deleted !== false ? $deleted : 0;
+            $results['message'] = "Deleted {$results['total_deleted']} events of types: " . implode(', ', $event_types);
+            
+        } catch (\Exception $e) {
+            $results['success'] = false;
+            $results['message'] = 'Error during specific cleanup: ' . $e->getMessage();
+        }
+
+        return $results;
+    }
+
+    /**
+     * Check if a transaction_id already exists in the event logs
+     * Handles both encrypted and unencrypted payloads
+     *
+     * @since    3.0.0
+     * @param    string    $transaction_id    The transaction ID to check for duplicates.
+     * @return   bool      True if transaction exists, false otherwise.
+     */
+    public function transaction_exists($transaction_id)
+    {
+        global $wpdb;
+
+        if (empty($transaction_id)) {
+            return false;
+        }
+
+        // First try to find in unencrypted data (for performance)
+        $search_pattern = '%"transaction_id":"' . $wpdb->esc_like($transaction_id) . '"%';
+        $query = "
+            SELECT COUNT(*) 
+            FROM $this->table_name 
+            WHERE (
+                original_payload LIKE %s 
+                OR final_payload LIKE %s
+            )
+            AND monitor_status = 'allowed'
+        ";
+        
+        $count = $wpdb->get_var($wpdb->prepare(
+            $query,
+            $search_pattern,
+            $search_pattern
+        ));
+
+        // If found in unencrypted data, return true
+        if (intval($count) > 0) {
+            return true;
+        }
+
+        // If not found and encryption is enabled, search in encrypted payloads
+        $encryption_enabled = get_option('ga4_jwt_encryption_enabled', false);
+        if (!$encryption_enabled) {
+            return false; // No encryption enabled, and already searched unencrypted data
+        }
+
+        // Get all purchase events and decrypt them to search for transaction_id
+        $encrypted_events = $wpdb->get_results(
+            "SELECT id, original_payload, final_payload 
+             FROM $this->table_name 
+             WHERE event_name = 'purchase' 
+             AND monitor_status = 'allowed'"
+        );
+
+        foreach ($encrypted_events as $event) {
+            // Check original_payload
+            if (!empty($event->original_payload)) {
+                $decrypted_payload = $this->decrypt_payload_for_display($event->original_payload);
+                if ($this->search_for_transaction_in_payload($decrypted_payload, $transaction_id)) {
+                    return true;
+                }
+            }
+
+            // Check final_payload
+            if (!empty($event->final_payload)) {
+                $decrypted_payload = $this->decrypt_payload_for_display($event->final_payload);
+                if ($this->search_for_transaction_in_payload($decrypted_payload, $transaction_id)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Search for transaction_id in a decrypted payload
+     *
+     * @since    3.0.0
+     * @param    mixed     $payload         The decrypted payload (string or array).
+     * @param    string    $transaction_id  The transaction ID to search for.
+     * @return   bool      True if transaction_id found, false otherwise.
+     */
+    private function search_for_transaction_in_payload($payload, $transaction_id)
+    {
+        // Convert to string for searching
+        $search_content = is_array($payload) ? wp_json_encode($payload) : (string)$payload;
+        
+        // Simple string search first
+        if (stripos($search_content, $transaction_id) !== false) {
+            return true;
+        }
+        
+        // If it's JSON, also search recursively in the array structure
+        if ($this->is_json($search_content)) {
+            $json_data = json_decode($search_content, true);
+            return $this->search_in_array($json_data, $transaction_id);
+        }
+        
+        // If payload is already an array, search in it directly
+        if (is_array($payload)) {
+            return $this->search_in_array($payload, $transaction_id);
+        }
+        
+        return false;
     }
 
     /**
