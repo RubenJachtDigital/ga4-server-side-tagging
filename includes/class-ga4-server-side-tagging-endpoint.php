@@ -37,25 +37,6 @@ class GA4_Server_Side_Tagging_Endpoint
      */
     private $logger;
 
-
-    /**
-     * Performance mode enabled - skips heavy validation for faster response
-     *
-     * @since    1.0.0
-     * @access   private
-     * @var      bool    $performance_mode_enabled    Whether performance mode is enabled.
-     */
-    private $performance_mode_enabled = false;
-
-    /**
-     * Session key for storing validation status
-     *
-     * @since    1.0.0
-     * @access   private
-     * @var      string    $validation_session_key    Session key for tracking validation.
-     */
-    private $validation_session_key = 'ga4_session_validated';
-
     /**
      * The cronjob manager instance.
      *
@@ -85,11 +66,6 @@ class GA4_Server_Side_Tagging_Endpoint
         $this->logger = $logger;
         $this->cronjob_manager = new GA4_Cronjob_Manager($logger);
         $this->event_logger = new GA4_Event_Logger();
-        
-        // Ensure session is started for validation tracking
-        if (!session_id()) {
-            session_start();
-        }
     }
 
     /**
@@ -124,23 +100,9 @@ class GA4_Server_Side_Tagging_Endpoint
      */
     public function check_strong_permission($request)
     {
-        // Check if this session has already passed heavy validation
-        $session_validated = isset($_SESSION[$this->validation_session_key]) && $_SESSION[$this->validation_session_key] === true;
-
-        if ($session_validated && $this->performance_mode_enabled) {
-            // Session already validated - perform only basic origin check
-            if (!$this->validate_request_origin($request)) {
-                $this->log_security_failure($request, 'ORIGIN_VALIDATION_FAILED', 'Request origin validation failed (basic check)');
-                return false;
-            }
-            
-            return true; // Fast path for validated sessions
-        }
-
-        
         // 1. Enhanced origin validation - STRICT check
         if (!$this->validate_request_origin($request)) {
-            $this->log_security_failure($request, 'ORIGIN_VALIDATION_FAILED', 'Request origin validation failed (heavy check)');
+            $this->log_security_failure($request, 'ORIGIN_VALIDATION_FAILED', 'Request origin validation failed');
             return false;
         }
 
@@ -155,9 +117,6 @@ class GA4_Server_Side_Tagging_Endpoint
             $this->log_security_failure($request, 'ENHANCED_SECURITY_CHECK_FAILED', 'Enhanced security validation failed');
             return false;
         }
-
-        // All heavy validation passed - mark session as validated
-        $_SESSION[$this->validation_session_key] = true;
 
         return true;
     }
@@ -1200,9 +1159,10 @@ class GA4_Server_Side_Tagging_Endpoint
         // Always log to file-based logger
         $this->logger->log_data($failure_data, 'Security Failure');
         
-        // Also log to Event Monitor database if extensive error logging is enabled
+        // Always log bot detection to Event Monitor database for visibility
+        // Other security failures only logged if extensive error logging is enabled
         $extensive_logging = get_option('ga4_extensive_logging', false);
-        if ($extensive_logging) {
+        if ($extensive_logging || $failure_type === 'BOT_DETECTED') {
             $event_name = $this->extract_event_name_from_request($request->get_json_params());
             
             // Map failure types to monitor status
