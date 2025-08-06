@@ -158,11 +158,11 @@ class GA4_Server_Side_Tagging_Endpoint
             $this->check_behavioral_patterns($request)
         );
 
-        // Require at least 3 positive checks to classify as bot (reduced false positives)
+        // Require at least 2 positive checks to classify as bot (stricter detection)
         $positive_checks = array_filter($bot_checks, function ($check) {
             return $check === true;
         });
-        $is_bot = count($positive_checks) >= 3;
+        $is_bot = count($positive_checks) >= 2;
 
         if ($is_bot) {
             // Log detailed bot detection information
@@ -321,16 +321,39 @@ class GA4_Server_Side_Tagging_Endpoint
             '/ubersuggest/i', // Added
             '/sistrix/i', // Added
 
-            // Headless browsers and automation
+            // Headless browsers and automation (enhanced patterns)
             '/headlesschrome/i',
             '/phantomjs/i',
             '/slimerjs/i',
             '/htmlunit/i',
             '/selenium/i',
-            '/webdriver/i', // Added
-            '/puppeteer/i', // Added
-            '/playwright/i', // Added
-            '/cypress/i', // Added
+            '/selenium[\s\-_]?server/i',
+            '/selenium[\s\-_]?webdriver/i',
+            '/selenium[\s\-_]?grid/i',
+            '/webdriver/i',
+            '/chromedriver/i',
+            '/geckodriver/i',
+            '/edgedriver/i',
+            '/safaridriver/i',
+            '/puppeteer/i',
+            '/playwright/i',
+            '/cypress/i',
+            '/testcafe/i',
+            '/nightwatch/i',
+            '/webdriverio/i',
+            '/protractor/i',
+            '/zombie\.js/i',
+            '/casperjs/i',
+            '/karma/i',
+            '/jest-puppeteer/i',
+            '/chrome-headless/i',
+            '/firefox-headless/i',
+            '/headless[\s\-_]?firefox/i',
+            '/remote[\s\-_]?webdriver/i',
+            '/appium/i',
+            '/browserstack/i',
+            '/saucelabs/i',
+            '/lambdatest/i',
 
             // Monitoring services
             '/pingdom/i',
@@ -386,6 +409,26 @@ class GA4_Server_Side_Tagging_Endpoint
         // Check for suspicious user agent patterns
         if (preg_match('/^[a-z\s]+$/i', $user_agent)) {
             return true; // Too simple user agent
+        }
+        
+        // Additional checks for common selenium characteristics
+        // Check for user agents that look like real browsers but have selenium characteristics
+        if (stripos($user_agent, 'mozilla') !== false && stripos($user_agent, 'webkit') !== false) {
+            // Check for suspicious version combinations or missing expected components
+            if (stripos($user_agent, 'selenium') !== false || 
+                stripos($user_agent, 'webdriver') !== false ||
+                stripos($user_agent, 'chromedriver') !== false ||
+                stripos($user_agent, 'geckodriver') !== false) {
+                return true;
+            }
+            
+            // Check for common automation frameworks embedded in real browser UAs
+            if (preg_match('/selenium[\s\-_\/]?[\d\.]+/i', $user_agent) ||
+                preg_match('/webdriver[\s\-_\/]?[\d\.]+/i', $user_agent) ||
+                preg_match('/chrome[\s\-_\/]?driver/i', $user_agent) ||
+                preg_match('/gecko[\s\-_\/]?driver/i', $user_agent)) {
+                return true;
+            }
         }
 
         return false;
@@ -548,18 +591,43 @@ class GA4_Server_Side_Tagging_Endpoint
     {
         $user_agent = $request->get_header('user-agent');
         
-        // Check for automation tools in user agent (more specific patterns)
+        // Check for automation tools in user agent (enhanced patterns)
         $automation_patterns = array(
-            '/^curl\//i',       // Only user agents starting with "curl/"
-            '/^wget\//i',       // Only user agents starting with "wget/"
-            '/automation/i',    // Generic automation indicator
-            '/postman/i',       // API testing tool
-            '/insomnia/i',      // API testing tool
-            '/selenium/i',      // Browser automation
-            '/webdriver/i',     // Browser automation
-            '/puppeteer/i',     // Browser automation
-            '/playwright/i',    // Browser automation
-            '/phantomjs/i'      // Headless browser
+            '/^curl\//i',               // Only user agents starting with "curl/"
+            '/^wget\//i',               // Only user agents starting with "wget/"
+            '/automation/i',            // Generic automation indicator
+            '/postman/i',               // API testing tool
+            '/insomnia/i',              // API testing tool
+            '/selenium/i',              // Browser automation
+            '/selenium[\s\-_]?server/i', // Selenium server patterns
+            '/selenium[\s\-_]?webdriver/i', // Selenium webdriver patterns
+            '/selenium[\s\-_]?grid/i',   // Selenium grid patterns
+            '/webdriver/i',             // Browser automation
+            '/chromedriver/i',          // Chrome WebDriver
+            '/geckodriver/i',           // Firefox WebDriver
+            '/edgedriver/i',            // Edge WebDriver
+            '/safaridriver/i',          // Safari WebDriver
+            '/puppeteer/i',             // Browser automation
+            '/playwright/i',            // Browser automation
+            '/phantomjs/i',             // Headless browser
+            '/testcafe/i',              // TestCafe automation
+            '/nightwatch/i',            // Nightwatch automation
+            '/webdriverio/i',           // WebdriverIO automation
+            '/protractor/i',            // Protractor automation
+            '/zombie\.js/i',            // Zombie.js headless browser
+            '/casperjs/i',              // CasperJS automation
+            '/karma/i',                 // Karma test runner
+            '/jest-puppeteer/i',        // Jest with Puppeteer
+            '/chrome-headless/i',       // Headless Chrome
+            '/firefox-headless/i',      // Headless Firefox
+            '/headless[\s\-_]?firefox/i', // Various headless Firefox patterns
+            '/remote[\s\-_]?webdriver/i', // Remote WebDriver
+            '/appium/i',                // Mobile automation
+            '/browserstack/i',          // BrowserStack automation
+            '/saucelabs/i',             // SauceLabs automation
+            '/lambdatest/i',            // LambdaTest automation
+            '/automated/i',             // Generic automated indicator
+            '/robot/i'                  // Generic robot indicator
         );
 
         foreach ($automation_patterns as $pattern) {
@@ -2083,9 +2151,9 @@ class GA4_Server_Side_Tagging_Endpoint
             $total_score += $ua_result['score'];
         }
         
-        // Mirror Cloudflare Worker logic: require at least 2 positive checks to classify as bot
+        // Stricter detection: require at least 1 positive check OR high score to classify as bot
         $positive_checks = array_filter($bot_checks);
-        $is_bot = count($positive_checks) >= 2;
+        $is_bot = count($positive_checks) >= 1 || $total_score >= 40;
         
         return array(
             'is_bot' => $is_bot,
@@ -2185,7 +2253,7 @@ class GA4_Server_Side_Tagging_Endpoint
         }
         
         return array(
-            'is_bot' => $score >= 30, // Threshold for bot classification
+            'is_bot' => $score >= 20, // Stricter threshold for bot classification
             'score' => $score,
             'indicators' => $indicators
         );
@@ -2241,8 +2309,47 @@ class GA4_Server_Side_Tagging_Endpoint
             }
         }
         
+        // Check for suspiciously fast navigation (bot-like rapid page changes)
+        if (isset($bot_data['page_load_time']) && $bot_data['page_load_time'] < 100) {
+            $score += 15;
+            $indicators[] = 'impossibly_fast_navigation';
+        }
+        
+        // Check for missing interaction data (bots often don't simulate mouse/keyboard properly)
+        if (isset($bot_data['mouse_movements']) && $bot_data['mouse_movements'] === 0) {
+            $score += 20;
+            $indicators[] = 'no_mouse_movement';
+        }
+        
+        // Check for unnatural event sequences (page_view immediately followed by purchase without clicks)
+        if (isset($event_params['event_name']) && $event_params['event_name'] === 'purchase' && 
+            isset($bot_data['time_since_last_interaction']) && $bot_data['time_since_last_interaction'] < 1000) {
+            $score += 25;
+            $indicators[] = 'unnatural_purchase_sequence';
+        }
+        
+        // Check for missing referrer on direct navigation (suspicious for automated tools)
+        if (isset($event_params['page_referrer']) && empty($event_params['page_referrer']) &&
+            isset($event_params['source']) && $event_params['source'] === '(direct)') {
+            $score += 10;
+            $indicators[] = 'suspicious_direct_navigation';
+        }
+        
+        // Check for identical repeated values (automation often uses fixed values)
+        if (isset($bot_data['viewport_width']) && isset($bot_data['viewport_height'])) {
+            $viewport_width = intval($bot_data['viewport_width']);
+            $viewport_height = intval($bot_data['viewport_height']);
+            // Common automation default screen sizes
+            if (($viewport_width === 1024 && $viewport_height === 768) ||
+                ($viewport_width === 1366 && $viewport_height === 768) ||
+                ($viewport_width === 1920 && $viewport_height === 1080)) {
+                $score += 8;
+                $indicators[] = 'common_automation_screen_size';
+            }
+        }
+        
         return array(
-            'is_bot' => $score >= 20, // Threshold for bot classification
+            'is_bot' => $score >= 15, // Stricter threshold for bot classification
             'score' => $score,
             'indicators' => $indicators
         );
@@ -2265,14 +2372,36 @@ class GA4_Server_Side_Tagging_Endpoint
             $indicators[] = 'missing_or_short_ua';
         }
         
-        // Additional automation tool patterns not in existing check
+        // Additional automation tool patterns not in existing check (enhanced)
         $automation_patterns = array(
             '/puppeteer/i',
             '/playwright/i',
             '/cypress/i',
             '/testcafe/i',
             '/nightwatch/i',
-            '/webdriverio/i'
+            '/webdriverio/i',
+            '/selenium[\s\-_]?server/i',
+            '/selenium[\s\-_]?webdriver/i',
+            '/selenium[\s\-_]?grid/i',
+            '/chromedriver/i',
+            '/geckodriver/i',
+            '/edgedriver/i',
+            '/safaridriver/i',
+            '/protractor/i',
+            '/zombie\.js/i',
+            '/casperjs/i',
+            '/karma/i',
+            '/jest-puppeteer/i',
+            '/chrome-headless/i',
+            '/firefox-headless/i',
+            '/headless[\s\-_]?firefox/i',
+            '/remote[\s\-_]?webdriver/i',
+            '/appium/i',
+            '/browserstack/i',
+            '/saucelabs/i',
+            '/lambdatest/i',
+            '/automated/i',
+            '/robot/i'
         );
         
         foreach ($automation_patterns as $pattern) {
