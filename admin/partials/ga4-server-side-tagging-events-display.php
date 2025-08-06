@@ -18,6 +18,71 @@ use GA4ServerSideTagging\Core\GA4_Event_Logger;
 // Initialize event logger
 $event_logger = new GA4_Event_Logger();
 
+/**
+ * Helper function to format error messages for display
+ * Handles strings, arrays, and objects appropriately
+ */
+function format_error_message_for_display($error_message, $is_truncated = false) {
+    if (empty($error_message)) {
+        return '';
+    }
+    
+    // If it's already a string, check if it might be JSON
+    if (is_string($error_message)) {
+        $decoded = json_decode($error_message, true);
+        if (json_last_error() === JSON_ERROR_NONE && (is_array($decoded) || is_object($decoded))) {
+            $error_message = $decoded;
+        } else {
+            // It's a plain string
+            return $is_truncated ? wp_trim_words($error_message, 8, '...') : $error_message;
+        }
+    }
+    
+    // Handle arrays and objects
+    if (is_array($error_message) || is_object($error_message)) {
+        $error_array = is_object($error_message) ? (array)$error_message : $error_message;
+        
+        if ($is_truncated) {
+            // For table display - show key information concisely
+            $summary_parts = array();
+            
+            // Look for common error fields
+            if (isset($error_array['type'])) {
+                $summary_parts[] = $error_array['type'];
+            }
+            if (isset($error_array['message'])) {
+                $summary_parts[] = wp_trim_words($error_array['message'], 4, '');
+            }
+            if (isset($error_array['error'])) {
+                $summary_parts[] = wp_trim_words($error_array['error'], 4, '');
+            }
+            if (isset($error_array['code'])) {
+                $summary_parts[] = 'Code: ' . $error_array['code'];
+            }
+            if (isset($error_array['status'])) {
+                $summary_parts[] = 'Status: ' . $error_array['status'];
+            }
+            
+            if (!empty($summary_parts)) {
+                return implode(' | ', array_slice($summary_parts, 0, 2)) . (count($summary_parts) > 2 ? '...' : '');
+            } else {
+                // Fallback - show first few key-value pairs
+                $keys = array_keys($error_array);
+                if (!empty($keys)) {
+                    $first_key = $keys[0];
+                    $first_value = is_string($error_array[$first_key]) ? $error_array[$first_key] : json_encode($error_array[$first_key]);
+                    return $first_key . ': ' . wp_trim_words($first_value, 4, '...');
+                }
+            }
+        } else {
+            // For full display - return formatted JSON
+            return wp_json_encode($error_array, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+        }
+    }
+    
+    return $error_message;
+}
+
 // Handle cleanup action
 if (isset($_POST['cleanup_logs']) && wp_verify_nonce($_POST['_wpnonce'], 'ga4_cleanup_logs')) {
     $days = intval($_POST['cleanup_days']) ?: 30;
@@ -351,7 +416,7 @@ $current_page = floor($offset / $limit) + 1;
         'bot_detected' => '🤖 Bot Detected',
         'error' => '⚠️ Error'
     );
-    $search_placeholder = 'ID, event name, IP, reason, user agent, URL, referrer, session ID, payload data...';
+    $search_placeholder = 'ID, event name, IP, reason, error message, user agent, URL, referrer, session ID, payload data...';
     
     // Include the reusable search template
     include plugin_dir_path(__FILE__) . 'ga4-search-template.php';
@@ -410,7 +475,15 @@ $current_page = floor($offset / $limit) + 1;
                                     </span>
                                 </td>
                                 <td>
-                                    <?php if ($event->reason) : ?>
+                                    <?php if ($event->error_message) : ?>
+                                        <?php 
+                                        $formatted_error = format_error_message_for_display($event->error_message, true);
+                                        $full_error = format_error_message_for_display($event->error_message, false);
+                                        ?>
+                                        <span title="<?php echo esc_attr($full_error); ?>" style="font-size: 11px; color: #d63384; font-weight: 500;">
+                                            <?php echo esc_html($formatted_error); ?>
+                                        </span>
+                                    <?php elseif ($event->reason) : ?>
                                         <span title="<?php echo esc_attr($event->reason); ?>" style="font-size: 11px;">
                                             <?php echo esc_html(wp_trim_words($event->reason, 8, '...')); ?>
                                         </span>
@@ -478,6 +551,7 @@ $current_page = floor($offset / $limit) + 1;
                                             data-transmission="<?php echo esc_attr($event->transmission_method ?? ''); ?>"
                                             data-created-at="<?php echo esc_attr($event->created_at); ?>"
                                             data-processed-at="<?php echo esc_attr($event->processed_at ?? ''); ?>"
+                                            data-error-message="<?php echo esc_attr(format_error_message_for_display($event->error_message ?? '', false)); ?>"
                                             style="font-size: 10px; padding: 3px 8px;">
                                         <?php echo esc_html__('View', 'ga4-server-side-tagging'); ?>
                                     </button>
@@ -508,6 +582,104 @@ $current_page = floor($offset / $limit) + 1;
 
 <script type="text/javascript">
 jQuery(document).ready(function($) {
+    
+    // Helper function to format complex error messages
+    function formatErrorMessage(errorMessage) {
+        if (!errorMessage) {
+            return '';
+        }
+        
+        // Try to parse as JSON first
+        var errorObj = null;
+        try {
+            errorObj = JSON.parse(errorMessage);
+        } catch (e) {
+            // If not JSON, treat as string
+            return '<div style="background: #fff3cd; padding: 8px 12px; border-radius: 4px; border: 1px solid #ffeaa7; color: #856404; word-wrap: break-word;">' + 
+                   htmlEscape(errorMessage) + '</div>';
+        }
+        
+        // Handle parsed JSON object/array
+        var formattedContent = '';
+        
+        if (typeof errorObj === 'object' && errorObj !== null) {
+            formattedContent += '<div style="background: #fff3cd; padding: 12px; border-radius: 4px; border: 1px solid #ffeaa7; color: #856404;">';
+            
+            if (Array.isArray(errorObj)) {
+                // Handle arrays
+                formattedContent += '<div style="font-weight: 600; margin-bottom: 8px;">Error Details (Array):</div>';
+                formattedContent += '<ul style="margin: 0; padding-left: 20px;">';
+                errorObj.forEach(function(item, index) {
+                    if (typeof item === 'object') {
+                        formattedContent += '<li><strong>Item ' + index + ':</strong> <pre style="background: rgba(255,255,255,0.7); padding: 4px; margin: 2px 0; border-radius: 2px; font-size: 11px; white-space: pre-wrap;">' + 
+                                           htmlEscape(JSON.stringify(item, null, 2)) + '</pre></li>';
+                    } else {
+                        formattedContent += '<li>' + htmlEscape(String(item)) + '</li>';
+                    }
+                });
+                formattedContent += '</ul>';
+            } else {
+                // Handle objects
+                formattedContent += '<div style="font-weight: 600; margin-bottom: 8px;">Error Details:</div>';
+                formattedContent += '<div style="display: grid; gap: 6px;">';
+                
+                // Special handling for common error object structures
+                var priorityKeys = ['type', 'error', 'message', 'code', 'status', 'details'];
+                var otherKeys = [];
+                
+                Object.keys(errorObj).forEach(function(key) {
+                    if (priorityKeys.indexOf(key) === -1) {
+                        otherKeys.push(key);
+                    }
+                });
+                
+                // Show priority keys first
+                priorityKeys.forEach(function(key) {
+                    if (errorObj.hasOwnProperty(key) && errorObj[key] !== null && errorObj[key] !== undefined) {
+                        var value = errorObj[key];
+                        var displayValue = '';
+                        
+                        if (typeof value === 'object') {
+                            displayValue = '<pre style="background: rgba(255,255,255,0.7); padding: 4px; margin: 2px 0; border-radius: 2px; font-size: 11px; white-space: pre-wrap;">' + 
+                                          htmlEscape(JSON.stringify(value, null, 2)) + '</pre>';
+                        } else {
+                            displayValue = htmlEscape(String(value));
+                        }
+                        
+                        formattedContent += '<div><strong>' + htmlEscape(key) + ':</strong> ' + displayValue + '</div>';
+                    }
+                });
+                
+                // Show other keys
+                otherKeys.forEach(function(key) {
+                    if (errorObj.hasOwnProperty(key) && errorObj[key] !== null && errorObj[key] !== undefined) {
+                        var value = errorObj[key];
+                        var displayValue = '';
+                        
+                        if (typeof value === 'object') {
+                            displayValue = '<pre style="background: rgba(255,255,255,0.7); padding: 4px; margin: 2px 0; border-radius: 2px; font-size: 11px; white-space: pre-wrap;">' + 
+                                          htmlEscape(JSON.stringify(value, null, 2)) + '</pre>';
+                        } else {
+                            displayValue = htmlEscape(String(value));
+                        }
+                        
+                        formattedContent += '<div><strong>' + htmlEscape(key) + ':</strong> ' + displayValue + '</div>';
+                    }
+                });
+                
+                formattedContent += '</div>';
+            }
+            
+            formattedContent += '</div>';
+        } else {
+            // Fallback for primitive types
+            formattedContent = '<div style="background: #fff3cd; padding: 8px 12px; border-radius: 4px; border: 1px solid #ffeaa7; color: #856404;">' + 
+                              htmlEscape(String(errorObj)) + '</div>';
+        }
+        
+        return formattedContent;
+    }
+
     // Event details modal
     $('.view-details-btn').click(function() {
         var data = $(this).data();
@@ -556,6 +728,9 @@ jQuery(document).ready(function($) {
         content += '</div>';
         if (data.reason) {
             content += '<div style="margin-top: 10px;"><strong>Reason:</strong> <span style="background: #fff; padding: 4px 8px; border-radius: 3px; border: 1px solid #ddd;">' + htmlEscape(data.reason) + '</span></div>';
+        }
+        if (data.errorMessage) {
+            content += '<div style="margin-top: 10px;"><strong>Error Message:</strong></div>' + formatErrorMessage(data.errorMessage);
         }
         content += '</div>';
 

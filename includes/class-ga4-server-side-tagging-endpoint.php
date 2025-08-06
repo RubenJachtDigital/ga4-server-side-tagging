@@ -678,6 +678,9 @@ class GA4_Server_Side_Tagging_Endpoint
                 $extensive_logging = get_option('ga4_extensive_logging', false);
                 if ($extensive_logging) {
                     $event_name = $this->extract_event_name_from_request($request->get_json_params());
+                    $bot_detection_details = $this->get_bot_detection_details($request);
+                    $error_message = $this->generate_bot_detection_error_message($bot_detection_details, $client_ip, $request->get_header('user-agent'));
+                    
                     $this->event_logger->create_event_record(
                         $request->get_body(),
                         'bot_detected', // monitor_status
@@ -686,13 +689,14 @@ class GA4_Server_Side_Tagging_Endpoint
                         array(
                             'event_name' => $event_name,
                             'reason' => 'Multi-factor bot detection triggered',
+                            'error_message' => $error_message,
                             'error_type' => 'bot_request_blocked',
                             'ip_address' => $client_ip,
                             'user_agent' => $request->get_header('user-agent'),
                             'url' => $request->get_header('origin'),
                             'referrer' => $request->get_header('referer'),
                             'session_id' => $session_id,
-                            'bot_detection_rules' => $this->get_bot_detection_details($request)
+                            'bot_detection_rules' => $bot_detection_details
                         )
                     );
                 }
@@ -714,6 +718,9 @@ class GA4_Server_Side_Tagging_Endpoint
                 $extensive_logging = get_option('ga4_extensive_logging', false);
                 if ($extensive_logging) {
                     $event_name = $this->extract_event_name_from_request($request->get_json_params());
+                    $rate_limit_info = array_merge($rate_limit_check, array('ip' => $client_ip));
+                    $error_message = $this->generate_rate_limit_error_message($rate_limit_info);
+                    
                     $this->event_logger->create_event_record(
                         substr($request->get_body(), 0, 1000) . '...', // Truncate large payloads
                         'denied', // monitor_status
@@ -722,6 +729,7 @@ class GA4_Server_Side_Tagging_Endpoint
                         array(
                             'event_name' => $event_name,
                             'reason' => 'Rate limit exceeded: ' . $rate_limit_check['retry_after'] . 's retry',
+                            'error_message' => $error_message,
                             'error_type' => 'rate_limit_exceeded',
                             'ip_address' => $client_ip,
                             'user_agent' => $request->get_header('user-agent'),
@@ -753,6 +761,8 @@ class GA4_Server_Side_Tagging_Endpoint
                 $this->logger->error("Empty request data received");
                 $event_name = $this->extract_event_name_from_request($request->get_json_params());
                 
+                $error_message = $this->generate_validation_error_message('empty_request', 'Request body was empty or could not be parsed');
+                
                 $this->event_logger->create_event_record(
                     $request->get_body(),
                     'error', // monitor_status
@@ -761,6 +771,7 @@ class GA4_Server_Side_Tagging_Endpoint
                     array(
                         'event_name' => $event_name,
                         'reason' => 'Empty request data received',
+                        'error_message' => $error_message,
                         'error_type' => 'data_validation_error',
                         'ip_address' => $client_ip,
                         'user_agent' => $request->get_header('user-agent'),
@@ -778,6 +789,8 @@ class GA4_Server_Side_Tagging_Endpoint
                 // Unified batch structure - validate it
                 if (empty($request_data['events'])) {
                     $event_name = $this->extract_event_name_from_request($request_data);
+                    $error_message = $this->generate_validation_error_message('empty_events_array', 'The events array is empty or missing');
+                    
                     $this->event_logger->create_event_record(
                         $request->get_body(),
                         'error', // monitor_status
@@ -786,6 +799,7 @@ class GA4_Server_Side_Tagging_Endpoint
                         array(
                             'event_name' => $event_name,
                             'reason' => 'Empty events array received',
+                            'error_message' => $error_message,
                             'error_type' => 'data_validation_error',
                             'ip_address' => $client_ip,
                             'user_agent' => $request->get_header('user-agent'),
@@ -802,6 +816,8 @@ class GA4_Server_Side_Tagging_Endpoint
                 foreach ($request_data['events'] as $index => $event) {
                     if (!is_array($event)) {
                         $event_name = $this->extract_event_name_from_request($request_data);
+                        $error_message = $this->generate_validation_error_message('invalid_event_format', "Event at index {$index} is not an array - expected event object");
+                        
                         $this->event_logger->create_event_record(
                             $request->get_body(),
                             'error', // monitor_status
@@ -810,6 +826,7 @@ class GA4_Server_Side_Tagging_Endpoint
                             array(
                                 'event_name' => $event_name,
                                 'reason' => "Event at index {$index} is not an array",
+                                'error_message' => $error_message,
                                 'error_type' => 'data_validation_error',
                                 'ip_address' => $client_ip,
                                 'user_agent' => $request->get_header('user-agent'),
@@ -824,6 +841,8 @@ class GA4_Server_Side_Tagging_Endpoint
                     
                     if (!isset($event['name']) || empty($event['name'])) {
                         $event_name = isset($event['name']) ? $event['name'] : 'unknown';
+                        $error_message = $this->generate_validation_error_message('missing_event_name', "Event at index {$index} is missing required 'name' field");
+                        
                         $this->event_logger->create_event_record(
                             $request->get_body(),
                             'error', // monitor_status
@@ -832,6 +851,7 @@ class GA4_Server_Side_Tagging_Endpoint
                             array(
                                 'event_name' => $event_name,
                                 'reason' => "Missing event name at index {$index}",
+                                'error_message' => $error_message,
                                 'error_type' => 'data_validation_error',
                                 'ip_address' => $client_ip,
                                 'user_agent' => $request->get_header('user-agent'),
@@ -2273,6 +2293,98 @@ class GA4_Server_Side_Tagging_Endpoint
             'timestamp' => current_time('mysql'),
             'detection_threshold' => 2
         );
+    }
+
+    /**
+     * Generate detailed error message based on bot detection results
+     *
+     * @since    3.0.0
+     * @param    array    $detection_details    Bot detection results.
+     * @param    string   $client_ip           Client IP address.
+     * @param    string   $user_agent          User agent string.
+     * @return   string                        Formatted error message.
+     */
+    private function generate_bot_detection_error_message($detection_details, $client_ip, $user_agent)
+    {
+        $failed_checks = array();
+        $check_descriptions = array(
+            'user_agent_check' => 'User Agent patterns indicate bot behavior',
+            'ip_check' => 'IP address matches known bot networks',
+            'referer_check' => 'Suspicious or missing referrer information',
+            'headers_check' => 'Missing essential browser headers',
+            'asn_check' => 'IP belongs to suspicious ASN/hosting provider',
+            'behavior_check' => 'Behavioral patterns indicate automated requests'
+        );
+
+        foreach ($detection_details as $check => $result) {
+            if ($result === true && isset($check_descriptions[$check])) {
+                $failed_checks[] = $check_descriptions[$check];
+            }
+        }
+
+        $error_message = array(
+            'type' => 'bot_detection',
+            'message' => 'Multi-factor bot detection triggered',
+            'failed_checks' => $failed_checks,
+            'checks_failed' => count($failed_checks),
+            'threshold' => 2,
+            'client_info' => array(
+                'ip' => $client_ip,
+                'user_agent' => substr($user_agent, 0, 200) . (strlen($user_agent) > 200 ? '...' : ''),
+                'detected_at' => current_time('mysql')
+            ),
+            'action' => 'Event blocked from processing'
+        );
+
+        return json_encode($error_message, JSON_PRETTY_PRINT);
+    }
+
+    /**
+     * Generate error message for rate limiting
+     *
+     * @since    3.0.0
+     * @param    array    $rate_limit_info    Rate limit details.
+     * @return   string                       Formatted error message.
+     */
+    private function generate_rate_limit_error_message($rate_limit_info)
+    {
+        $error_message = array(
+            'type' => 'rate_limit',
+            'message' => 'Request rate limit exceeded',
+            'limit' => 100,
+            'period' => '60 seconds',
+            'retry_after' => $rate_limit_info['retry_after'] . ' seconds',
+            'client_info' => array(
+                'ip' => $rate_limit_info['ip'] ?? 'unknown',
+                'current_count' => $rate_limit_info['current_count'] ?? 'unknown',
+                'window_start' => $rate_limit_info['window_start'] ?? 'unknown'
+            ),
+            'action' => 'Event rejected - retry after cooldown period'
+        );
+
+        return json_encode($error_message, JSON_PRETTY_PRINT);
+    }
+
+    /**
+     * Generate error message for validation errors
+     *
+     * @since    3.0.0
+     * @param    string   $validation_type     Type of validation that failed.
+     * @param    string   $details            Specific error details.
+     * @return   string                       Formatted error message.
+     */
+    private function generate_validation_error_message($validation_type, $details)
+    {
+        $error_message = array(
+            'type' => 'validation_error',
+            'validation_type' => $validation_type,
+            'message' => 'Request validation failed',
+            'details' => $details,
+            'detected_at' => current_time('mysql'),
+            'action' => 'Event rejected due to invalid data'
+        );
+
+        return json_encode($error_message, JSON_PRETTY_PRINT);
     }
 
     /**

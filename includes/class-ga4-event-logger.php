@@ -1345,6 +1345,11 @@ class GA4_Event_Logger
         
         // Merge additional data with base args (additional_data takes priority)
         $event_args = array_merge($base_args, $additional_data);
+        
+        // Auto-generate error_message if not provided for error events
+        if (in_array($monitor_status, ['denied', 'bot_detected', 'error']) && empty($event_args['error_message'])) {
+            $event_args['error_message'] = $this->generate_auto_error_message($monitor_status, $event_args);
+        }
 
         return $this->log_event($event_args);
     }
@@ -1786,5 +1791,84 @@ class GA4_Event_Logger
         
         // Return plain JSON if encryption is disabled or failed
         return wp_json_encode($headers);
+    }
+
+    /**
+     * Auto-generate error message based on monitor status and available data
+     *
+     * @since    3.0.0
+     * @param    string    $monitor_status    The monitor status (denied/bot_detected/error).
+     * @param    array     $event_args        Event arguments with context data.
+     * @return   string                       Generated error message as JSON.
+     */
+    private function generate_auto_error_message($monitor_status, $event_args)
+    {
+        $error_message = array(
+            'type' => $monitor_status,
+            'detected_at' => current_time('mysql'),
+            'event_name' => $event_args['event_name'] ?? 'unknown',
+            'client_info' => array()
+        );
+
+        // Add client information if available
+        if (!empty($event_args['ip_address'])) {
+            $error_message['client_info']['ip'] = $event_args['ip_address'];
+        }
+        if (!empty($event_args['user_agent'])) {
+            $error_message['client_info']['user_agent'] = substr($event_args['user_agent'], 0, 200);
+        }
+        if (!empty($event_args['session_id'])) {
+            $error_message['client_info']['session_id'] = $event_args['session_id'];
+        }
+
+        // Add specific information based on monitor status
+        switch ($monitor_status) {
+            case 'bot_detected':
+                $error_message['message'] = 'Automated request detected and blocked';
+                $error_message['action'] = 'Event blocked from processing';
+                
+                // Add bot detection details if available
+                if (!empty($event_args['bot_detection_rules'])) {
+                    $bot_rules = $event_args['bot_detection_rules'];
+                    if (is_string($bot_rules)) {
+                        $bot_rules = json_decode($bot_rules, true) ?: $bot_rules;
+                    }
+                    $error_message['detection_details'] = $bot_rules;
+                }
+                break;
+
+            case 'denied':
+                $error_message['message'] = 'Request denied due to policy violation';
+                $error_message['action'] = 'Event rejected';
+                
+                // Check if this looks like a rate limit case
+                if (!empty($event_args['reason']) && strpos($event_args['reason'], 'Rate limit') !== false) {
+                    $error_message['type'] = 'rate_limit';
+                    $error_message['message'] = 'Request rate limit exceeded';
+                }
+                break;
+
+            case 'error':
+                $error_message['message'] = 'Request processing error occurred';
+                $error_message['action'] = 'Event processing failed';
+                
+                // Add specific error details
+                if (!empty($event_args['error_type'])) {
+                    $error_message['error_type'] = $event_args['error_type'];
+                }
+                break;
+        }
+
+        // Add the reason as additional context
+        if (!empty($event_args['reason'])) {
+            $error_message['reason'] = $event_args['reason'];
+        }
+
+        // Add error type as additional context
+        if (!empty($event_args['error_type'])) {
+            $error_message['category'] = $event_args['error_type'];
+        }
+
+        return wp_json_encode($error_message, JSON_PRETTY_PRINT);
     }
 }
