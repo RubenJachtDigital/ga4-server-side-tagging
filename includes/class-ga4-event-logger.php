@@ -775,24 +775,41 @@ class GA4_Event_Logger
     }
 
     /**
-     * Clean old logs with options to preserve purchase events
+     * Clean old logs with options to preserve specific event types
      *
      * @since    2.1.0
-     * @param    int     $days                Number of days to keep.
-     * @param    bool    $preserve_purchases  Whether to preserve purchase events (default: true).
-     * @param    bool    $delete_all_events   Whether to delete all events regardless of age (default: false).
+     * @param    int     $days                     Number of days to keep.
+     * @param    mixed   $preserve_purchases       Legacy parameter: bool for purchases, or array of event types to preserve.
+     * @param    bool    $delete_all_events        Whether to delete all events regardless of age (default: false).
+     * @param    array   $preserve_event_types     Array of event types to preserve (takes precedence over $preserve_purchases).
      * @return   array   Array with deletion results and counts.
      */
-    public function cleanup_old_logs($days = 30, $preserve_purchases = true, $delete_all_events = false)
+    public function cleanup_old_logs($days = 30, $preserve_purchases = true, $delete_all_events = false, $preserve_event_types = null)
     {
         global $wpdb;
 
+        // Handle legacy parameters and determine which event types to preserve
+        $events_to_preserve = array();
+        
+        if ($preserve_event_types !== null && is_array($preserve_event_types)) {
+            // New parameter takes precedence
+            $events_to_preserve = $preserve_event_types;
+        } elseif (is_array($preserve_purchases)) {
+            // Handle case where preserve_purchases is actually an array of event types
+            $events_to_preserve = $preserve_purchases;
+        } elseif ($preserve_purchases === true) {
+            // Legacy behavior: preserve only purchase events
+            $events_to_preserve = array('purchase');
+        }
+        // If preserve_purchases === false, preserve nothing (empty array)
+
         $results = array(
             'total_deleted' => 0,
-            'non_purchase_deleted' => 0,
-            'purchase_deleted' => 0,
+            'preserved_events_deleted' => 0,
+            'other_events_deleted' => 0,
             'success' => true,
-            'message' => ''
+            'message' => '',
+            'preserved_types' => $events_to_preserve
         );
 
         try {
@@ -805,25 +822,29 @@ class GA4_Event_Logger
             } else {
                 $cutoff_date = date('Y-m-d H:i:s', strtotime("-{$days} days"));
                 
-                if ($preserve_purchases) {
-                    // Delete old events but preserve purchase events
+                if (!empty($events_to_preserve)) {
+                    // Delete old events but preserve specified event types
+                    $placeholders = implode(',', array_fill(0, count($events_to_preserve), '%s'));
                     $query = "DELETE FROM $this->table_name 
                              WHERE created_at < %s 
-                             AND event_name != 'purchase'";
+                             AND event_name NOT IN ($placeholders)";
                     
-                    $non_purchase_deleted = $wpdb->query($wpdb->prepare($query, $cutoff_date));
-                    $results['non_purchase_deleted'] = $non_purchase_deleted !== false ? $non_purchase_deleted : 0;
-                    $results['total_deleted'] = $results['non_purchase_deleted'];
-                    $results['message'] = "Deleted {$results['non_purchase_deleted']} old non-purchase events (preserved all purchase events)";
+                    $params = array_merge(array($cutoff_date), $events_to_preserve);
+                    $other_events_deleted = $wpdb->query($wpdb->prepare($query, $params));
+                    $results['other_events_deleted'] = $other_events_deleted !== false ? $other_events_deleted : 0;
+                    $results['total_deleted'] = $results['other_events_deleted'];
+                    
+                    $preserved_types_str = implode(', ', $events_to_preserve);
+                    $results['message'] = "Deleted {$results['other_events_deleted']} old events (preserved: {$preserved_types_str})";
                     
                 } else {
-                    // Delete all old events including purchases
+                    // Delete all old events - no preservation
                     $deleted = $wpdb->query($wpdb->prepare(
                         "DELETE FROM $this->table_name WHERE created_at < %s",
                         $cutoff_date
                     ));
                     $results['total_deleted'] = $deleted !== false ? $deleted : 0;
-                    $results['message'] = "Deleted {$results['total_deleted']} old events including purchases";
+                    $results['message'] = "Deleted {$results['total_deleted']} old events (no events preserved)";
                 }
             }
             

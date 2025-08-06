@@ -24,15 +24,25 @@ if (isset($_POST['cleanup_logs']) && wp_verify_nonce($_POST['_wpnonce'], 'ga4_cl
     $preserve_purchases = isset($_POST['preserve_purchases']) ? (bool) $_POST['preserve_purchases'] : true;
     $delete_all = isset($_POST['delete_all_events']) ? (bool) $_POST['delete_all_events'] : false;
     
+    // Handle new preserved event types
+    $preserved_event_types = array();
+    if (isset($_POST['preserved_event_types']) && is_array($_POST['preserved_event_types'])) {
+        $preserved_event_types = array_map('sanitize_text_field', $_POST['preserved_event_types']);
+    } elseif ($preserve_purchases) {
+        // Legacy compatibility: if preserve_purchases is checked, preserve purchase events
+        $preserved_event_types = array('purchase');
+    }
+    
     // Save the unified cleanup days setting
     update_option('ga4_event_cleanup_days', $days);
     update_option('ga4_preserve_purchases_cleanup', $preserve_purchases);
+    update_option('ga4_preserved_event_types_cleanup', $preserved_event_types);
     
     // Check if the enhanced method exists
     if (method_exists($event_logger, 'cleanup_old_logs') && 
         (new ReflectionMethod($event_logger, 'cleanup_old_logs'))->getNumberOfParameters() >= 2) {
-        // New enhanced method with preserve_purchases parameter
-        $results = $event_logger->cleanup_old_logs($days, $preserve_purchases, $delete_all);
+        // New enhanced method with preserved event types parameter
+        $results = $event_logger->cleanup_old_logs($days, $preserve_purchases, $delete_all, $preserved_event_types);
         
         if ($results['success']) {
             echo '<div class="notice notice-success is-dismissible"><p>' . esc_html($results['message']) . '</p></div>';
@@ -91,6 +101,7 @@ if (isset($_POST['toggle_extensive_logging']) && wp_verify_nonce($_POST['_wpnonc
 // Migrate from old separate settings if they exist
 $event_cleanup_days = get_option('ga4_event_cleanup_days');
 $preserve_purchases = get_option('ga4_preserve_purchases_cleanup', true); // Default: preserve purchases
+$preserved_event_types = get_option('ga4_preserved_event_types_cleanup', array('purchase')); // Default: preserve purchase events
 
 if ($event_cleanup_days === false) {
     // Check for old separate settings and use them as migration
@@ -284,15 +295,27 @@ $current_page = floor($offset / $limit) + 1;
                 <span><?php echo esc_html__('days', 'ga4-server-side-tagging'); ?></span>
             </p>
             
-            <p>
-                <label>
-                    <input type="checkbox" name="preserve_purchases" value="1" <?php checked($preserve_purchases, true); ?>>
-                    <?php echo esc_html__('Preserve all purchase events (recommended)', 'ga4-server-side-tagging'); ?>
+            <p><strong><?php echo esc_html__('Event Types to Preserve:', 'ga4-server-side-tagging'); ?></strong></p>
+            <div style="margin: 10px 0; padding: 10px; background: #f9f9f9; border: 1px solid #ddd; width: 100%;">
+                <label style="display: block; margin-bottom: 5px;">
+                    <input type="checkbox" name="preserved_event_types[]" value="purchase" <?php checked(in_array('purchase', $preserved_event_types)); ?>>
+                    <?php echo esc_html__('Purchase events (recommended - critical business data)', 'ga4-server-side-tagging'); ?>
                 </label>
-            </p>
+                <label style="display: block; margin-bottom: 5px;">
+                    <input type="checkbox" name="preserved_event_types[]" value="quote_request" <?php checked(in_array('quote_request', $preserved_event_types)); ?>>
+                    <?php echo esc_html__('Quote request events (lead generation data)', 'ga4-server-side-tagging'); ?>
+                </label>
+                <label style="display: block; margin-bottom: 5px;">
+                    <input type="checkbox" name="preserved_event_types[]" value="form_conversion" <?php checked(in_array('form_conversion', $preserved_event_types)); ?>>
+                    <?php echo esc_html__('Form conversion events (conversion tracking data)', 'ga4-server-side-tagging'); ?>
+                </label>
+            </div>
+            
+            <!-- Legacy compatibility checkbox (hidden but maintains compatibility) -->
+            <input type="hidden" name="preserve_purchases" value="<?php echo in_array('purchase', $preserved_event_types) ? '1' : '0'; ?>">
             
             <p class="description">
-                <?php echo esc_html__('Purchase events contain critical business data and should typically be preserved. Other events (page_view, click, etc.) will be cleaned up normally.', 'ga4-server-side-tagging'); ?>
+                <?php echo esc_html__('Select which event types should be preserved during cleanup. These events contain valuable business data and will not be deleted regardless of age. Other events (page_view, click, etc.) will be cleaned up normally according to the age setting above.', 'ga4-server-side-tagging'); ?>
             </p>
             
             <input type="submit" name="cleanup_logs" class="button" value="<?php echo esc_attr__('Cleanup Old Logs', 'ga4-server-side-tagging'); ?>"
@@ -300,7 +323,7 @@ $current_page = floor($offset / $limit) + 1;
         </form>
         
         <!-- Delete All Events Form -->
-        <form method="post" style="display: inline-block; vertical-align: top; background: #ffeeee; padding: 15px; border: 1px solid #ff6666;">
+        <form method="post" style="display: inline-block; vertical-align: top; background: #ffeeee; padding: 15px; border: 1px solid #ff6666; margin-top: 24px;">
             <?php wp_nonce_field('ga4_delete_all_events'); ?>
             <h3 style="color: #d63638;"><?php echo esc_html__('⚠️ DANGER ZONE', 'ga4-server-side-tagging'); ?></h3>
             
