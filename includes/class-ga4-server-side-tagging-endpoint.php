@@ -228,16 +228,24 @@ class GA4_Server_Side_Tagging_Endpoint
             // Samsung Browser
             '/Mozilla.*Android.*SamsungBrowser/i',
             
-            // Desktop browsers
+            // Desktop browsers (excluding headless/automation)
             '/Mozilla.*Windows NT.*Chrome/i',
             '/Mozilla.*Macintosh.*Safari/i',
             '/Mozilla.*Windows.*Firefox/i',
-            '/Mozilla.*X11.*Linux.*Chrome/i',
-            '/Mozilla.*X11.*Linux.*Firefox/i'
+            '/Mozilla.*X11.*Linux.*Chrome(?!.*[Hh]eadless)/i', // Exclude HeadlessChrome
+            '/Mozilla.*X11.*Linux.*Firefox(?!.*[Hh]eadless)/i' // Exclude headless Firefox
         );
 
         foreach ($legitimate_browsers as $pattern) {
             if (preg_match($pattern, $user_agent)) {
+                // Double-check: even if it matches legitimate pattern, reject if it contains automation indicators
+                if (stripos($user_agent, 'headless') !== false ||
+                    stripos($user_agent, 'selenium') !== false ||
+                    stripos($user_agent, 'webdriver') !== false ||
+                    stripos($user_agent, 'puppeteer') !== false ||
+                    stripos($user_agent, 'playwright') !== false) {
+                    return false; // Override whitelist for automation tools
+                }
                 return true;
             }
         }
