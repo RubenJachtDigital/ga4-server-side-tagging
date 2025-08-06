@@ -327,13 +327,13 @@ class GA4_Event_Logger
 
         // Decrypt payloads and headers for display
         foreach ($results as $result) {
-            if (!empty($result->payload)) {
+            if (isset($result->payload) && !empty($result->payload)) {
                 $result->payload = $this->decrypt_payload_for_display($result->payload);
             }
-            if (!empty($result->headers)) {
+            if (isset($result->headers) && !empty($result->headers)) {
                 $result->headers = \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::decrypt_headers_from_storage($result->headers);
             }
-            if (!empty($result->bot_detection_rules)) {
+            if (isset($result->bot_detection_rules) && !empty($result->bot_detection_rules)) {
                 $result->bot_detection_rules = $this->decrypt_payload_for_display($result->bot_detection_rules);
             }
         }
@@ -411,13 +411,13 @@ class GA4_Event_Logger
 
         // Decrypt payloads and headers for display
         foreach ($results as $result) {
-            if (!empty($result->payload)) {
+            if (isset($result->payload) && !empty($result->payload)) {
                 $result->payload = $this->decrypt_payload_for_display($result->payload);
             }
-            if (!empty($result->headers)) {
+            if (isset($result->headers) && !empty($result->headers)) {
                 $result->headers = \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::decrypt_headers_from_storage($result->headers);
             }
-            if (!empty($result->bot_detection_rules)) {
+            if (isset($result->bot_detection_rules) && !empty($result->bot_detection_rules)) {
                 $result->bot_detection_rules = $this->decrypt_payload_for_display($result->bot_detection_rules);
             }
         }
@@ -599,30 +599,30 @@ class GA4_Event_Logger
             $original_headers_decrypted = '';
             $final_headers_decrypted = '';
             
-            if (!empty($result->original_payload)) {
+            if (isset($result->original_payload) && !empty($result->original_payload)) {
                 $original_payload_decrypted = $this->decrypt_payload_for_display($result->original_payload);
                 $result->original_payload = $original_payload_decrypted;
             }
-            if (!empty($result->final_payload)) {
+            if (isset($result->final_payload) && !empty($result->final_payload)) {
                 $final_payload_decrypted = $this->decrypt_payload_for_display($result->final_payload);
                 $result->final_payload = $final_payload_decrypted;
             }
-            if (!empty($result->original_headers)) {
+            if (isset($result->original_headers) && !empty($result->original_headers)) {
                 $original_headers_decrypted = \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::decrypt_headers_from_storage($result->original_headers);
                 $result->original_headers = $original_headers_decrypted;
             }
-            if (!empty($result->final_headers)) {
+            if (isset($result->final_headers) && !empty($result->final_headers)) {
                 $final_headers_decrypted = \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::decrypt_headers_from_storage($result->final_headers);
                 $result->final_headers = $final_headers_decrypted;
             }
-            if (!empty($result->bot_detection_rules)) {
+            if (isset($result->bot_detection_rules) && !empty($result->bot_detection_rules)) {
                 $result->bot_detection_rules = $this->decrypt_payload_for_display($result->bot_detection_rules);
             }
             
             // Add backward compatibility fields for admin display
-            $result->event_status = $result->monitor_status; // For legacy display code
-            $result->payload = $result->original_payload; // For legacy display code
-            $result->headers = $result->original_headers; // For legacy display code
+            $result->event_status = isset($result->monitor_status) ? $result->monitor_status : 'unknown'; // For legacy display code
+            $result->payload = isset($result->original_payload) ? $result->original_payload : ''; // For legacy display code
+            $result->headers = isset($result->original_headers) ? $result->original_headers : array(); // For legacy display code
             
             // If searching, also check encrypted payload fields for additional matches
             if ($has_search) {
@@ -1026,7 +1026,7 @@ class GA4_Event_Logger
 
         foreach ($encrypted_events as $event) {
             // Check original_payload
-            if (!empty($event->original_payload)) {
+            if (isset($event->original_payload) && !empty($event->original_payload)) {
                 $decrypted_payload = $this->decrypt_payload_for_display($event->original_payload);
                 if ($this->search_for_transaction_in_payload($decrypted_payload, $transaction_id)) {
                     return true;
@@ -1034,7 +1034,7 @@ class GA4_Event_Logger
             }
 
             // Check final_payload
-            if (!empty($event->final_payload)) {
+            if (isset($event->final_payload) && !empty($event->final_payload)) {
                 $decrypted_payload = $this->decrypt_payload_for_display($event->final_payload);
                 if ($this->search_for_transaction_in_payload($decrypted_payload, $transaction_id)) {
                     return true;
@@ -1651,27 +1651,27 @@ class GA4_Event_Logger
             $original_headers_decrypted = '';
             $final_headers_decrypted = '';
             
-            if (!empty($event->original_payload)) {
+            if (isset($event->original_payload) && !empty($event->original_payload)) {
                 $original_payload_decrypted = $this->decrypt_payload_for_display($event->original_payload);
                 $event->original_payload = $original_payload_decrypted;
             }
-            if (!empty($event->final_payload)) {
+            if (isset($event->final_payload) && !empty($event->final_payload)) {
                 $final_payload_decrypted = $this->decrypt_payload_for_display($event->final_payload);
                 $event->final_payload = $final_payload_decrypted;
             }
-            if (!empty($event->original_headers)) {
+            if (isset($event->original_headers) && !empty($event->original_headers)) {
                 $original_headers_decrypted = \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::decrypt_headers_from_storage($event->original_headers);
                 $event->original_headers = $original_headers_decrypted;
             }
-            if (!empty($event->final_headers)) {
+            if (isset($event->final_headers) && !empty($event->final_headers)) {
                 $final_headers_decrypted = \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::decrypt_headers_from_storage($event->final_headers);
                 $event->final_headers = $final_headers_decrypted;
             }
             
             // Add backward compatibility fields for cronjob admin display
-            $event->event_status = $event->queue_status; // For legacy display code
-            $event->event_data = $event->original_payload; // For legacy display code
-            $event->status = $event->queue_status; // For legacy display code
+            $event->event_status = isset($event->queue_status) ? $event->queue_status : 'unknown'; // For legacy display code
+            $event->event_data = isset($event->original_payload) ? $event->original_payload : ''; // For legacy display code
+            $event->status = isset($event->queue_status) ? $event->queue_status : 'unknown'; // For legacy display code
             
             // If searching, also check encrypted payload fields for additional matches
             if ($has_search) {

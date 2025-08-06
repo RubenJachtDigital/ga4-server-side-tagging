@@ -143,6 +143,11 @@ class GA4_Server_Side_Tagging_Endpoint
         $client_ip = $this->get_client_ip($request);
         $referer = $request->get_header('referer');
 
+        // Whitelist legitimate user agents and services
+        if ($this->is_whitelisted_request($user_agent, $client_ip, $referer)) {
+            return false;
+        }
+
         // Run multiple bot detection checks
         $bot_checks = array(
             $this->check_user_agent_patterns($user_agent),
@@ -153,11 +158,11 @@ class GA4_Server_Side_Tagging_Endpoint
             $this->check_behavioral_patterns($request)
         );
 
-        // Require at least 2 positive checks to classify as bot (same as Cloudflare worker)
+        // Require at least 3 positive checks to classify as bot (reduced false positives)
         $positive_checks = array_filter($bot_checks, function ($check) {
             return $check === true;
         });
-        $is_bot = count($positive_checks) >= 2;
+        $is_bot = count($positive_checks) >= 3;
 
         if ($is_bot) {
             // Log detailed bot detection information
@@ -185,6 +190,85 @@ class GA4_Server_Side_Tagging_Endpoint
         }
 
         return $is_bot;
+    }
+
+    /**
+     * Check if request is from whitelisted legitimate services
+     *
+     * @since    3.0.0
+     * @param    string    $user_agent    User agent string.
+     * @param    string    $client_ip     Client IP address.
+     * @param    string    $referer       Referer header.
+     * @return   bool                    True if whitelisted.
+     */
+    private function is_whitelisted_request($user_agent, $client_ip, $referer)
+    {
+        if (empty($user_agent)) {
+            return false;
+        }
+
+        // Legitimate mobile browsers (common patterns)
+        $legitimate_browsers = array(
+            // Mobile Safari (iOS)
+            '/Mozilla.*iPhone.*Safari/i',
+            '/Mozilla.*iPad.*Safari/i',
+            
+            // Chrome Mobile
+            '/Mozilla.*Android.*Chrome/i',
+            '/Mozilla.*Mobile.*Chrome/i',
+            
+            // Firefox Mobile
+            '/Mozilla.*Mobile.*Firefox/i',
+            '/Mozilla.*Android.*Firefox/i',
+            
+            // Edge Mobile
+            '/Mozilla.*Mobile.*Edge/i',
+            '/Mozilla.*Android.*Edge/i',
+            
+            // Samsung Browser
+            '/Mozilla.*Android.*SamsungBrowser/i',
+            
+            // Desktop browsers
+            '/Mozilla.*Windows NT.*Chrome/i',
+            '/Mozilla.*Macintosh.*Safari/i',
+            '/Mozilla.*Windows.*Firefox/i',
+            '/Mozilla.*X11.*Linux.*Chrome/i',
+            '/Mozilla.*X11.*Linux.*Firefox/i'
+        );
+
+        foreach ($legitimate_browsers as $pattern) {
+            if (preg_match($pattern, $user_agent)) {
+                return true;
+            }
+        }
+
+        // Known legitimate services
+        $legitimate_services = array(
+            // Payment processors
+            '/PayPal/i',
+            '/Stripe/i',
+            
+            // Social media legitimate crawlers
+            '/facebookexternalhit.*facebook\.com/i',
+            '/Twitterbot.*twitter\.com/i',
+            
+            // Search engines (legitimate ones only)
+            '/Googlebot.*google\.com/i',
+            '/bingbot.*bing\.com/i',
+            
+            // Monitoring services
+            '/UptimeRobot/i',
+            '/GTmetrix/i',
+            '/Pingdom/i'
+        );
+
+        foreach ($legitimate_services as $pattern) {
+            if (preg_match($pattern, $user_agent)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -259,20 +343,18 @@ class GA4_Server_Side_Tagging_Endpoint
             '/lighthouse/i', // Added
             '/chrome-lighthouse/i',
 
-            // Generic automation and tools
-            '/python/i',
-            '/requests/i',
-            '/curl/i',
-            '/wget/i',
-            '/apache-httpclient/i',
-            '/java\//i',
-            '/okhttp/i',
-            '/node\.js/i',
-            '/go-http-client/i',
-            '/http_request/i', // Added
-            '/ruby/i',
-            '/perl/i',
-            '/libwww/i',
+            // Generic automation and tools (more specific patterns to avoid false positives)
+            '/^python-/i',        // Only user agents starting with "python-" (not apps containing "python")
+            '/^curl\//i',         // Only user agents starting with "curl/" (not apps containing "curl")
+            '/^wget\//i',         // Only user agents starting with "wget/" (not apps containing "wget")
+            '/apache-httpclient\/[0-9]/i', // Specific Apache HTTP Client pattern
+            '/^java\//i',         // Only user agents starting with "java/" (not apps containing "java")
+            '/^node\.js\//i',     // Only user agents starting with "node.js/" (not apps containing "node")
+            '/^go-http-client\//i', // Only user agents starting with "go-http-client/"
+            '/^http_request/i',   // Only user agents starting with "http_request"
+            '/^ruby\//i',         // Only user agents starting with "ruby/" (not apps containing "ruby")
+            '/^perl\//i',         // Only user agents starting with "perl/" (not apps containing "perl")
+            '/libwww-perl/i',     // More specific libwww pattern
 
             // AI/ML crawlers
             '/gptbot/i', // Added
@@ -283,10 +365,10 @@ class GA4_Server_Side_Tagging_Endpoint
             '/perplexity/i', // Added
             '/cohere/i', // Added
 
-            // Academic and research bots
-            '/researchbot/i', // Added
-            '/academicbot/i', // Added
-            '/university/i', // Added
+            // Academic and research bots (more specific patterns)
+            '/researchbot/i',    // Added
+            '/academicbot/i',    // Added
+            '/university.*bot/i', // Only university bots, not general university references
 
             // Suspicious patterns
             '/^mozilla\/5\.0$/i', // Just "Mozilla/5.0"
@@ -371,14 +453,15 @@ class GA4_Server_Side_Tagging_Endpoint
 
         // Check for suspicious header values
         $accept = $request->get_header('accept');
-        if ($accept === '*/*') {
-            return true; // Too generic
+        // Note: accept: '*/*' is actually common and legitimate for AJAX requests, mobile browsers, and APIs
+        // Only flag if accept header is completely missing AND other suspicious patterns exist
+        if (empty($accept) && $missing_count >= 1) {
+            return true;
         }
 
-        $connection = $request->get_header('connection');
-        if ($connection === 'close') {
-            return true; // Suspicious connection type
-        }
+        // Note: Connection: close can be legitimate (mobile browsers, HTTP/1.0 clients, proxies)
+        // Only flag if combined with other suspicious indicators
+        // Removing this check to reduce false positives
 
         // Check for automation indicators in headers
         $x_forwarded_for = $request->get_header('x-forwarded-for');
@@ -407,32 +490,42 @@ class GA4_Server_Side_Tagging_Endpoint
             return false;
         }
 
-        // Known bot/hosting provider IP ranges (expanded from Cloudflare worker)
+        // Known bot/hosting provider IP ranges (hosting providers commonly used by automated bots)
+        // NOTE: Cloudflare IPs removed as they represent legitimate users behind Cloudflare proxy
         $suspicious_ip_ranges = array(
-            // Cloud providers commonly used by bots
-            '13.107.42.0/24',     // Microsoft Azure
+            // Major cloud providers commonly used by bots (but not CDN/proxy services)
+            '13.107.42.0/24',     // Microsoft Azure (specific bot-heavy ranges)
             '20.36.0.0/14',       // Microsoft Azure
             '40.74.0.0/15',       // Microsoft Azure
             '52.0.0.0/11',        // Amazon AWS
             '54.0.0.0/15',        // Amazon AWS
             '35.0.0.0/8',         // Google Cloud
             '34.0.0.0/9',         // Google Cloud
-            '104.16.0.0/12',      // Cloudflare
-            '172.64.0.0/13',      // Cloudflare
-            '173.245.48.0/20',    // Cloudflare
-            '103.21.244.0/22',    // Cloudflare
-            '103.22.200.0/22',    // Cloudflare
-            '103.31.4.0/22',      // Cloudflare
-            '141.101.64.0/18',    // Cloudflare
-            '108.162.192.0/18',   // Cloudflare
-            '190.93.240.0/20',    // Cloudflare
-            '188.114.96.0/20',    // Cloudflare
-            '197.234.240.0/22',   // Cloudflare
-            '198.41.128.0/17',    // Cloudflare
-            '162.158.0.0/15',     // Cloudflare
-            '104.24.0.0/14',      // Cloudflare
-            '172.67.0.0/16',      // Cloudflare
-            '131.0.72.0/22'       // Cloudflare
+            
+            // Known VPS/hosting providers commonly used by bots
+            '45.77.0.0/16',       // Vultr
+            '108.61.0.0/16',      // Vultr  
+            '207.148.0.0/16',     // Vultr
+            '149.28.0.0/16',      // Vultr
+            '95.179.0.0/16',      // Vultr
+            '144.202.0.0/16',     // Vultr
+            '198.13.32.0/20',     // Vultr
+            
+            // DigitalOcean ranges commonly used by bots
+            '165.227.0.0/16',     // DigitalOcean
+            '142.93.0.0/16',      // DigitalOcean
+            '164.90.0.0/16',      // DigitalOcean
+            '167.99.0.0/16',      // DigitalOcean
+            '178.62.0.0/16',      // DigitalOcean
+            
+            // Linode ranges
+            '172.104.0.0/15',     // Linode
+            '139.144.0.0/16',     // Linode
+            '45.79.0.0/16',       // Linode
+            
+            // OVH ranges commonly used by bots
+            '51.254.0.0/16',      // OVH
+            '151.80.0.0/16'       // OVH
         );
 
         foreach ($suspicious_ip_ranges as $range) {
@@ -455,20 +548,18 @@ class GA4_Server_Side_Tagging_Endpoint
     {
         $user_agent = $request->get_header('user-agent');
         
-        // Check for automation tools in user agent
+        // Check for automation tools in user agent (more specific patterns)
         $automation_patterns = array(
-            '/curl/i',
-            '/wget/i',
-            '/python/i',
-            '/node/i',
-            '/automation/i',
-            '/postman/i',
-            '/insomnia/i',
-            '/selenium/i',
-            '/webdriver/i',
-            '/puppeteer/i',
-            '/playwright/i',
-            '/phantom/i'
+            '/^curl\//i',       // Only user agents starting with "curl/"
+            '/^wget\//i',       // Only user agents starting with "wget/"
+            '/automation/i',    // Generic automation indicator
+            '/postman/i',       // API testing tool
+            '/insomnia/i',      // API testing tool
+            '/selenium/i',      // Browser automation
+            '/webdriver/i',     // Browser automation
+            '/puppeteer/i',     // Browser automation
+            '/playwright/i',    // Browser automation
+            '/phantomjs/i'      // Headless browser
         );
 
         foreach ($automation_patterns as $pattern) {
@@ -477,10 +568,10 @@ class GA4_Server_Side_Tagging_Endpoint
             }
         }
 
-        // Check content type
+        // Check content type (more lenient for legitimate requests)
         $content_type = $request->get_header('content-type');
-        if ($content_type && $content_type !== 'application/json') {
-            return true; // Expecting JSON for this endpoint
+        if ($content_type && !preg_match('/application\/json|text\/plain|application\/x-www-form-urlencoded/i', $content_type)) {
+            return true; // Allow common legitimate content types
         }
 
         // Check for missing origin and referer (both missing is suspicious)
@@ -529,13 +620,14 @@ class GA4_Server_Side_Tagging_Endpoint
             return false; // Missing referer is not necessarily suspicious for API calls
         }
 
+        // Only flag referrers that are actually suspicious (not legitimate search traffic)
         $suspicious_patterns = array(
-            '/google\.com\/search/i',
-            '/bing\.com\/search/i',
-            '/yahoo\.com\/search/i',
-            '/bot/i',
-            '/crawl/i',
-            '/spider/i'
+            '/bot/i',          // Referrers containing "bot" 
+            '/crawl/i',        // Referrers containing "crawl"
+            '/spider/i',       // Referrers containing "spider"
+            '/scraper/i',      // Referrers containing "scraper"
+            '/automated/i',    // Referrers containing "automated"
+            '/test\..*\.com/i' // Test domains that shouldn't be referrers
         );
 
         foreach ($suspicious_patterns as $pattern) {
@@ -1389,6 +1481,11 @@ class GA4_Server_Side_Tagging_Endpoint
      */
     private function get_client_ip($request)
     {
+        // Check if this is a test scenario first
+        if (isset($request->scenario_data)) {
+            return $request->scenario_data['ip'];
+        }
+        
         // Check for IP from various headers (in order of preference)
         $ip_headers = array(
             'HTTP_CF_CONNECTING_IP',     // Cloudflare
@@ -2291,7 +2388,7 @@ class GA4_Server_Side_Tagging_Endpoint
             'asn_check' => $this->check_suspicious_asn($client_ip),
             'behavior_check' => $this->check_behavioral_patterns($request),
             'timestamp' => current_time('mysql'),
-            'detection_threshold' => 2
+            'detection_threshold' => 3
         );
     }
 
@@ -2327,7 +2424,7 @@ class GA4_Server_Side_Tagging_Endpoint
             'message' => 'Multi-factor bot detection triggered',
             'failed_checks' => $failed_checks,
             'checks_failed' => count($failed_checks),
-            'threshold' => 2,
+            'threshold' => 3,
             'client_info' => array(
                 'ip' => $client_ip,
                 'user_agent' => substr($user_agent, 0, 200) . (strlen($user_agent) > 200 ? '...' : ''),
@@ -2433,4 +2530,231 @@ class GA4_Server_Side_Tagging_Endpoint
 
         return 'unknown';
     }
+
+    /**
+     * Simulate bot requests for testing bot detection
+     *
+     * @since    3.0.0
+     * @param    string    $scenario    Type of bot to simulate.
+     * @return   array                  Test results.
+     */
+    public function simulate_bot_request($scenario = 'default')
+    {
+        if (!current_user_can('manage_options')) {
+            return array('error' => 'Unauthorized');
+        }
+
+        $test_scenarios = array(
+            'python_bot' => array(
+                'user_agent' => 'python-requests/2.25.1',
+                'headers' => array(),
+                'ip' => '142.93.100.50', // DigitalOcean IP (should be flagged by ASN)
+                'referer' => '',
+                'expected' => 'bot_detected'
+            ),
+            'curl_bot' => array(
+                'user_agent' => 'curl/7.68.0',
+                'headers' => array('accept' => '*/*'),
+                'ip' => '165.227.50.25', // DigitalOcean IP
+                'referer' => '',
+                'expected' => 'bot_detected'
+            ),
+            'selenium_bot' => array(
+                'user_agent' => 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 selenium/4.0.0',
+                'headers' => array(
+                    'accept' => 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                    'accept-language' => 'en-US,en;q=0.5',
+                    'accept-encoding' => 'gzip, deflate'
+                ),
+                'ip' => '52.91.75.123', // AWS IP
+                'referer' => '',
+                'expected' => 'bot_detected'
+            ),
+            'headless_chrome' => array(
+                'user_agent' => 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/91.0.4472.124 Safari/537.36',
+                'headers' => array(
+                    'accept' => '*/*',
+                    'accept-language' => 'en-US,en;q=0.9'
+                ),
+                'ip' => '34.102.136.180', // Google Cloud IP
+                'referer' => '',
+                'expected' => 'bot_detected'
+            ),
+            'scraper_bot' => array(
+                'user_agent' => 'Mozilla/5.0 (compatible; CustomScraper/1.0; +http://example.com/bot)',
+                'headers' => array(
+                    'accept' => 'text/html',
+                    'from' => 'bot@example.com' // Bot indicator header
+                ),
+                'ip' => '45.77.125.89', // Vultr IP
+                'referer' => 'http://scraper-referrer.com/bot',
+                'expected' => 'bot_detected'
+            ),
+            'legitimate_mobile' => array(
+                'user_agent' => 'Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.0 Mobile/15E148 Safari/604.1',
+                'headers' => array(
+                    'accept' => '*/*',
+                    'accept-language' => 'en-US,en;q=0.9',
+                    'accept-encoding' => 'gzip, deflate, br'
+                ),
+                'ip' => '104.28.62.24', // Cloudflare IP (legitimate user behind proxy)
+                'referer' => 'https://www.bilderrahmenspezialisten.de/bilderrahmen/',
+                'expected' => 'allowed'
+            ),
+            'legitimate_desktop' => array(
+                'user_agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                'headers' => array(
+                    'accept' => 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                    'accept-language' => 'en-US,en;q=0.5',
+                    'accept-encoding' => 'gzip, deflate'
+                ),
+                'ip' => '192.168.1.100',
+                'referer' => 'https://www.google.com/search?q=bilderrahmen',
+                'expected' => 'allowed'
+            ),
+            'api_integration' => array(
+                'user_agent' => 'MyLegitimateApp/2.1.0 (iOS; Version 14.0; iPhone12,1)',
+                'headers' => array(
+                    'accept' => 'application/json',
+                    'accept-language' => 'en-US',
+                    'content-type' => 'application/json'
+                ),
+                'ip' => '203.0.113.45', // Example IP
+                'referer' => '',
+                'expected' => 'allowed'
+            )
+        );
+
+        $scenario_data = isset($test_scenarios[$scenario]) ? $test_scenarios[$scenario] : $test_scenarios['python_bot'];
+        
+        // Create a mock request object
+        $mock_request = $this->create_mock_request($scenario_data);
+        
+        // Test bot detection
+        $is_bot = $this->is_bot_request($mock_request);
+        $bot_details = $this->get_bot_detection_details($mock_request);
+        
+        // Log the test event for monitoring
+        $this->log_test_event($scenario, $scenario_data, $is_bot, $bot_details);
+        
+        return array(
+            'scenario' => $scenario,
+            'expected' => $scenario_data['expected'],
+            'detected_as_bot' => $is_bot,
+            'passed_test' => ($is_bot && $scenario_data['expected'] === 'bot_detected') || 
+                           (!$is_bot && $scenario_data['expected'] === 'allowed'),
+            'detection_details' => $bot_details,
+            'test_data' => $scenario_data
+        );
+    }
+
+    /**
+     * Create a mock WordPress request object for testing
+     *
+     * @since    3.0.0
+     * @param    array    $scenario_data    Test scenario data.
+     * @return   object                     Mock WP_REST_Request.
+     */
+    private function create_mock_request($scenario_data)
+    {
+        // Create a proper mock request object
+        return new class($scenario_data) {
+            private $scenario_data;
+            
+            public function __construct($scenario_data) {
+                $this->scenario_data = $scenario_data;
+            }
+            
+            public function get_header($header) {
+                $header = strtolower($header);
+                
+                // Special handling for user-agent
+                if ($header === 'user-agent') {
+                    return $this->scenario_data['user_agent'];
+                }
+                
+                // Special handling for referer
+                if ($header === 'referer') {
+                    return $this->scenario_data['referer'];
+                }
+                
+                // Handle other headers
+                $header_key = str_replace('-', '_', $header);
+                return isset($this->scenario_data['headers'][$header]) ? $this->scenario_data['headers'][$header] : 
+                       (isset($this->scenario_data['headers'][$header_key]) ? $this->scenario_data['headers'][$header_key] : '');
+            }
+            
+            public function get_json_params() {
+                return array(
+                    'events' => array(
+                        array('name' => 'test_bot_simulation', 'params' => array())
+                    ),
+                    'client_id' => 'test-client-123'
+                );
+            }
+            
+            public function get_body() {
+                return json_encode(array(
+                    'events' => array(
+                        array('name' => 'test_bot_simulation', 'params' => array('test_scenario' => 'bot_simulation'))
+                    ),
+                    'client_id' => 'test-client-123',
+                    'test_simulation' => true
+                ));
+            }
+        };
+    }
+
+
+    /**
+     * Log test event for monitoring
+     *
+     * @since    3.0.0
+     * @param    string    $scenario        Test scenario name.
+     * @param    array     $scenario_data   Scenario data.
+     * @param    bool      $detected_as_bot Whether detected as bot.
+     * @param    array     $bot_details     Detection details.
+     */
+    private function log_test_event($scenario, $scenario_data, $detected_as_bot, $bot_details)
+    {
+        $monitor_status = $detected_as_bot ? 'bot_detected' : 'allowed';
+        $error_message = null;
+        
+        if ($detected_as_bot) {
+            $error_message = $this->generate_bot_detection_error_message(
+                $bot_details, 
+                $scenario_data['ip'], 
+                $scenario_data['user_agent']
+            );
+        }
+        
+        $this->event_logger->create_event_record(
+            json_encode(array(
+                'events' => array(
+                    array('name' => 'test_bot_simulation', 'params' => array('scenario' => $scenario))
+                ),
+                'client_id' => 'test-simulation-' . time(),
+                'test_simulation' => true
+            )),
+            $monitor_status,
+            $scenario_data['headers'],
+            false,
+            array(
+                'event_name' => 'test_bot_simulation',
+                'reason' => $detected_as_bot ? 'Bot detection test - ' . $scenario : 'Legitimate traffic test - ' . $scenario,
+                'error_message' => $error_message,
+                'error_type' => $detected_as_bot ? 'bot_simulation_test' : null,
+                'ip_address' => $scenario_data['ip'],
+                'user_agent' => $scenario_data['user_agent'],
+                'url' => home_url(),
+                'referrer' => $scenario_data['referer'],
+                'session_id' => 'test-session-' . time(),
+                'bot_detection_rules' => $detected_as_bot ? $bot_details : null,
+                'test_scenario' => $scenario,
+                'test_expected' => $scenario_data['expected'],
+                'test_result' => $detected_as_bot ? 'bot_detected' : 'allowed'
+            )
+        );
+    }
+
 }

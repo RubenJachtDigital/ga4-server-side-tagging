@@ -14,6 +14,8 @@ if (!defined('WPINC')) {
 }
 
 use GA4ServerSideTagging\Core\GA4_Event_Logger;
+use GA4ServerSideTagging\API\GA4_Server_Side_Tagging_Endpoint;
+use GA4ServerSideTagging\Core\GA4_Server_Side_Tagging_Logger;
 
 // Initialize event logger
 $event_logger = new GA4_Event_Logger();
@@ -160,6 +162,34 @@ if (isset($_POST['toggle_extensive_logging']) && wp_verify_nonce($_POST['_wpnonc
     $status = $new_setting ? 'enabled' : 'disabled';
     $message = sprintf('Extensive error logging has been %s. This affects bot detection and rate limiting event storage.', $status);
     echo '<div class="notice notice-success is-dismissible"><p>' . esc_html($message) . '</p></div>';
+}
+
+// Handle bot simulation test
+if (isset($_POST['run_bot_test']) && wp_verify_nonce($_POST['_wpnonce'], 'ga4_bot_simulation')) {
+    $scenario = sanitize_text_field($_POST['test_scenario'] ?? 'python_bot');
+    
+    // Create endpoint instance and run test
+    $logger = new GA4_Server_Side_Tagging_Logger();
+    $endpoint = new GA4_Server_Side_Tagging_Endpoint($logger);
+    
+    $test_result = $endpoint->simulate_bot_request($scenario);
+    
+    if (isset($test_result['error'])) {
+        echo '<div class="notice notice-error is-dismissible"><p>Test Error: ' . esc_html($test_result['error']) . '</p></div>';
+    } else {
+        $status_class = $test_result['passed_test'] ? 'notice-success' : 'notice-warning';
+        $test_status = $test_result['passed_test'] ? '✓ PASSED' : '⚠ FAILED';
+        
+        $message = sprintf(
+            'Bot Test %s - Scenario: %s | Expected: %s | Detected as: %s | Check Event Monitor for details',
+            $test_status,
+            ucfirst(str_replace('_', ' ', $scenario)),
+            $test_result['expected'],
+            $test_result['detected_as_bot'] ? 'Bot' : 'Legitimate'
+        );
+        
+        echo '<div class="notice ' . $status_class . ' is-dismissible"><p>' . esc_html($message) . '</p></div>';
+    }
 }
 
 // Get the unified cleanup days setting (default: 7 days)
@@ -316,6 +346,60 @@ $current_page = floor($offset / $limit) + 1;
         </div>
     </div>
 
+    <!-- Bot Detection Testing Section -->
+    <div class="ga4-admin-section">
+        <h2><?php echo esc_html__('🤖 Bot Detection Testing', 'ga4-server-side-tagging'); ?></h2>
+        <div style="padding: 15px; background: #e7f3ff; border-radius: 5px; border-left: 4px solid #2271b1;">
+            <p style="margin: 0 0 15px 0;">
+                <strong><?php echo esc_html__('Test your bot detection system:', 'ga4-server-side-tagging'); ?></strong>
+                <?php echo esc_html__('Simulate various bot and legitimate user scenarios to verify detection accuracy. Test events will appear in the Event Monitor below.', 'ga4-server-side-tagging'); ?>
+            </p>
+            
+            <form method="post" style="display: flex; align-items: center; gap: 15px; flex-wrap: wrap;">
+                <?php wp_nonce_field('ga4_bot_simulation'); ?>
+                
+                <div>
+                    <label for="test_scenario" style="display: block; font-weight: bold; margin-bottom: 5px;">
+                        <?php echo esc_html__('Test Scenario:', 'ga4-server-side-tagging'); ?>
+                    </label>
+                    <select name="test_scenario" id="test_scenario" style="padding: 5px;">
+                        <optgroup label="🤖 Bot Scenarios (Should be Detected)">
+                            <option value="python_bot">Python Bot (python-requests + DigitalOcean IP)</option>
+                            <option value="curl_bot">Curl Bot (curl + DigitalOcean IP)</option>
+                            <option value="selenium_bot">Selenium Bot (selenium user agent + AWS IP)</option>
+                            <option value="headless_chrome">Headless Chrome (headless + Google Cloud IP)</option>
+                            <option value="scraper_bot">Scraper Bot (scraper user agent + suspicious referrer)</option>
+                        </optgroup>
+                        <optgroup label="✅ Legitimate Scenarios (Should be Allowed)">
+                            <option value="legitimate_mobile">iPhone Safari (your reported user case)</option>
+                            <option value="legitimate_desktop">Desktop Chrome (Google search referrer)</option>
+                            <option value="api_integration">Legitimate App Integration</option>
+                        </optgroup>
+                    </select>
+                </div>
+                
+                <div>
+                    <input type="submit" name="run_bot_test" class="button button-secondary" 
+                           value="<?php echo esc_attr__('Run Bot Test', 'ga4-server-side-tagging'); ?>" />
+                </div>
+            </form>
+            
+            <div style="margin-top: 15px; font-size: 13px; color: #666;">
+                <p><strong><?php echo esc_html__('How it works:', 'ga4-server-side-tagging'); ?></strong></p>
+                <ul style="margin: 5px 0 0 20px;">
+                    <li><?php echo esc_html__('Each test simulates a request with specific user agent, headers, IP address, and referrer', 'ga4-server-side-tagging'); ?></li>
+                    <li><?php echo esc_html__('The system runs bot detection and logs the result as a test event', 'ga4-server-side-tagging'); ?></li>
+                    <li><?php echo esc_html__('Results show in the Event Monitor table below - look for events named "test_bot_simulation"', 'ga4-server-side-tagging'); ?></li>
+                    <li><?php echo esc_html__('Green = test passed (detected correctly), Yellow = test failed (detection was wrong)', 'ga4-server-side-tagging'); ?></li>
+                </ul>
+                <p style="margin-top: 10px;">
+                    <strong style="color: #d63384;"><?php echo esc_html__('Note:', 'ga4-server-side-tagging'); ?></strong>
+                    <?php echo esc_html__('The "iPhone Safari" test uses the same user agent and Cloudflare IP from your reported case - it should be allowed after our fixes.', 'ga4-server-side-tagging'); ?>
+                </p>
+            </div>
+        </div>
+    </div>
+
     <!-- Management Section -->
     <div class="ga4-admin-section">
         <h2><?php echo esc_html__('Event Management', 'ga4-server-side-tagging'); ?></h2>
@@ -445,10 +529,18 @@ $current_page = floor($offset / $limit) + 1;
                     </thead>
                     <tbody>
                         <?php foreach ($events as $event) : ?>
-                            <tr>
+                            <?php
+                            // Check if this is a test event
+                            $is_test_event = ($event->event_name === 'test_bot_simulation');
+                            $test_row_style = $is_test_event ? 'style="background-color: #f0f8ff; border-left: 3px solid #2271b1;"' : '';
+                            ?>
+                            <tr <?php echo $test_row_style; ?>>
                                 <td><?php echo intval($event->id); ?></td>
                                 <td>
                                     <strong><?php echo esc_html($event->event_name); ?></strong>
+                                    <?php if ($is_test_event) : ?>
+                                        <br><small style="color: #2271b1; font-weight: bold;">🧪 BOT DETECTION TEST</small>
+                                    <?php endif; ?>
                                     <?php if ($event->batch_size > 1) : ?>
                                         <br><small style="color: #666;">Batch: <?php echo intval($event->batch_size); ?> events</small>
                                     <?php endif; ?>

@@ -134,21 +134,36 @@ function decrypt_jwt_token($jwt_token)
     }
 }
 
+// Initialize required classes
+try {
+    $logger = new GA4ServerSideTagging\Core\GA4_Server_Side_Tagging_Logger();
+    $cronjob_manager = new GA4ServerSideTagging\Core\GA4_Cronjob_Manager($logger);
+} catch (Exception $e) {
+    // Fallback if classes aren't available
+    $logger = null;
+    $cronjob_manager = null;
+    echo '<div class="notice notice-error"><p>Error: Required classes not available. Please check plugin installation.</p></div>';
+}
+
 // Handle manual trigger action
-if (isset($_POST['trigger_cronjob']) && wp_verify_nonce($_POST['_wpnonce'], 'ga4_trigger_cronjob')) {
-    $this->cronjob_manager->trigger_manual_processing();
+if (isset($_POST['trigger_cronjob']) && wp_verify_nonce($_POST['_wpnonce'], 'ga4_trigger_cronjob') && $cronjob_manager) {
+    $cronjob_manager->trigger_manual_processing();
     echo '<div class="notice notice-success is-dismissible"><p>Cronjob triggered successfully! Events have been processed.</p></div>';
+} elseif (isset($_POST['trigger_cronjob']) && !$cronjob_manager) {
+    echo '<div class="notice notice-error is-dismissible"><p>Error: Could not initialize cronjob manager. Please check plugin installation.</p></div>';
 }
 
 // Handle cleanup action
-if (isset($_POST['cleanup_events']) && wp_verify_nonce($_POST['_wpnonce'], 'ga4_cleanup_events')) {
+if (isset($_POST['cleanup_events']) && wp_verify_nonce($_POST['_wpnonce'], 'ga4_cleanup_events') && $cronjob_manager) {
     $days = intval($_POST['cleanup_days']) ?: 7;
     
     // Save the unified cleanup days setting
     update_option('ga4_event_cleanup_days', $days);
     
-    $cleaned = $this->cronjob_manager->cleanup_old_events($days);
+    $cleaned = $cronjob_manager->cleanup_old_events($days);
     echo '<div class="notice notice-success is-dismissible"><p>Cleaned up ' . $cleaned . ' old events.</p></div>';
+} elseif (isset($_POST['cleanup_events']) && !$cronjob_manager) {
+    echo '<div class="notice notice-error is-dismissible"><p>Error: Could not initialize cronjob manager. Please check plugin installation.</p></div>';
 }
 
 // Handle direct sending setting
@@ -185,7 +200,10 @@ if ($event_cleanup_days === false) {
 }
 
 // Get queue statistics
-$stats = $this->cronjob_manager->get_queue_stats();
+$stats = array('total' => 0, 'pending' => 0, 'completed' => 0, 'failed' => 0);
+if ($cronjob_manager) {
+    $stats = $cronjob_manager->get_queue_stats();
+}
 $next_scheduled = wp_next_scheduled('ga4_process_event_queue');
 
 // Get filter parameters
@@ -195,17 +213,20 @@ $limit = isset($_GET['limit']) ? max(10, min(200, intval($_GET['limit']))) : 50;
 $offset = isset($_GET['offset']) ? max(0, intval($_GET['offset'])) : 0;
 
 // Get events with filtering and pagination (unified table approach)
-$events_data = $this->cronjob_manager->get_events_for_table(array(
-    'limit' => $limit,
-    'offset' => $offset,
-    'status' => $filter_status,
-    'search' => $search,
-    'orderby' => 'created_at',
-    'order' => 'DESC'
-));
-
-$events = $events_data['events'];
-$total_events = $events_data['total'];
+$events = array();
+$total_events = 0;
+if ($cronjob_manager) {
+    $events_data = $cronjob_manager->get_events_for_table(array(
+        'limit' => $limit,
+        'offset' => $offset,
+        'status' => $filter_status,
+        'search' => $search,
+        'orderby' => 'created_at',
+        'order' => 'DESC'
+    ));
+    $events = $events_data['events'];
+    $total_events = $events_data['total'];
+}
 
 // Calculate pagination info
 $total_pages = ceil($total_events / $limit);
@@ -277,8 +298,11 @@ $current_page = floor($offset / $limit) + 1;
         <form method="post" style="display: inline-block; margin-right: 20px;">
             <?php wp_nonce_field('ga4_trigger_cronjob'); ?>
             <input type="submit" name="trigger_cronjob" class="button button-primary" value="<?php echo esc_attr__('Trigger Cronjob Now', 'ga4-server-side-tagging'); ?>" 
-                   onclick="return confirm('<?php echo esc_js(__('This will immediately process all pending events. Continue?', 'ga4-server-side-tagging')); ?>');">
+                   onclick="return confirm('<?php echo esc_js(__('This will immediately process all pending events. Continue?', 'ga4-server-side-tagging')); ?>');"<?php if (!$cronjob_manager) echo ' disabled'; ?>>
             <p class="description"><?php echo esc_html__('Manually trigger the cronjob to process all pending events immediately.', 'ga4-server-side-tagging'); ?></p>
+            <?php if (!$cronjob_manager) : ?>
+                <p class="description" style="color: #dc3545;"><strong>Disabled:</strong> Cronjob manager could not be initialized.</p>
+            <?php endif; ?>
         </form>
 
         <form method="post" style="display: inline-block;">
@@ -287,8 +311,11 @@ $current_page = floor($offset / $limit) + 1;
             <input type="number" id="cleanup_days" name="cleanup_days" value="<?php echo esc_attr($event_cleanup_days); ?>" min="1" max="365" style="width: 60px;">
             <span><?php echo esc_html__('days', 'ga4-server-side-tagging'); ?></span>
             <input type="submit" name="cleanup_events" class="button" value="<?php echo esc_attr__('Cleanup Old Events', 'ga4-server-side-tagging'); ?>"
-                   onclick="return confirm('<?php echo esc_js(__('Are you sure you want to delete old events?', 'ga4-server-side-tagging')); ?>');">
+                   onclick="return confirm('<?php echo esc_js(__('Are you sure you want to delete old events?', 'ga4-server-side-tagging')); ?>');"<?php if (!$cronjob_manager) echo ' disabled'; ?>>
             <p class="description"><?php echo esc_html__('Remove processed/failed events older than the specified number of days to keep the database clean.', 'ga4-server-side-tagging'); ?></p>
+            <?php if (!$cronjob_manager) : ?>
+                <p class="description" style="color: #dc3545;"><strong>Disabled:</strong> Cronjob manager could not be initialized.</p>
+            <?php endif; ?>
         </form>
     </div>
 
@@ -311,7 +338,11 @@ $current_page = floor($offset / $limit) + 1;
         <h2><?php echo esc_html__('Event Queue', 'ga4-server-side-tagging'); ?></h2>
 
         
-        <?php if (empty($events)) : ?>
+        <?php if (!$cronjob_manager) : ?>
+            <div class="notice notice-error">
+                <p><strong>Error:</strong> Could not initialize cronjob manager. Please check plugin installation.</p>
+            </div>
+        <?php elseif (empty($events)) : ?>
             <p><?php echo esc_html__('No events found matching your criteria.', 'ga4-server-side-tagging'); ?></p>
         <?php else : ?>
             <div style="max-height: 600px; overflow-y: auto; border: 1px solid #ddd; border-radius: 3px;">
