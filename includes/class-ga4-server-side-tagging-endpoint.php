@@ -158,7 +158,7 @@ class GA4_Server_Side_Tagging_Endpoint
             $this->check_behavioral_patterns($request)
         );
 
-        // Require at least 2 positive checks to classify as bot (stricter detection)
+        // Require at least 2 positive checks to classify as bot (balanced detection)
         $positive_checks = array_filter($bot_checks, function ($check) {
             return $check === true;
         });
@@ -2151,9 +2151,9 @@ class GA4_Server_Side_Tagging_Endpoint
             $total_score += $ua_result['score'];
         }
         
-        // Stricter detection: require at least 1 positive check OR high score to classify as bot
+        // Balanced detection: require at least 2 positive checks OR very high score to classify as bot
         $positive_checks = array_filter($bot_checks);
-        $is_bot = count($positive_checks) >= 1 || $total_score >= 40;
+        $is_bot = count($positive_checks) >= 2 || $total_score >= 60;
         
         return array(
             'is_bot' => $is_bot,
@@ -2253,7 +2253,7 @@ class GA4_Server_Side_Tagging_Endpoint
         }
         
         return array(
-            'is_bot' => $score >= 20, // Stricter threshold for bot classification
+            'is_bot' => $score >= 30, // More balanced threshold for bot classification
             'score' => $score,
             'indicators' => $indicators
         );
@@ -2349,7 +2349,7 @@ class GA4_Server_Side_Tagging_Endpoint
         }
         
         return array(
-            'is_bot' => $score >= 15, // Stricter threshold for bot classification
+            'is_bot' => $score >= 30, // More balanced threshold for bot classification
             'score' => $score,
             'indicators' => $indicators
         );
