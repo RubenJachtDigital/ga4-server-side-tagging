@@ -346,7 +346,8 @@ $current_page = floor($offset / $limit) + 1;
         </div>
     </div>
 
-    <!-- Bot Detection Testing Section -->
+    <?php if (get_option('ga4_test_mode_enabled', false)): ?>
+    <!-- Bot Detection Testing Section (Test Mode Only) -->
     <div class="ga4-admin-section">
         <h2><?php echo esc_html__('🤖 Bot Detection Testing', 'ga4-server-side-tagging'); ?></h2>
         <div style="padding: 15px; background: #e7f3ff; border-radius: 5px; border-left: 4px solid #2271b1;">
@@ -399,6 +400,7 @@ $current_page = floor($offset / $limit) + 1;
             </div>
         </div>
     </div>
+    <?php endif; ?>
 
     <!-- Management Section -->
     <div class="ga4-admin-section">
@@ -613,11 +615,11 @@ $current_page = floor($offset / $limit) + 1;
                                             data-reason="<?php echo esc_attr($event->reason ?? ''); ?>"
                                             data-payload="<?php echo esc_attr($event->payload ?? ''); ?>"
                                             data-headers="<?php
-                                                // Properly format headers for display
-                                            if (!empty($event->headers) && is_array($event->headers)) {
-                                                echo esc_attr(wp_json_encode($event->headers, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+                                                // Properly format headers for display - use original_headers which contain decrypted headers
+                                            if (!empty($event->original_headers) && is_array($event->original_headers)) {
+                                                echo esc_attr(wp_json_encode($event->original_headers, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
                                             } else {
-                                                echo esc_attr($event->headers ?? '');
+                                                echo esc_attr($event->original_headers ?? '');
                                             }
                                             ?>"
                                             data-ip="<?php echo esc_attr($event->ip_address ?? ''); ?>"
