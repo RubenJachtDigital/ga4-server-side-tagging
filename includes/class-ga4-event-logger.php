@@ -221,6 +221,7 @@ class GA4_Event_Logger
                 'processing_time_ms' => is_numeric($args['processing_time_ms']) ? floatval($args['processing_time_ms']) : null,
                 'batch_size' => intval($args['batch_size']),
                 'transmission_method' => sanitize_text_field($args['transmission_method']),
+                'created_at' => current_time('mysql'),
                 'processed_at' => $args['processed_at'],
                 'retry_count' => intval($args['retry_count']),
                 'error_message' => sanitize_textarea_field($args['error_message']),
@@ -228,7 +229,7 @@ class GA4_Event_Logger
                 'final_payload_encrypted' => (bool) $args['final_payload_encrypted']
             ),
             array(
-                '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%d', '%s', '%d', '%s', '%s', '%f', '%d', '%s', '%s', '%d', '%s', '%d', '%d'
+                '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%d', '%s', '%d', '%s', '%s', '%f', '%d', '%s', '%s', '%s', '%d', '%s', '%d', '%d'
             )
         );
 
