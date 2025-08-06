@@ -573,9 +573,23 @@ $current_page = floor($offset / $limit) + 1;
                                         <?php 
                                         $formatted_error = format_error_message_for_display($event->error_message, true);
                                         $full_error = format_error_message_for_display($event->error_message, false);
+                                        
+                                        // Ensure title attribute is always a string
+                                        if (is_array($full_error) || is_object($full_error)) {
+                                            $title_text = wp_json_encode($full_error, JSON_UNESCAPED_SLASHES);
+                                        } else {
+                                            $title_text = (string)$full_error;
+                                        }
+                                        
+                                        // Ensure displayed text is always a string  
+                                        if (is_array($formatted_error) || is_object($formatted_error)) {
+                                            $display_text = wp_json_encode($formatted_error, JSON_UNESCAPED_SLASHES);
+                                        } else {
+                                            $display_text = (string)$formatted_error;
+                                        }
                                         ?>
-                                        <span title="<?php echo esc_attr($full_error); ?>" style="font-size: 11px; color: #d63384; font-weight: 500;">
-                                            <?php echo esc_html($formatted_error); ?>
+                                        <span title="<?php echo esc_attr($title_text); ?>" style="font-size: 11px; color: #d63384; font-weight: 500;">
+                                            <?php echo esc_html($display_text); ?>
                                         </span>
                                     <?php elseif ($event->reason) : ?>
                                         <span title="<?php echo esc_attr($event->reason); ?>" style="font-size: 11px;">
@@ -616,10 +630,24 @@ $current_page = floor($offset / $limit) + 1;
                                             data-payload="<?php echo esc_attr($event->payload ?? ''); ?>"
                                             data-headers="<?php
                                                 // Properly format headers for display - use original_headers which contain decrypted headers
-                                            if (!empty($event->original_headers) && is_array($event->original_headers)) {
-                                                echo esc_attr(wp_json_encode($event->original_headers, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+                                            if (!empty($event->original_headers)) {
+                                                if (is_array($event->original_headers)) {
+                                                    echo esc_attr(wp_json_encode($event->original_headers, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+                                                } elseif (is_object($event->original_headers)) {
+                                                    echo esc_attr(wp_json_encode((array)$event->original_headers, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+                                                } elseif (is_string($event->original_headers)) {
+                                                    // Try to decode if it's a JSON string
+                                                    $decoded = json_decode($event->original_headers, true);
+                                                    if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
+                                                        echo esc_attr(wp_json_encode($decoded, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+                                                    } else {
+                                                        echo esc_attr($event->original_headers);
+                                                    }
+                                                } else {
+                                                    echo esc_attr(is_scalar($event->original_headers) ? $event->original_headers : wp_json_encode($event->original_headers));
+                                                }
                                             } else {
-                                                echo esc_attr($event->original_headers ?? '');
+                                                echo esc_attr('');
                                             }
                                             ?>"
                                             data-ip="<?php echo esc_attr($event->ip_address ?? ''); ?>"
@@ -645,7 +673,32 @@ $current_page = floor($offset / $limit) + 1;
                                             data-transmission="<?php echo esc_attr($event->transmission_method ?? ''); ?>"
                                             data-created-at="<?php echo esc_attr($event->created_at); ?>"
                                             data-processed-at="<?php echo esc_attr($event->processed_at ?? ''); ?>"
-                                            data-error-message="<?php echo esc_attr(format_error_message_for_display($event->error_message ?? '', false)); ?>"
+                                            data-error-message="<?php 
+                                            // Pass raw error message to JavaScript (not formatted HTML)
+                                            $error_msg = $event->error_message ?? '';
+                                            if (!empty($error_msg)) {
+                                                // Always pass as JSON string to JavaScript for proper parsing
+                                                if (is_string($error_msg)) {
+                                                    // Check if it's already JSON
+                                                    $decoded = json_decode($error_msg, true);
+                                                    if (json_last_error() === JSON_ERROR_NONE) {
+                                                        // It's JSON, pass as-is
+                                                        echo esc_attr($error_msg);
+                                                    } else {
+                                                        // It's a plain string, wrap in JSON format
+                                                        echo esc_attr(wp_json_encode($error_msg, JSON_UNESCAPED_SLASHES));
+                                                    }
+                                                } elseif (is_array($error_msg) || is_object($error_msg)) {
+                                                    // Convert arrays/objects to JSON string
+                                                    echo esc_attr(wp_json_encode($error_msg, JSON_UNESCAPED_SLASHES));
+                                                } else {
+                                                    // For other types, convert to JSON string
+                                                    echo esc_attr(wp_json_encode((string)$error_msg, JSON_UNESCAPED_SLASHES));
+                                                }
+                                            } else {
+                                                echo esc_attr('');
+                                            }
+                                            ?>"
                                             style="font-size: 10px; padding: 3px 8px;">
                                         <?php echo esc_html__('View', 'ga4-server-side-tagging'); ?>
                                     </button>
@@ -824,7 +877,10 @@ jQuery(document).ready(function($) {
             content += '<div style="margin-top: 10px;"><strong>Reason:</strong> <span style="background: #fff; padding: 4px 8px; border-radius: 3px; border: 1px solid #ddd;">' + htmlEscape(data.reason) + '</span></div>';
         }
         if (data.errorMessage) {
-            content += '<div style="margin-top: 10px;"><strong>Error Message:</strong></div>' + formatErrorMessage(data.errorMessage);
+            content += '<div style="margin-top: 10px;"><strong>Error Message:</strong></div>';
+            content += '<div style="background: #fff3cd; border: 1px solid #ffeaa7; border-radius: 4px; padding: 12px; margin-top: 5px;">';
+            content += '<pre style="background: #fff; padding: 10px; border: 1px solid #dee2e6; border-radius: 3px; white-space: pre-wrap; word-wrap: break-word; max-height: 200px; overflow-y: auto; font-size: 11px; margin: 0; line-height: 1.4; color: #856404;">' + formatJson(data.errorMessage) + '</pre>';
+            content += '</div>';
         }
         content += '</div>';
 
