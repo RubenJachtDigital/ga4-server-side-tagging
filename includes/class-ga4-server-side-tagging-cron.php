@@ -169,7 +169,7 @@ class GA4_Server_Side_Tagging_Cron
 
     /**
      * Handle cleanup of old completed events.
-     * Updated to use unified table architecture.
+     * Updated to use unified table architecture and respect event preservation settings.
      *
      * @since    1.0.0
      */
@@ -191,20 +191,23 @@ class GA4_Server_Side_Tagging_Cron
                 update_option('ga4_event_cleanup_days', $cleanup_days);
             }
             
-            // Use the Cronjob Manager's cleanup method for unified table handling
-            $cronjob_manager = new GA4_Cronjob_Manager();
-            $total_deleted = $cronjob_manager->cleanup_old_events($cleanup_days);
+            // Get preservation settings from admin configuration
+            $preserve_purchases = get_option('ga4_preserve_purchases_cleanup', true); // Default: preserve purchases
+            $preserved_event_types = get_option('ga4_preserved_event_types_cleanup', array('purchase')); // Default: preserve purchases
             
-            if ($total_deleted > 0) {
+            // Use Event Logger's cleanup method with preservation support
+            $event_logger = new \GA4ServerSideTagging\Core\GA4_Event_Logger();
+            $result = $event_logger->cleanup_old_logs($cleanup_days, $preserve_purchases, false, $preserved_event_types);
+            
+            if ($result['success']) {
                 $this->logger->info(sprintf(
-                    'Automatic event cleanup completed: %d old events removed (older than %d days)',
-                    $total_deleted,
-                    $cleanup_days
+                    'Automatic event cleanup completed: %s',
+                    $result['message']
                 ));
             } else {
-                $this->logger->info(sprintf(
-                    'Automatic event cleanup completed: No events older than %d days found',
-                    $cleanup_days
+                $this->logger->error(sprintf(
+                    'Automatic event cleanup failed: %s',
+                    $result['message']
                 ));
             }
             
