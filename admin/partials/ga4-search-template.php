@@ -25,12 +25,18 @@ if (!defined('WPINC')) {
  * @var array $unique_events - Array of unique event names (optional, for event monitor)
  * @var array $status_options - Array of status options for the filter
  * @var string $search_placeholder - Placeholder text for search field
+ * @var string $date_from - Start date filter (optional)
+ * @var string $date_to - End date filter (optional)
+ * @var string $hours_filter - Hours filter (optional)
  */
 
 // Set defaults for optional variables
 $filter_event = $filter_event ?? '';
 $unique_events = $unique_events ?? array();
 $search_placeholder = $search_placeholder ?? 'Search...';
+$date_from = $date_from ?? '';
+$date_to = $date_to ?? '';
+$hours_filter = $hours_filter ?? '';
 ?>
 
 <!-- Filters Section -->
@@ -74,6 +80,30 @@ $search_placeholder = $search_placeholder ?? 'Search...';
                 </select>
             </div>
             <?php endif; ?>
+
+            <!-- Date Range Filter -->
+            <div>
+                <label><?php echo esc_html__('Date Range:', 'ga4-server-side-tagging'); ?></label><br>
+                <div style="display: flex; gap: 5px; align-items: center;">
+                    <input type="datetime-local" id="date_from" name="date_from" value="<?php echo esc_attr($date_from); ?>" style="width: 160px;" title="<?php echo esc_attr__('Start date and time', 'ga4-server-side-tagging'); ?>">
+                    <span style="color: #666;">to</span>
+                    <input type="datetime-local" id="date_to" name="date_to" value="<?php echo esc_attr($date_to); ?>" style="width: 160px;" title="<?php echo esc_attr__('End date and time', 'ga4-server-side-tagging'); ?>">
+                </div>
+            </div>
+
+            <!-- Quick Hours Filter -->
+            <div>
+                <label for="hours_filter"><?php echo esc_html__('Quick Filter:', 'ga4-server-side-tagging'); ?></label><br>
+                <select id="hours_filter" name="hours_filter">
+                    <option value=""><?php echo esc_html__('All Time', 'ga4-server-side-tagging'); ?></option>
+                    <option value="1" <?php selected($hours_filter, '1'); ?>><?php echo esc_html__('Last Hour', 'ga4-server-side-tagging'); ?></option>
+                    <option value="6" <?php selected($hours_filter, '6'); ?>><?php echo esc_html__('Last 6 Hours', 'ga4-server-side-tagging'); ?></option>
+                    <option value="24" <?php selected($hours_filter, '24'); ?>><?php echo esc_html__('Last 24 Hours', 'ga4-server-side-tagging'); ?></option>
+                    <option value="168" <?php selected($hours_filter, '168'); ?>><?php echo esc_html__('Last 7 Days', 'ga4-server-side-tagging'); ?></option>
+                    <option value="720" <?php selected($hours_filter, '720'); ?>><?php echo esc_html__('Last 30 Days', 'ga4-server-side-tagging'); ?></option>
+                    <option value="last_2_fridays" <?php selected($hours_filter, 'last_2_fridays'); ?>><?php echo esc_html__('Last 2 Fridays', 'ga4-server-side-tagging'); ?></option>
+                </select>
+            </div>
 
             <!-- Per Page -->
             <div>
@@ -127,7 +157,10 @@ $search_placeholder = $search_placeholder ?? 'Search...';
                 'filter_status' => $filter_status,
                 'filter_event' => $filter_event,
                 'search' => $search,
-                'limit' => $limit
+                'limit' => $limit,
+                'date_from' => $date_from,
+                'date_to' => $date_to,
+                'hours_filter' => $hours_filter
             ));
             
             if ($current_page > 1) : ?>
@@ -153,3 +186,89 @@ $search_placeholder = $search_placeholder ?? 'Search...';
         <?php endif; ?>
     </div>
 </div>
+
+<script type="text/javascript">
+jQuery(document).ready(function($) {
+    // Date filtering functionality
+    var dateFromInput = $('#date_from');
+    var dateToInput = $('#date_to');
+    var hoursFilterSelect = $('#hours_filter');
+    
+    // Clear date inputs when hours filter is selected
+    hoursFilterSelect.on('change', function() {
+        if ($(this).val()) {
+            dateFromInput.val('');
+            dateToInput.val('');
+        }
+    });
+    
+    // Clear hours filter when date inputs are used
+    dateFromInput.add(dateToInput).on('input change', function() {
+        if (dateFromInput.val() || dateToInput.val()) {
+            hoursFilterSelect.val('');
+        }
+    });
+    
+    // Auto-set end date when start date is selected
+    dateFromInput.on('change', function() {
+        var fromDate = $(this).val();
+        if (fromDate && !dateToInput.val()) {
+            // Set end date to 24 hours later
+            var date = new Date(fromDate);
+            date.setHours(date.getHours() + 24);
+            dateToInput.val(date.toISOString().slice(0, 16));
+        }
+    });
+    
+    // Validate date range
+    function validateDateRange() {
+        var from = dateFromInput.val();
+        var to = dateToInput.val();
+        
+        if (from && to && new Date(from) > new Date(to)) {
+            dateToInput[0].setCustomValidity('End date must be after start date');
+        } else {
+            dateToInput[0].setCustomValidity('');
+        }
+    }
+    
+    dateFromInput.add(dateToInput).on('change', validateDateRange);
+    
+    // Quick preset buttons
+    function addQuickPresets() {
+        var presetContainer = $('<div style="margin-top: 5px; font-size: 12px;"></div>');
+        var presets = [
+            { label: 'Last 1h', hours: 1 },
+            { label: 'Last 6h', hours: 6 },
+            { label: 'Today', hours: 24 },
+            { label: 'This Week', hours: 168 },
+            { label: 'Last 2 Fridays', hours: 'last_2_fridays' }
+        ];
+        
+        $.each(presets, function(index, preset) {
+            var button = $('<button type="button" class="button button-small" style="margin-right: 5px; font-size: 10px; padding: 2px 6px;">' + preset.label + '</button>');
+            button.on('click', function(e) {
+                e.preventDefault();
+                hoursFilterSelect.val(preset.hours);
+                dateFromInput.val('');
+                dateToInput.val('');
+            });
+            presetContainer.append(button);
+        });
+        
+        // Add clear button
+        var clearButton = $('<button type="button" class="button button-small" style="margin-left: 10px; font-size: 10px; padding: 2px 6px; color: #666;">Clear</button>');
+        clearButton.on('click', function(e) {
+            e.preventDefault();
+            dateFromInput.val('');
+            dateToInput.val('');
+            hoursFilterSelect.val('');
+        });
+        presetContainer.append(clearButton);
+        
+        $('#hours_filter').parent().append(presetContainer);
+    }
+    
+    addQuickPresets();
+});
+</script>

@@ -212,6 +212,11 @@ $search = isset($_GET['search']) ? sanitize_text_field($_GET['search']) : '';
 $limit = isset($_GET['limit']) ? max(10, min(200, intval($_GET['limit']))) : 50;
 $offset = isset($_GET['offset']) ? max(0, intval($_GET['offset'])) : 0;
 
+// Date filtering parameters
+$date_from = isset($_GET['date_from']) ? sanitize_text_field($_GET['date_from']) : '';
+$date_to = isset($_GET['date_to']) ? sanitize_text_field($_GET['date_to']) : '';
+$hours_filter = isset($_GET['hours_filter']) ? sanitize_text_field($_GET['hours_filter']) : '';
+
 // Get events with filtering and pagination (unified table approach)
 $events = array();
 $total_events = 0;
@@ -221,6 +226,9 @@ if ($cronjob_manager) {
         'offset' => $offset,
         'status' => $filter_status,
         'search' => $search,
+        'date_from' => $date_from,
+        'date_to' => $date_to,
+        'hours_filter' => $hours_filter,
         'orderby' => 'created_at',
         'order' => 'DESC'
     ));

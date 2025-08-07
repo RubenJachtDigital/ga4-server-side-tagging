@@ -503,7 +503,10 @@ class GA4_Event_Logger
             'event_name' => '',
             'search' => '',
             'orderby' => 'created_at',
-            'order' => 'DESC'
+            'order' => 'DESC',
+            'date_from' => '',
+            'date_to' => '',
+            'hours_filter' => ''
         );
 
         $args = wp_parse_args($args, $defaults);
@@ -521,6 +524,35 @@ class GA4_Event_Logger
         if (!empty($args['event_name'])) {
             $where_clauses[] = 'event_name = %s';
             $where_values[] = $args['event_name'];
+        }
+
+        // Date filtering logic
+        if (!empty($args['hours_filter'])) {
+            if ($args['hours_filter'] === 'last_2_fridays') {
+                // Special case: From the Friday before last to last Friday (end of day)
+                $last_friday = $this->get_last_friday();
+                $friday_before_last = $this->get_friday_before_last();
+                
+                $where_clauses[] = 'created_at >= %s AND created_at <= %s';
+                $where_values[] = $friday_before_last . ' 00:00:00';
+                $where_values[] = $last_friday . ' 23:59:59';
+            } elseif (is_numeric($args['hours_filter'])) {
+                // Regular hours filter
+                $hours = intval($args['hours_filter']);
+                $cutoff_datetime = date('Y-m-d H:i:s', strtotime("-{$hours} hours"));
+                $where_clauses[] = 'created_at >= %s';
+                $where_values[] = $cutoff_datetime;
+            }
+        } elseif (!empty($args['date_from']) || !empty($args['date_to'])) {
+            // Date range filtering
+            if (!empty($args['date_from'])) {
+                $where_clauses[] = 'created_at >= %s';
+                $where_values[] = $args['date_from'];
+            }
+            if (!empty($args['date_to'])) {
+                $where_clauses[] = 'created_at <= %s';
+                $where_values[] = $args['date_to'];
+            }
         }
 
         // Search handling: we'll search in both database fields and encrypted payload fields
@@ -1571,7 +1603,10 @@ class GA4_Event_Logger
             'status' => '',
             'search' => '',
             'orderby' => 'created_at',
-            'order' => 'DESC'
+            'order' => 'DESC',
+            'date_from' => '',
+            'date_to' => '',
+            'hours_filter' => ''
         );
 
         $args = wp_parse_args($args, $defaults);
@@ -1583,6 +1618,35 @@ class GA4_Event_Logger
         if (!empty($args['status'])) {
             $where_conditions[] = "queue_status = %s";
             $query_args[] = $args['status'];
+        }
+
+        // Date filtering logic
+        if (!empty($args['hours_filter'])) {
+            if ($args['hours_filter'] === 'last_2_fridays') {
+                // Special case: From the Friday before last to last Friday (end of day)
+                $last_friday = $this->get_last_friday();
+                $friday_before_last = $this->get_friday_before_last();
+                
+                $where_conditions[] = 'created_at >= %s AND created_at <= %s';
+                $query_args[] = $friday_before_last . ' 00:00:00';
+                $query_args[] = $last_friday . ' 23:59:59';
+            } elseif (is_numeric($args['hours_filter'])) {
+                // Regular hours filter
+                $hours = intval($args['hours_filter']);
+                $cutoff_datetime = date('Y-m-d H:i:s', strtotime("-{$hours} hours"));
+                $where_conditions[] = 'created_at >= %s';
+                $query_args[] = $cutoff_datetime;
+            }
+        } elseif (!empty($args['date_from']) || !empty($args['date_to'])) {
+            // Date range filtering
+            if (!empty($args['date_from'])) {
+                $where_conditions[] = 'created_at >= %s';
+                $query_args[] = $args['date_from'];
+            }
+            if (!empty($args['date_to'])) {
+                $where_conditions[] = 'created_at <= %s';
+                $query_args[] = $args['date_to'];
+            }
         }
 
         // Search handling: we'll search in both database fields and encrypted payload fields
@@ -1870,5 +1934,42 @@ class GA4_Event_Logger
         }
 
         return wp_json_encode($error_message, JSON_PRETTY_PRINT);
+    }
+
+    /**
+     * Get the date of the last Friday (or today if today is Friday)
+     *
+     * @since    3.0.0
+     * @return   string  Date in Y-m-d format
+     */
+    private function get_last_friday()
+    {
+        $today = new \DateTime();
+        $day_of_week = $today->format('w'); // 0 = Sunday, 5 = Friday
+        
+        if ($day_of_week == 5) {
+            // Today is Friday
+            return $today->format('Y-m-d');
+        } elseif ($day_of_week < 5) {
+            // We're before Friday this week, so get last Friday (from previous week)
+            $days_back = $day_of_week + 2; // +2 because we need to go back to Friday
+            return $today->modify("-{$days_back} days")->format('Y-m-d');
+        } else {
+            // We're after Friday this week (Saturday/Sunday), so get Friday from this week
+            $days_back = $day_of_week - 5;
+            return $today->modify("-{$days_back} days")->format('Y-m-d');
+        }
+    }
+
+    /**
+     * Get the date of the Friday before the last Friday
+     *
+     * @since    3.0.0
+     * @return   string  Date in Y-m-d format
+     */
+    private function get_friday_before_last()
+    {
+        $last_friday = new \DateTime($this->get_last_friday());
+        return $last_friday->modify('-7 days')->format('Y-m-d');
     }
 }
