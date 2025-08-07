@@ -28,7 +28,7 @@ if (! defined('WPINC')) {
 }
 
 // Define plugin version
-define('GA4_SERVER_SIDE_TAGGING_VERSION', '2.2.2');
+define('GA4_SERVER_SIDE_TAGGING_VERSION', '2.2.3');
 define('GA4_SERVER_SIDE_TAGGING_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('GA4_SERVER_SIDE_TAGGING_PLUGIN_URL', plugin_dir_url(__FILE__));
 

@@ -555,10 +555,7 @@ function detectBot(request, payload) {
     checkIPReputation(cfData)
   ];
 
-  // Check WordPress bot data if available
-  if (params.botData) {
-    checks.push(checkWordPressBotData(params.botData));
-  }
+  // Skip WordPress bot data analysis (removed)
 
   // Check behavior patterns if available
   if (params.botData || params.event_timestamp) {
@@ -741,72 +738,6 @@ function checkSuspiciousGeography(country, city, region) {
   return { isBot: false, reason: "geography_ok" };
 }
 
-/**
- * Check WordPress bot data for comprehensive analysis - ENHANCED
- */
-function checkWordPressBotData(botData) {
-  var suspiciousPatterns = [];
-
-  // Check bot score passed from WordPress - LOWERED THRESHOLD
-  if (botData.bot_score && parseInt(botData.bot_score) > 35) {
-    return { isBot: true, reason: 'high_bot_score: ' + botData.bot_score };
-  }
-
-  // Check for automation indicators
-  if (botData.webdriver_detected === true || botData.has_automation_indicators === true) {
-    suspiciousPatterns.push('automation_detected');
-  }
-
-  // Check JavaScript availability - be more lenient
-  if (botData.has_javascript === false) {
-    suspiciousPatterns.push('no_javascript');
-  }
-
-  // Check engagement time - ADJUSTED
-  if (botData.engagement_calculated && parseInt(botData.engagement_calculated) < 500) {
-    suspiciousPatterns.push('very_short_engagement');
-  }
-
-  // Enhanced screen dimension checks
-  var screenWidth = parseInt(botData.screen_available_width);
-  var screenHeight = parseInt(botData.screen_available_height);
-  if (screenWidth && screenHeight) {
-    // Check for impossible dimensions
-    if (screenWidth < 320 || screenHeight < 240 || screenWidth > 7680 || screenHeight > 4320) {
-      suspiciousPatterns.push('impossible_screen_dimensions');
-    }
-  }
-
-  // Enhanced hardware checks
-  if (botData.hardware_concurrency === 0) {
-    suspiciousPatterns.push('no_hardware_concurrency');
-  }
-  
-  if (botData.max_touch_points === undefined || botData.max_touch_points < 0) {
-    suspiciousPatterns.push('suspicious_touch_points');
-  }
-
-  // Check for missing or suspicious browser features
-  if (botData.cookie_enabled === false) {
-    suspiciousPatterns.push('cookies_disabled');
-  }
-
-  if (botData.color_depth && (botData.color_depth < 16 || botData.color_depth > 32)) {
-    suspiciousPatterns.push('unusual_color_depth');
-  }
-
-  // Check timezone consistency
-  if (botData.timezone === 'UTC' || botData.timezone === 'GMT') {
-    suspiciousPatterns.push('suspicious_timezone');
-  }
-
-  // Require fewer patterns for bot detection
-  if (suspiciousPatterns.length >= 2) {
-    return { isBot: true, reason: 'wordpress_bot_data: ' + suspiciousPatterns.join(', ') };
-  }
-
-  return { isBot: false, reason: "wordpress_bot_data_ok" };
-}
 
 /**
  * Check behavior patterns using WordPress-passed data - ENHANCED

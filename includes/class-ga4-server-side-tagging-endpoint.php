@@ -2126,17 +2126,8 @@ class GA4_Server_Side_Tagging_Endpoint
             $bot_checks[] = false;
         }
         
-        // 2. WordPress botData analysis (mirrors Cloudflare checkWordPressBotData)
-        if ($bot_data) {
-            $botdata_result = $this->check_wordpress_bot_data($bot_data);
-            $bot_checks[] = $botdata_result['is_bot'];
-            if ($botdata_result['is_bot']) {
-                $reasons[] = 'botdata_analysis';
-                $total_score += $botdata_result['score'];
-            }
-        } else {
-            $bot_checks[] = false;
-        }
+        // 2. Skip WordPress botData analysis (removed)
+        $bot_checks[] = false;
         
         // 3. Behavior patterns analysis (mirrors Cloudflare checkBehaviorPatterns)
         if ($bot_data && $event_params) {
@@ -2170,102 +2161,13 @@ class GA4_Server_Side_Tagging_Endpoint
             'positive_checks' => count($positive_checks),
             'check_details' => array(
                 'wordpress_patterns' => $bot_checks[0],
-                'botdata_analysis' => $bot_checks[1],
-                'behavior_patterns' => $bot_checks[2],
-                'user_agent' => $bot_checks[3]
+                'botdata_analysis' => false,
+                'behavior_patterns' => $bot_checks[1],
+                'user_agent' => $bot_checks[2]
             )
         );
     }
     
-    /**
-     * Check WordPress botData for bot indicators (mirrors Cloudflare checkWordPressBotData)
-     *
-     * @since    1.0.0
-     * @param    array    $bot_data    The botData from client.
-     * @return   array                Bot detection result.
-     */
-    private function check_wordpress_bot_data($bot_data)
-    {
-        $score = 0;
-        $indicators = array();
-        
-        // Bot score check (primary indicator)
-        if (isset($bot_data['bot_score']) && $bot_data['bot_score'] > 35) {
-            $score += 40;
-            $indicators[] = 'high_bot_score';
-        }
-        
-        // Webdriver detection
-        if (isset($bot_data['webdriver_detected']) && $bot_data['webdriver_detected']) {
-            $score += 50;
-            $indicators[] = 'webdriver_detected';
-        }
-        
-        // Automation indicators
-        if (isset($bot_data['has_automation_indicators']) && $bot_data['has_automation_indicators']) {
-            $score += 30;
-            $indicators[] = 'automation_indicators';
-        }
-        
-        // JavaScript availability (missing JS is suspicious)
-        if (isset($bot_data['has_javascript']) && !$bot_data['has_javascript']) {
-            $score += 20;
-            $indicators[] = 'no_javascript';
-        }
-        
-        // Hardware checks
-        if (isset($bot_data['hardware_concurrency']) && $bot_data['hardware_concurrency'] === 0) {
-            $score += 15;
-            $indicators[] = 'no_hardware_concurrency';
-        }
-        
-        // Cookie support
-        if (isset($bot_data['cookie_enabled']) && !$bot_data['cookie_enabled']) {
-            $score += 10;
-            $indicators[] = 'cookies_disabled';
-        }
-        
-        // Screen dimension validation
-        if (isset($bot_data['screen_available_width']) && isset($bot_data['screen_available_height'])) {
-            $width = intval($bot_data['screen_available_width']);
-            $height = intval($bot_data['screen_available_height']);
-            
-            if ($width < 320 || $width > 7680 || $height < 240 || $height > 4320) {
-                $score += 25;
-                $indicators[] = 'invalid_screen_dimensions';
-            }
-        }
-        
-        // Color depth check
-        if (isset($bot_data['color_depth'])) {
-            $color_depth = intval($bot_data['color_depth']);
-            if ($color_depth < 16 || $color_depth > 32) {
-                $score += 15;
-                $indicators[] = 'invalid_color_depth';
-            }
-        }
-        
-        // Engagement time check
-        if (isset($bot_data['engagement_calculated']) && $bot_data['engagement_calculated'] < 500) {
-            $score += 20;
-            $indicators[] = 'low_engagement';
-        }
-        
-        // Timezone check (UTC/GMT is suspicious)
-        if (isset($bot_data['timezone'])) {
-            $timezone = strtolower($bot_data['timezone']);
-            if (in_array($timezone, array('utc', 'gmt', 'utc+0', 'gmt+0'))) {
-                $score += 10;
-                $indicators[] = 'suspicious_timezone';
-            }
-        }
-        
-        return array(
-            'is_bot' => $score >= 30, // More balanced threshold for bot classification
-            'score' => $score,
-            'indicators' => $indicators
-        );
-    }
     
     /**
      * Check behavior patterns for bot indicators (mirrors Cloudflare checkBehaviorPatterns)

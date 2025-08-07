@@ -2137,41 +2137,6 @@
      * Build complete event data with all session context, attribution, and page data
      * This preserves the original page context when events are queued
      */
-    getBotData: async function () {
-
-      // Get user agent and client behavior data (preserve original context)
-      var userAgentInfo = GA4Utils.device.parseUserAgent();
-      var clientBehavior = GA4Utils.botDetection.getClientBehaviorData();
-
-
-      // Add bot detection data for Cloudflare Worker analysis
-      var botData = {
-        user_agent_full: userAgentInfo.user_agent,
-        browser_name: userAgentInfo.browser_name,
-        device_type: userAgentInfo.device_type,
-        is_mobile: userAgentInfo.is_mobile,
-        has_javascript: clientBehavior.hasJavaScript,
-        screen_available_width: clientBehavior.screenAvailWidth,
-        screen_available_height: clientBehavior.screenAvailHeight,
-        color_depth: clientBehavior.colorDepth,
-        pixel_depth: clientBehavior.pixelDepth,
-        timezone: clientBehavior.timezone,
-        platform: clientBehavior.platform,
-        cookie_enabled: clientBehavior.cookieEnabled,
-        hardware_concurrency: clientBehavior.hardwareConcurrency,
-        max_touch_points: clientBehavior.maxTouchPoints,
-        webdriver_detected: clientBehavior.webdriver,
-        has_automation_indicators: clientBehavior.hasAutomationIndicators,
-        page_load_time: clientBehavior.pageLoadTime,
-        user_interaction_detected: clientBehavior.hasInteracted,
-        bot_score: GA4Utils.botDetection.calculateBotScore(
-          userAgentInfo,
-          clientBehavior
-        ),
-      };
-
-      return botData;
-    },
 
 
     trackEvent: async function (eventName, eventParams = {}) {
@@ -2265,7 +2230,6 @@
 
       // Add stored attribution data for non-foundational events only
       this.addStoredAttributionData(eventParams, eventName);
-      eventParams.botData = await this.getBotData();
 
       // Check consent status via consent manager (only if consent mode is enabled)
       if (this.config.consentSettings && this.config.consentSettings.consentModeEnabled && 
@@ -2464,10 +2428,6 @@
         });
         return; // Don't send bot traffic
       }
-
-
-      // Add bot detection data for Cloudflare Worker analysis
-      params.botData = await this.getBotData();
 
       // Apply GDPR anonymization based on consent
       if (window.GA4ConsentManager && typeof window.GA4ConsentManager.applyGDPRAnonymization === 'function') {
