@@ -335,7 +335,7 @@ $current_page = floor($offset / $limit) + 1;
         'completed' => '✅ Completed', 
         'failed' => '❌ Failed'
     );
-    $search_placeholder = 'ID, event name, error message, IP, user agent, URL, payload data...';
+    $search_placeholder = 'ID, event name, error message, IP, user agent, URL, referrer, session ID...';
     
     // Include the reusable search template
     include plugin_dir_path(__FILE__) . 'ga4-search-template.php';

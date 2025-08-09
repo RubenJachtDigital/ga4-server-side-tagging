@@ -510,7 +510,7 @@ $current_page = floor($offset / $limit) + 1;
         'bot_detected' => '🤖 Bot Detected',
         'error' => '⚠️ Error'
     );
-    $search_placeholder = 'ID, event name, IP, reason, error message, user agent, URL, referrer, session ID, payload data...';
+    $search_placeholder = 'ID, event name, IP, reason, error message, user agent, URL, referrer, session ID...';
     
     // Include the reusable search template
     include plugin_dir_path(__FILE__) . 'ga4-search-template.php';

@@ -555,13 +555,8 @@ class GA4_Event_Logger
             }
         }
 
-        // Search handling: we'll search in both database fields and encrypted payload fields
-        $search_term = '';
-        $has_search = false;
+        // Search in: ID, Event Name, Reason, IP Address, User Agent, URL, Referrer, Session ID, User ID, Error Message
         if (!empty($args['search'])) {
-            $search_term = $args['search'];
-            $has_search = true;
-            // First try to find matches in non-encrypted database columns using SQL for better performance
             $where_clauses[] = '(id LIKE %s OR event_name LIKE %s OR reason LIKE %s OR ip_address LIKE %s OR user_agent LIKE %s OR url LIKE %s OR referrer LIKE %s OR session_id LIKE %s OR user_id LIKE %s OR error_message LIKE %s)';
             $db_search_term = '%' . $wpdb->esc_like($args['search']) . '%';
             $where_values[] = $db_search_term; // id
@@ -591,118 +586,41 @@ class GA4_Event_Logger
         $orderby = in_array($args['orderby'], $allowed_orderby) ? $args['orderby'] : 'created_at';
         $order = strtoupper($args['order']) === 'ASC' ? 'ASC' : 'DESC';
 
-        // When searching, we need to search ALL records to find matches
-        // Otherwise use normal pagination
-        if ($has_search) {
-            // Remove limits when searching to search through all records
-            $search_limit = 0; // No limit
-            $search_offset = 0; // Start from beginning
+        // Always use pagination for performance
+        $query = "SELECT * FROM $this->table_name $where_sql ORDER BY $orderby $order LIMIT %d OFFSET %d";
+        $final_values = array_merge($where_values, array($args['limit'], $args['offset']));
+        if (!empty($where_values)) {
+            $query = $wpdb->prepare($query, $final_values);
         } else {
-            $search_limit = $args['limit'];
-            $search_offset = $args['offset'];
-        }
-
-        // Build query
-        if ($has_search) {
-            // No limit when searching - get all matching records
-            $query = "SELECT * FROM $this->table_name $where_sql ORDER BY $orderby $order";
-            if (!empty($where_values)) {
-                $query = $wpdb->prepare($query, $where_values);
-            }
-        } else {
-            // Normal pagination
-            $query = "SELECT * FROM $this->table_name $where_sql ORDER BY $orderby $order LIMIT %d OFFSET %d";
-            $final_values = array_merge($where_values, array($search_limit, $search_offset));
-            if (!empty($where_values)) {
-                $query = $wpdb->prepare($query, $final_values);
-            } else {
-                $query = $wpdb->prepare($query, $search_limit, $search_offset);
-            }
+            $query = $wpdb->prepare($query, $args['limit'], $args['offset']);
         }
 
         $results = $wpdb->get_results($query) ?: array();
 
-        // Decrypt the 4 payload columns and perform payload search if needed
-        $filtered_results = array();
+        // Decrypt columns for display
         foreach ($results as $result) {
-            // Decrypt payload columns
-            $original_payload_decrypted = '';
-            $final_payload_decrypted = '';
-            $original_headers_decrypted = '';
-            $final_headers_decrypted = '';
-            
+            // Decrypt encrypted columns
             if (isset($result->original_payload) && !empty($result->original_payload)) {
-                $original_payload_decrypted = $this->decrypt_payload_for_display($result->original_payload);
-                $result->original_payload = $original_payload_decrypted;
+                $result->original_payload = $this->decrypt_payload_for_display($result->original_payload);
             }
             if (isset($result->final_payload) && !empty($result->final_payload)) {
-                $final_payload_decrypted = $this->decrypt_payload_for_display($result->final_payload);
-                $result->final_payload = $final_payload_decrypted;
+                $result->final_payload = $this->decrypt_payload_for_display($result->final_payload);
             }
             if (isset($result->original_headers) && !empty($result->original_headers)) {
-                $original_headers_decrypted = \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::decrypt_headers_from_storage($result->original_headers);
-                $result->original_headers = $original_headers_decrypted;
+                $result->original_headers = \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::decrypt_headers_from_storage($result->original_headers);
             }
             if (isset($result->final_headers) && !empty($result->final_headers)) {
-                $final_headers_decrypted = \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::decrypt_headers_from_storage($result->final_headers);
-                $result->final_headers = $final_headers_decrypted;
+                $result->final_headers = \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::decrypt_headers_from_storage($result->final_headers);
             }
             if (isset($result->bot_detection_rules) && !empty($result->bot_detection_rules)) {
                 $result->bot_detection_rules = $this->decrypt_payload_for_display($result->bot_detection_rules);
             }
             
             // Add backward compatibility fields for admin display
-            $result->event_status = isset($result->monitor_status) ? $result->monitor_status : 'unknown'; // For legacy display code
-            $result->payload = isset($result->original_payload) ? $result->original_payload : ''; // For legacy display code
-            $result->headers = isset($result->original_headers) ? $result->original_headers : array(); // For legacy display code
-            
-            // If searching, also check encrypted payload fields for additional matches
-            if ($has_search) {
-                $search_found_in_payload = false;
-                
-                // Search in decrypted payload fields (database fields already matched by SQL)
-                $payload_fields = array(
-                    $original_payload_decrypted,
-                    $final_payload_decrypted,
-                    $original_headers_decrypted,
-                    $final_headers_decrypted,
-                    $result->bot_detection_rules ?? ''
-                );
-                
-                foreach ($payload_fields as $field_content) {
-                    // Convert arrays to JSON strings for searching
-                    $search_content = is_array($field_content) ? wp_json_encode($field_content) : (string)$field_content;
-                    if (stripos($search_content, $search_term) !== false) {
-                        $search_found_in_payload = true;
-                        break;
-                    }
-                    
-                    // Also search in individual JSON values if it's valid JSON
-                    if (!$search_found_in_payload && $this->is_json($search_content)) {
-                        $json_data = json_decode($search_content, true);
-                        if ($this->search_in_array($json_data, $search_term)) {
-                            $search_found_in_payload = true;
-                            break;
-                        }
-                    }
-                }
-                
-                // Include this result (SQL already filtered database fields, or payload search found match)
-                $filtered_results[] = $result;
-            } else {
-                $filtered_results[] = $result;
-            }
+            $result->event_status = isset($result->monitor_status) ? $result->monitor_status : 'unknown';
+            $result->payload = isset($result->original_payload) ? $result->original_payload : '';
+            $result->headers = isset($result->original_headers) ? $result->original_headers : array();
         }
-        
-        // Apply pagination to search results
-        if ($has_search) {
-            $total_filtered = count($filtered_results);
-            $filtered_results = array_slice($filtered_results, $args['offset'], $args['limit']);
-            // Update total count for pagination
-            $total_events = $total_filtered;
-        }
-        
-        $results = $filtered_results;
 
         return array(
             'results' => $results,
@@ -1649,13 +1567,8 @@ class GA4_Event_Logger
             }
         }
 
-        // Search handling: we'll search in both database fields and encrypted payload fields
-        $has_search = false;
-        $search_term = '';
+        // Search in: ID, Event Name, Error Message, IP Address, User Agent, URL, Referrer, Session ID, User ID
         if (!empty($args['search'])) {
-            $search_term = $args['search'];
-            $has_search = true;
-            // First try to find matches in non-encrypted database columns using SQL for better performance
             $where_conditions[] = "(id LIKE %s OR event_name LIKE %s OR error_message LIKE %s OR ip_address LIKE %s OR user_agent LIKE %s OR url LIKE %s OR referrer LIKE %s OR session_id LIKE %s OR user_id LIKE %s)";
             $db_search_term = '%' . $wpdb->esc_like($args['search']) . '%';
             $query_args[] = $db_search_term; // id
@@ -1685,105 +1598,38 @@ class GA4_Event_Logger
             $orderby = 'created_at DESC';
         }
 
-        // When searching, we need to search ALL records to find matches
-        if ($has_search) {
-            // No limit when searching - get all matching records
-            $query = "SELECT * FROM $this->table_name 
-                      $where_sql 
-                      ORDER BY $orderby";
-            if (!empty($query_args)) {
-                $events = $wpdb->get_results($wpdb->prepare($query, $query_args));
-            } else {
-                $events = $wpdb->get_results($query);
-            }
-        } else {
-            // Normal pagination
-            $query = "SELECT * FROM $this->table_name 
-                      $where_sql 
-                      ORDER BY $orderby 
-                      LIMIT %d OFFSET %d";
-            $final_args = array_merge($query_args, array($args['limit'], $args['offset']));
-            $events = $wpdb->get_results($wpdb->prepare($query, $final_args));
-        }
+        // Always use pagination for performance
+        $query = "SELECT * FROM $this->table_name 
+                  $where_sql 
+                  ORDER BY $orderby 
+                  LIMIT %d OFFSET %d";
+        $final_args = array_merge($query_args, array($args['limit'], $args['offset']));
+        $events = $wpdb->get_results($wpdb->prepare($query, $final_args));
 
-        // Decrypt the 4 payload columns and perform payload search if needed
-        $filtered_events = array();
+        // Decrypt columns for display
         foreach ($events as $event) {
-            // Decrypt payload columns
-            $original_payload_decrypted = '';
-            $final_payload_decrypted = '';
-            $original_headers_decrypted = '';
-            $final_headers_decrypted = '';
-            
+            // Decrypt encrypted columns
             if (isset($event->original_payload) && !empty($event->original_payload)) {
-                $original_payload_decrypted = $this->decrypt_payload_for_display($event->original_payload);
-                $event->original_payload = $original_payload_decrypted;
+                $event->original_payload = $this->decrypt_payload_for_display($event->original_payload);
             }
             if (isset($event->final_payload) && !empty($event->final_payload)) {
-                $final_payload_decrypted = $this->decrypt_payload_for_display($event->final_payload);
-                $event->final_payload = $final_payload_decrypted;
+                $event->final_payload = $this->decrypt_payload_for_display($event->final_payload);
             }
             if (isset($event->original_headers) && !empty($event->original_headers)) {
-                $original_headers_decrypted = \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::decrypt_headers_from_storage($event->original_headers);
-                $event->original_headers = $original_headers_decrypted;
+                $event->original_headers = \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::decrypt_headers_from_storage($event->original_headers);
             }
             if (isset($event->final_headers) && !empty($event->final_headers)) {
-                $final_headers_decrypted = \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::decrypt_headers_from_storage($event->final_headers);
-                $event->final_headers = $final_headers_decrypted;
+                $event->final_headers = \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::decrypt_headers_from_storage($event->final_headers);
             }
             
             // Add backward compatibility fields for cronjob admin display
-            $event->event_status = isset($event->queue_status) ? $event->queue_status : 'unknown'; // For legacy display code
-            $event->event_data = isset($event->original_payload) ? $event->original_payload : ''; // For legacy display code
-            $event->status = isset($event->queue_status) ? $event->queue_status : 'unknown'; // For legacy display code
-            
-            // If searching, also check encrypted payload fields for additional matches
-            if ($has_search) {
-                $search_found_in_payload = false;
-                
-                // Search in decrypted payload fields (database fields already matched by SQL)
-                $payload_fields = array(
-                    $original_payload_decrypted,
-                    $final_payload_decrypted,
-                    $original_headers_decrypted,
-                    $final_headers_decrypted
-                );
-                
-                foreach ($payload_fields as $field_content) {
-                    // Convert arrays to JSON strings for searching
-                    $search_content = is_array($field_content) ? wp_json_encode($field_content) : (string)$field_content;
-                    if (stripos($search_content, $search_term) !== false) {
-                        $search_found_in_payload = true;
-                        break;
-                    }
-                    
-                    // Also search in individual JSON values if it's valid JSON
-                    if (!$search_found_in_payload && $this->is_json($search_content)) {
-                        $json_data = json_decode($search_content, true);
-                        if ($this->search_in_array($json_data, $search_term)) {
-                            $search_found_in_payload = true;
-                            break;
-                        }
-                    }
-                }
-                
-                // Include this result (SQL already filtered database fields, or payload search found match)
-                $filtered_events[] = $event;
-            } else {
-                $filtered_events[] = $event;
-            }
-        }
-        
-        // Apply pagination to search results
-        if ($has_search) {
-            $total_filtered = count($filtered_events);
-            $filtered_events = array_slice($filtered_events, $args['offset'], $args['limit']);
-            // Update total count for pagination
-            $total_events = $total_filtered;
+            $event->event_status = isset($event->queue_status) ? $event->queue_status : 'unknown';
+            $event->event_data = isset($event->original_payload) ? $event->original_payload : '';
+            $event->status = isset($event->queue_status) ? $event->queue_status : 'unknown';
         }
 
         return array(
-            'events' => $has_search ? $filtered_events : $events,
+            'events' => $events,
             'total' => intval($total_events)
         );
     }
