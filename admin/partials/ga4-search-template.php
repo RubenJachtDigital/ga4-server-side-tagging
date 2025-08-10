@@ -683,7 +683,7 @@ jQuery(document).ready(function($) {
             fromFormatted = mondayString + 'T00:00';
             toFormatted = sundayString + 'T23:59';
         } else if (hours === 'last_2_fridays') {
-            // Last 2 Fridays to current time
+            // Last 2 Fridays (from two Fridays ago 00:00 to last Friday 23:59)
             var today = new Date();
             var daysSinceFriday = (today.getDay() + 2) % 7; // Days since last Friday
             var lastFriday = new Date(today.getTime() - daysSinceFriday * 24 * 60 * 60 * 1000);
@@ -693,14 +693,12 @@ jQuery(document).ready(function($) {
                 String(twoFridaysAgo.getMonth() + 1).padStart(2, '0') + '-' + 
                 String(twoFridaysAgo.getDate()).padStart(2, '0');
             
-            var nowString = now.getFullYear() + '-' + 
-                String(now.getMonth() + 1).padStart(2, '0') + '-' + 
-                String(now.getDate()).padStart(2, '0');
-            var nowTimeString = String(now.getHours()).padStart(2, '0') + ':' + 
-                String(now.getMinutes()).padStart(2, '0');
+            var toString = lastFriday.getFullYear() + '-' + 
+                String(lastFriday.getMonth() + 1).padStart(2, '0') + '-' + 
+                String(lastFriday.getDate()).padStart(2, '0');
             
             fromFormatted = fromString + 'T00:00';
-            toFormatted = nowString + 'T' + nowTimeString;
+            toFormatted = toString + 'T23:59';
         } else {
             // Calculate from date based on hours (always include today)
             var hoursNum = parseInt(hours);
