@@ -101,7 +101,10 @@ $hours_filter = $hours_filter ?? '';
                                 $quick_labels = array(
                                     '1' => 'Last Hour',
                                     '6' => 'Last 6h',
-                                    '24' => 'Last 24h',
+                                    '24' => 'Today',
+                                    'yesterday' => 'Yesterday',
+                                    'this_week' => 'This Week',
+                                    'last_week' => 'Last Week',
                                     '168' => 'Last 7d',
                                     '720' => 'Last 30d',
                                     'last_2_fridays' => 'Last 2 Fridays'
@@ -150,6 +153,9 @@ $hours_filter = $hours_filter ?? '';
                     <button type="button" class="button ga4-quick-filter" data-hours="1"><?php echo esc_html__('Last Hour', 'ga4-server-side-tagging'); ?></button>
                     <button type="button" class="button ga4-quick-filter" data-hours="6"><?php echo esc_html__('Last 6 Hours', 'ga4-server-side-tagging'); ?></button>
                     <button type="button" class="button ga4-quick-filter" data-hours="24"><?php echo esc_html__('Today', 'ga4-server-side-tagging'); ?></button>
+                    <button type="button" class="button ga4-quick-filter" data-hours="yesterday"><?php echo esc_html__('Yesterday', 'ga4-server-side-tagging'); ?></button>
+                    <button type="button" class="button ga4-quick-filter" data-hours="this_week"><?php echo esc_html__('This Week', 'ga4-server-side-tagging'); ?></button>
+                    <button type="button" class="button ga4-quick-filter" data-hours="last_week"><?php echo esc_html__('Last Week', 'ga4-server-side-tagging'); ?></button>
                     <button type="button" class="button ga4-quick-filter" data-hours="168"><?php echo esc_html__('Last 7 Days', 'ga4-server-side-tagging'); ?></button>
                     <button type="button" class="button ga4-quick-filter" data-hours="720"><?php echo esc_html__('Last 30 Days', 'ga4-server-side-tagging'); ?></button>
                     <button type="button" class="button ga4-quick-filter" data-hours="last_2_fridays"><?php echo esc_html__('Last 2 Fridays', 'ga4-server-side-tagging'); ?></button>
@@ -172,14 +178,6 @@ $hours_filter = $hours_filter ?? '';
                         <label for="modal_date_to"><?php echo esc_html__('To:', 'ga4-server-side-tagging'); ?></label>
                         <input type="datetime-local" id="modal_date_to" value="<?php echo esc_attr($date_to); ?>">
                     </div>
-                </div>
-                <div class="ga4-date-presets">
-                    <small>
-                        <button type="button" class="button-link ga4-preset-btn" data-preset="today"><?php echo esc_html__('Today', 'ga4-server-side-tagging'); ?></button> |
-                        <button type="button" class="button-link ga4-preset-btn" data-preset="yesterday"><?php echo esc_html__('Yesterday', 'ga4-server-side-tagging'); ?></button> |
-                        <button type="button" class="button-link ga4-preset-btn" data-preset="this_week"><?php echo esc_html__('This Week', 'ga4-server-side-tagging'); ?></button> |
-                        <button type="button" class="button-link ga4-preset-btn" data-preset="last_week"><?php echo esc_html__('Last Week', 'ga4-server-side-tagging'); ?></button>
-                    </small>
                 </div>
             </div>
         </div>
@@ -425,6 +423,7 @@ $hours_filter = $hours_filter ?? '';
     font-weight: 600;
 }
 
+
 .ga4-date-divider {
     text-align: center;
     margin: 25px 0;
@@ -476,25 +475,6 @@ $hours_filter = $hours_filter ?? '';
     font-size: 14px;
 }
 
-.ga4-date-presets {
-    text-align: center;
-}
-
-.ga4-preset-btn {
-    color: #0073aa;
-    text-decoration: none;
-    font-size: 13px;
-    padding: 2px 4px;
-    margin: 0 2px;
-    cursor: pointer;
-    border: none;
-    background: none;
-}
-
-.ga4-preset-btn:hover {
-    text-decoration: underline;
-    color: #005a87;
-}
 
 .ga4-date-modal-footer {
     padding: 20px 25px;
@@ -578,7 +558,10 @@ jQuery(document).ready(function($) {
             var labels = {
                 '1': 'Last Hour',
                 '6': 'Last 6h',
-                '24': 'Last 24h',
+                '24': 'Today',
+                'yesterday': 'Yesterday',
+                'this_week': 'This Week',
+                'last_week': 'Last Week',
                 '168': 'Last 7d',
                 '720': 'Last 30d',
                 'last_2_fridays': 'Last 2 Fridays'
@@ -601,8 +584,39 @@ jQuery(document).ready(function($) {
         e.preventDefault();
         
         // Sync modal inputs with current values
-        modalDateFrom.val(dateFromInput.val());
-        modalDateTo.val(dateToInput.val());
+        var currentFrom = dateFromInput.val();
+        var currentTo = dateToInput.val();
+        
+        // If no existing date filters, set default range (yesterday 00:00 to yesterday 23:59)
+        if (!currentFrom && !currentTo && !hoursFilterInput.val()) {
+            var now = new Date();
+            
+            // Get yesterday's date
+            var yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+            var dateString = yesterday.getFullYear() + '-' + 
+                String(yesterday.getMonth() + 1).padStart(2, '0') + '-' + 
+                String(yesterday.getDate()).padStart(2, '0');
+            
+            // Set both start and end to yesterday with hardcoded times
+            var yesterdayStart = dateString + 'T00:00';
+            var yesterdayEnd = dateString + 'T23:59';
+            
+            modalDateFrom.val(yesterdayStart);
+            modalDateTo.val(yesterdayEnd);
+        } else {
+            // Convert Amsterdam time back to local time for display
+            if (currentFrom) {
+                var fromDate = new Date(currentFrom.replace(' ', 'T'));
+                var localFromDate = new Date(fromDate.getTime() - (2 * 3600000) + (fromDate.getTimezoneOffset() * 60000));
+                modalDateFrom.val(localFromDate.toISOString().slice(0, 16));
+            }
+            
+            if (currentTo) {
+                var toDate = new Date(currentTo.replace(' ', 'T'));
+                var localToDate = new Date(toDate.getTime() - (2 * 3600000) + (toDate.getTimezoneOffset() * 60000));
+                modalDateTo.val(localToDate.toISOString().slice(0, 16));
+            }
+        }
         
         updateDateStatus();
         modal.show();
@@ -623,66 +637,128 @@ jQuery(document).ready(function($) {
     // Quick filter buttons
     $('.ga4-quick-filter').on('click', function() {
         var hours = $(this).data('hours');
+        var now = new Date();
+        var fromFormatted, toFormatted;
         
-        // Clear date inputs and set hours filter
+        if (hours === 'yesterday') {
+            // Yesterday 00:00 to 23:59
+            var yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+            var yesterdayString = yesterday.getFullYear() + '-' + 
+                String(yesterday.getMonth() + 1).padStart(2, '0') + '-' + 
+                String(yesterday.getDate()).padStart(2, '0');
+            fromFormatted = yesterdayString + 'T00:00';
+            toFormatted = yesterdayString + 'T23:59';
+        } else if (hours === 'this_week') {
+            // This week (Monday to current time)
+            var dayOfWeek = now.getDay();
+            var diff = now.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1); // Monday as first day
+            var mondayDate = new Date(now.getFullYear(), now.getMonth(), diff);
+            var mondayString = mondayDate.getFullYear() + '-' + 
+                String(mondayDate.getMonth() + 1).padStart(2, '0') + '-' + 
+                String(mondayDate.getDate()).padStart(2, '0');
+            
+            var nowString = now.getFullYear() + '-' + 
+                String(now.getMonth() + 1).padStart(2, '0') + '-' + 
+                String(now.getDate()).padStart(2, '0');
+            var nowTimeString = String(now.getHours()).padStart(2, '0') + ':' + 
+                String(now.getMinutes()).padStart(2, '0');
+            
+            fromFormatted = mondayString + 'T00:00';
+            toFormatted = nowString + 'T' + nowTimeString;
+        } else if (hours === 'last_week') {
+            // Last week (Monday to Sunday)
+            var lastWeek = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+            var dayOfWeek = lastWeek.getDay();
+            var diff = lastWeek.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1);
+            var mondayDate = new Date(lastWeek.getFullYear(), lastWeek.getMonth(), diff);
+            var sundayDate = new Date(mondayDate.getTime() + 6 * 24 * 60 * 60 * 1000);
+            
+            var mondayString = mondayDate.getFullYear() + '-' + 
+                String(mondayDate.getMonth() + 1).padStart(2, '0') + '-' + 
+                String(mondayDate.getDate()).padStart(2, '0');
+            var sundayString = sundayDate.getFullYear() + '-' + 
+                String(sundayDate.getMonth() + 1).padStart(2, '0') + '-' + 
+                String(sundayDate.getDate()).padStart(2, '0');
+            
+            fromFormatted = mondayString + 'T00:00';
+            toFormatted = sundayString + 'T23:59';
+        } else if (hours === 'last_2_fridays') {
+            // Last 2 Fridays to current time
+            var today = new Date();
+            var daysSinceFriday = (today.getDay() + 2) % 7; // Days since last Friday
+            var lastFriday = new Date(today.getTime() - daysSinceFriday * 24 * 60 * 60 * 1000);
+            var twoFridaysAgo = new Date(lastFriday.getTime() - 7 * 24 * 60 * 60 * 1000);
+            
+            var fromString = twoFridaysAgo.getFullYear() + '-' + 
+                String(twoFridaysAgo.getMonth() + 1).padStart(2, '0') + '-' + 
+                String(twoFridaysAgo.getDate()).padStart(2, '0');
+            
+            var nowString = now.getFullYear() + '-' + 
+                String(now.getMonth() + 1).padStart(2, '0') + '-' + 
+                String(now.getDate()).padStart(2, '0');
+            var nowTimeString = String(now.getHours()).padStart(2, '0') + ':' + 
+                String(now.getMinutes()).padStart(2, '0');
+            
+            fromFormatted = fromString + 'T00:00';
+            toFormatted = nowString + 'T' + nowTimeString;
+        } else {
+            // Calculate from date based on hours (always include today)
+            var hoursNum = parseInt(hours);
+            var fromDate = new Date(now.getTime() - hoursNum * 60 * 60 * 1000);
+            
+            var fromString = fromDate.getFullYear() + '-' + 
+                String(fromDate.getMonth() + 1).padStart(2, '0') + '-' + 
+                String(fromDate.getDate()).padStart(2, '0');
+            var fromTimeString = String(fromDate.getHours()).padStart(2, '0') + ':' + 
+                String(fromDate.getMinutes()).padStart(2, '0');
+            
+            // Always end at current time
+            var nowString = now.getFullYear() + '-' + 
+                String(now.getMonth() + 1).padStart(2, '0') + '-' + 
+                String(now.getDate()).padStart(2, '0');
+            var nowTimeString = String(now.getHours()).padStart(2, '0') + ':' + 
+                String(now.getMinutes()).padStart(2, '0');
+            
+            fromFormatted = fromString + 'T' + fromTimeString;
+            toFormatted = nowString + 'T' + nowTimeString;
+        }
+        
+        // Clear any existing date range values first
         modalDateFrom.val('');
         modalDateTo.val('');
+        
+        // Display the calculated range in custom date inputs (for visibility)
+        modalDateFrom.val(fromFormatted);
+        modalDateTo.val(toFormatted);
+        
+        // Set hours filter (this is what actually gets used for filtering)
         hoursFilterInput.val(hours);
         
         updateDateStatus();
         
-        // Auto-apply quick filters
-        $('#ga4-filter-form').submit();
-        modal.hide();
+        // Don't auto-submit - let user see the range and click Apply manually
     });
     
-    // Date preset buttons
-    $('.ga4-preset-btn').on('click', function() {
-        var preset = $(this).data('preset');
-        var now = new Date();
-        var from, to;
-        
-        switch (preset) {
-            case 'today':
-                from = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-                to = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59);
-                break;
-            case 'yesterday':
-                from = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
-                to = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 23, 59, 59);
-                break;
-            case 'this_week':
-                var dayOfWeek = now.getDay();
-                var diff = now.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1); // Monday as first day
-                from = new Date(now.setDate(diff));
-                from.setHours(0, 0, 0, 0);
-                to = new Date();
-                break;
-            case 'last_week':
-                var lastWeek = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-                var dayOfWeek = lastWeek.getDay();
-                var diff = lastWeek.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1);
-                from = new Date(lastWeek.setDate(diff));
-                from.setHours(0, 0, 0, 0);
-                to = new Date(from.getTime() + 6 * 24 * 60 * 60 * 1000);
-                to.setHours(23, 59, 59);
-                break;
-        }
-        
-        if (from && to) {
-            modalDateFrom.val(from.toISOString().slice(0, 16));
-            modalDateTo.val(to.toISOString().slice(0, 16));
-            
-            // Clear hours filter when using custom dates
-            hoursFilterInput.val('');
-        }
-    });
     
     // Apply date filter
     $('.ga4-apply-date-filter').on('click', function() {
-        // Update hidden form fields
-        dateFromInput.val(modalDateFrom.val());
-        dateToInput.val(modalDateTo.val());
+        // Convert datetime-local values to Amsterdam timezone before submitting
+        var fromValue = modalDateFrom.val();
+        var toValue = modalDateTo.val();
+        
+        if (fromValue) {
+            // Convert from local time to Amsterdam time (UTC+2)
+            var fromDate = new Date(fromValue);
+            var amsterdamFromDate = new Date(fromDate.getTime() + (2 * 3600000) - (fromDate.getTimezoneOffset() * 60000));
+            dateFromInput.val(amsterdamFromDate.toISOString().slice(0, 19).replace('T', ' '));
+        }
+        
+        if (toValue) {
+            // Convert from local time to Amsterdam time (UTC+2)
+            var toDate = new Date(toValue);
+            var amsterdamToDate = new Date(toDate.getTime() + (2 * 3600000) - (toDate.getTimezoneOffset() * 60000));
+            dateToInput.val(amsterdamToDate.toISOString().slice(0, 19).replace('T', ' '));
+        }
         
         // Clear hours filter if custom dates are set
         if (modalDateFrom.val() || modalDateTo.val()) {
@@ -703,6 +779,7 @@ jQuery(document).ready(function($) {
         dateFromInput.val('');
         dateToInput.val('');
         hoursFilterInput.val('');
+        
         
         updateDateStatus();
         modal.hide();
