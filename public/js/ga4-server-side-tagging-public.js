@@ -1167,13 +1167,18 @@
     },
 
     /**
-     * Generate unique conversion ID for form submissions (persistent for 5 minutes)
+     * Generate unique conversion ID for form submissions (persistent for 15 minutes per event type)
+     * @param {string} eventType - The event type (e.g., 'form_conversion', 'quote_request')
      */
-    generateConversionId: function() {
+    generateConversionId: function(eventType) {
       var self = this;
       
-      // Check for existing conversion ID that's still valid
-      var existingConversionData = sessionStorage.getItem('ga4_conversion_data');
+      // Default to 'form_conversion' if no eventType provided for backward compatibility
+      eventType = eventType || 'form_conversion';
+      
+      // Check for existing conversion ID for this specific event type
+      var storageKey = 'ga4_conversion_data_' + eventType;
+      var existingConversionData = sessionStorage.getItem(storageKey);
       var currentTime = Date.now();
       
       if (existingConversionData) {
@@ -1181,8 +1186,8 @@
           var conversionData = JSON.parse(existingConversionData);
           var timeDiff = currentTime - conversionData.created;
           
-          // If less than 5 minutes (300,000 ms), return existing ID
-          if (timeDiff < 300000) {
+          // If less than 15 minutes (900,000 ms), return existing ID
+          if (timeDiff < 900000) {
             return conversionData.id;
           }
         } catch (e) {
@@ -1199,15 +1204,16 @@
       // Generate random component
       var random = Math.random().toString(36).substr(2, 6);
       
-      // Combine: CONV_{sessionId}_{timestamp}_{random}
-      var conversionId = 'CONV_' + sessionId + '_' + timestamp + '_' + random;
+      // Combine: CONV_{eventType}_{sessionId}_{timestamp}_{random}
+      var conversionId = 'CONV_' + eventType + '_' + sessionId + '_' + timestamp + '_' + random;
       
-      // Store with timestamp
+      // Store with timestamp using event-specific storage key
       var conversionData = {
         id: conversionId,
-        created: timestamp
+        created: timestamp,
+        eventType: eventType
       };
-      sessionStorage.setItem('ga4_conversion_data', JSON.stringify(conversionData));
+      sessionStorage.setItem(storageKey, JSON.stringify(conversionData));
       
       return conversionId;
     },
@@ -1269,7 +1275,7 @@
         var $form = $(event.target);
         var formId = $form.attr("id") || selector;
         var formAction = $form.attr("action") || "contact_form_7_conversion";
-        var conversionId = self.generateConversionId();
+        var conversionId = self.generateConversionId('form_conversion');
         
         var trackingData = {
           form_id: formId,
@@ -1295,7 +1301,7 @@
             
             var formId = $form.attr("id") || selector;
             var formAction = $form.attr("action") || "contact_form_7_conversion";
-            var conversionId = self.generateConversionId();
+            var conversionId = self.generateConversionId('form_conversion');
             
             var trackingData = {
               form_id: formId,
@@ -1333,7 +1339,7 @@
         
         var formId = $form.attr("id") || selector;
         var formAction = $form.attr("action") || "gravity_forms_conversion";
-        var conversionId = self.generateConversionId();
+        var conversionId = self.generateConversionId('form_conversion');
         
         var trackingData = {
           form_id: formId,
@@ -1369,7 +1375,7 @@
         var formId = $form.attr("id") || selector.replace(/[^a-zA-Z0-9]/g, '_');
         var formAction = $form.attr("action") || "generic_form_conversion";
         var formMethod = $form.attr("method") || "post";
-        var conversionId = self.generateConversionId();
+        var conversionId = self.generateConversionId('form_conversion');
         
         var trackingData = {
           form_id: formId,
@@ -2222,11 +2228,16 @@
               "Quote data found, tracking purchase event with attribution",
               self.config.quoteData
             );
-            self.trackEvent("quote_request", self.config.quoteData);
+            // Add conversion_id to quote data for duplicate prevention
+            var quoteDataWithConversion = Object.assign({}, self.config.quoteData);
+            quoteDataWithConversion.conversion_id = self.generateConversionId('quote_request');
+            self.trackEvent("quote_request", quoteDataWithConversion);
           } else {
             // Fallback order data
             var orderData = self.extractOrderDataFromPage();
             if (orderData.transaction_id) {
+              // Add conversion_id to order data for duplicate prevention
+              orderData.conversion_id = self.generateConversionId('quote_request');
               self.trackEvent("quote_request", orderData);
             } else {
               self.log("Could not extract order data from the page");

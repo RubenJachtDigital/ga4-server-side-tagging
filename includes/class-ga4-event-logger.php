@@ -996,6 +996,80 @@ class GA4_Event_Logger
     }
 
     /**
+     * Check if a conversion_id already exists in the event logs (permanently, no time window)
+     * Handles both encrypted and unencrypted payloads
+     *
+     * @since    3.0.0
+     * @param    string    $conversion_id    The conversion ID to check for duplicates.
+     * @return   bool      True if conversion exists, false otherwise.
+     */
+    public function conversion_exists($conversion_id)
+    {
+        global $wpdb;
+
+        if (empty($conversion_id)) {
+            return false;
+        }
+
+        // First try to find in unencrypted data (for performance) - check all events permanently
+        $search_pattern = '%"conversion_id":"' . $wpdb->esc_like($conversion_id) . '"%';
+        $query = "
+            SELECT COUNT(*) 
+            FROM $this->table_name 
+            WHERE (
+                original_payload LIKE %s 
+                OR final_payload LIKE %s
+            )
+            AND monitor_status = 'allowed'
+        ";
+        
+        $count = $wpdb->get_var($wpdb->prepare(
+            $query,
+            $search_pattern,
+            $search_pattern
+        ));
+
+        // If found in unencrypted data, return true
+        if (intval($count) > 0) {
+            return true;
+        }
+
+        // If not found and encryption is enabled, search in encrypted payloads
+        $encryption_enabled = get_option('ga4_jwt_encryption_enabled', false);
+        if (!$encryption_enabled) {
+            return false; // No encryption enabled, and already searched unencrypted data
+        }
+
+        // Get all form_conversion and quote_request events and decrypt them to search for conversion_id
+        $encrypted_events = $wpdb->get_results(
+            "SELECT id, original_payload, final_payload 
+             FROM $this->table_name 
+             WHERE event_name IN ('form_conversion', 'quote_request')
+             AND monitor_status = 'allowed'"
+        );
+
+        foreach ($encrypted_events as $event) {
+            // Check original_payload
+            if (isset($event->original_payload) && !empty($event->original_payload)) {
+                $decrypted_payload = $this->decrypt_payload_for_display($event->original_payload);
+                if ($this->search_for_conversion_in_payload($decrypted_payload, $conversion_id)) {
+                    return true;
+                }
+            }
+
+            // Check final_payload
+            if (isset($event->final_payload) && !empty($event->final_payload)) {
+                $decrypted_payload = $this->decrypt_payload_for_display($event->final_payload);
+                if ($this->search_for_conversion_in_payload($decrypted_payload, $conversion_id)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /**
      * Search for transaction_id in a decrypted payload
      *
      * @since    3.0.0
@@ -1022,6 +1096,38 @@ class GA4_Event_Logger
         // If payload is already an array, search in it directly
         if (is_array($payload)) {
             return $this->search_in_array($payload, $transaction_id);
+        }
+        
+        return false;
+    }
+
+    /**
+     * Search for conversion_id in a decrypted payload
+     *
+     * @since    3.0.0
+     * @param    mixed     $payload         The decrypted payload (string or array).
+     * @param    string    $conversion_id   The conversion ID to search for.
+     * @return   bool      True if conversion_id found, false otherwise.
+     */
+    private function search_for_conversion_in_payload($payload, $conversion_id)
+    {
+        // Convert to string for searching
+        $search_content = is_array($payload) ? wp_json_encode($payload) : (string)$payload;
+        
+        // Simple string search first
+        if (stripos($search_content, $conversion_id) !== false) {
+            return true;
+        }
+        
+        // If it's JSON, also search recursively in the array structure
+        if ($this->is_json($search_content)) {
+            $json_data = json_decode($search_content, true);
+            return $this->search_in_array($json_data, $conversion_id);
+        }
+        
+        // If payload is already an array, search in it directly
+        if (is_array($payload)) {
+            return $this->search_in_array($payload, $conversion_id);
         }
         
         return false;

@@ -1216,6 +1216,84 @@ class GA4_Server_Side_Tagging_Endpoint
                     }
                 }
                 
+                // Check for duplicate conversion_id for form_conversion events
+                if (isset($event['name']) && $event['name'] === 'form_conversion' && 
+                    isset($event['params']['conversion_id'])) {
+                    
+                    $conversion_id = $event['params']['conversion_id'];
+                    
+                    if ($this->event_logger->conversion_exists($conversion_id)) {
+                        // Log the duplicate attempt
+                        $this->event_logger->create_event_record(
+                            array(
+                                'event' => $event,
+                                'consent' => $request_data['consent'] ?? null,
+                                'batch' => $request_data['batch'] ?? false,
+                                'timestamp' => time()
+                            ),
+                            'denied', // monitor_status - denied due to duplicate
+                            $this->get_essential_headers($request),
+                            $was_originally_encrypted,
+                            array(
+                                'event_name' => $event['name'],
+                                'reason' => "Duplicate conversion_id: {$conversion_id}",
+                                'error_type' => 'duplicate_conversion',
+                                'ip_address' => $client_ip,
+                                'user_agent' => $request->get_header('user-agent'),
+                                'url' => $request->get_header('origin'),
+                                'referrer' => $request->get_header('referer'),
+                                'session_id' => $session_id,
+                                'consent_given' => $this->extract_consent_status($request_data),
+                                'batch_size' => count($request_data['events']),
+                                'duplicate_conversion_id' => $conversion_id
+                            )
+                        );
+                        
+                        $this->logger->warning("Duplicate form conversion blocked: {$conversion_id} from IP: {$client_ip}");
+                        $failed_events++;
+                        continue; // Skip processing this event
+                    }
+                }
+                
+                // Check for duplicate conversion_id for quote_request events  
+                if (isset($event['name']) && $event['name'] === 'quote_request' && 
+                    isset($event['params']['conversion_id'])) {
+                    
+                    $conversion_id = $event['params']['conversion_id'];
+                    
+                    if ($this->event_logger->conversion_exists($conversion_id)) {
+                        // Log the duplicate attempt
+                        $this->event_logger->create_event_record(
+                            array(
+                                'event' => $event,
+                                'consent' => $request_data['consent'] ?? null,
+                                'batch' => $request_data['batch'] ?? false,
+                                'timestamp' => time()
+                            ),
+                            'denied', // monitor_status - denied due to duplicate
+                            $this->get_essential_headers($request),
+                            $was_originally_encrypted,
+                            array(
+                                'event_name' => $event['name'],
+                                'reason' => "Duplicate conversion_id: {$conversion_id}",
+                                'error_type' => 'duplicate_conversion',
+                                'ip_address' => $client_ip,
+                                'user_agent' => $request->get_header('user-agent'),
+                                'url' => $request->get_header('origin'),
+                                'referrer' => $request->get_header('referer'),
+                                'session_id' => $session_id,
+                                'consent_given' => $this->extract_consent_status($request_data),
+                                'batch_size' => count($request_data['events']),
+                                'duplicate_conversion_id' => $conversion_id
+                            )
+                        );
+                        
+                        $this->logger->warning("Duplicate quote request conversion blocked: {$conversion_id} from IP: {$client_ip}");
+                        $failed_events++;
+                        continue; // Skip processing this event
+                    }
+                }
+                
                 // Prepare event data with context
                 $event_data = array(
                     'event' => $event,
@@ -1363,6 +1441,82 @@ class GA4_Server_Side_Tagging_Endpoint
                     );
                     
                     $this->logger->warning("Duplicate purchase transaction blocked (direct mode): {$transaction_id} from IP: {$client_ip}");
+                    $duplicate_count++;
+                    continue; // Skip this event
+                }
+            }
+            
+            // Check for duplicate conversion_id for form_conversion events
+            if (isset($event['name']) && $event['name'] === 'form_conversion' && 
+                isset($event['params']['conversion_id'])) {
+                
+                $conversion_id = $event['params']['conversion_id'];
+                
+                if ($this->event_logger->conversion_exists($conversion_id)) {
+                    // Log the duplicate attempt
+                    $this->event_logger->create_event_record(
+                        array(
+                            'event' => $event,
+                            'consent' => $request_data['consent'] ?? null,
+                            'batch' => $request_data['batch'] ?? false,
+                            'timestamp' => time()
+                        ),
+                        'denied', // monitor_status - denied due to duplicate
+                        $original_headers,
+                        $was_originally_encrypted,
+                        array(
+                            'event_name' => $event['name'],
+                            'reason' => "Duplicate conversion_id: {$conversion_id} (direct mode)",
+                            'error_type' => 'duplicate_conversion',
+                            'ip_address' => $client_ip,
+                            'user_agent' => $request->get_header('user-agent'),
+                            'url' => $request->get_header('origin'),
+                            'referrer' => $request->get_header('referer'),
+                            'session_id' => $session_id,
+                            'consent_given' => $this->extract_consent_status($request_data),
+                            'duplicate_conversion_id' => $conversion_id
+                        )
+                    );
+                    
+                    $this->logger->warning("Duplicate form conversion blocked (direct mode): {$conversion_id} from IP: {$client_ip}");
+                    $duplicate_count++;
+                    continue; // Skip this event
+                }
+            }
+            
+            // Check for duplicate conversion_id for quote_request events  
+            if (isset($event['name']) && $event['name'] === 'quote_request' && 
+                isset($event['params']['conversion_id'])) {
+                
+                $conversion_id = $event['params']['conversion_id'];
+                
+                if ($this->event_logger->conversion_exists($conversion_id)) {
+                    // Log the duplicate attempt
+                    $this->event_logger->create_event_record(
+                        array(
+                            'event' => $event,
+                            'consent' => $request_data['consent'] ?? null,
+                            'batch' => $request_data['batch'] ?? false,
+                            'timestamp' => time()
+                        ),
+                        'denied', // monitor_status - denied due to duplicate
+                        $original_headers,
+                        $was_originally_encrypted,
+                        array(
+                            'event_name' => $event['name'],
+                            'reason' => "Duplicate conversion_id: {$conversion_id} (direct mode)",
+                            'error_type' => 'duplicate_conversion',
+                            'ip_address' => $client_ip,
+                            'user_agent' => $request->get_header('user-agent'),
+                            'url' => $request->get_header('origin'),
+                            'referrer' => $request->get_header('referer'),
+                            'session_id' => $session_id,
+                            'consent_given' => $this->extract_consent_status($request_data),
+                            'duplicate_conversion_id' => $conversion_id
+                        )
+                    );
+                    
+                    $this->logger->warning("Duplicate quote request conversion blocked (direct mode): {$conversion_id} from IP: {$client_ip}");
                     $duplicate_count++;
                     continue; // Skip this event
                 }
