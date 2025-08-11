@@ -224,7 +224,7 @@ class GA4_Server_Side_Tagging_Public
             'apiEndpoint' => rest_url('ga4-server-side-tagging/v1'),
             'isEcommerceEnabled' => (bool) get_option('ga4_ecommerce_tracking', true),
             'yithRaqFormId' => get_option('ga4_yith_raq_form_id', ''),
-            'conversionFormIds' => get_option('ga4_conversion_form_ids', ''),
+            'conversionFormSelectors' => get_option('ga4_conversion_form_selectors', ''),
             'currency' => function_exists('get_woocommerce_currency') ? get_woocommerce_currency() : 'EUR',
             'siteName' => get_bloginfo('name'),
             'transmissionMethod' => get_option('ga4_transmission_method', 'direct_to_cf'),

@@ -33,7 +33,7 @@ $extensive_logging = get_option('ga4_extensive_logging', false);
 $ecommerce_tracking = get_option('ga4_ecommerce_tracking', true);
 $track_logged_in_users = get_option('ga4_track_logged_in_users', true);
 $yith_raq_form_id = get_option('ga4_yith_raq_form_id', '');
-$conversion_form_ids = get_option('ga4_conversion_form_ids', '');
+$conversion_form_selectors = get_option('ga4_conversion_form_selectors', '');
 $disable_all_ip = get_option('ga4_disable_all_ip', false);
 $batch_size = get_option('ga4_event_batch_size', 1000);
 ?>
@@ -192,13 +192,21 @@ $batch_size = get_option('ga4_event_batch_size', 1000);
                         </tr>
                         <tr>
                             <th scope="row">
-                                <label for="ga4_conversion_form_ids">Conversion Form ID(s)</label>
+                                <label for="ga4_conversion_form_selectors">Conversion Form Selectors</label>
                             </th>
                             <td>
-                                <input type="text" id="ga4_conversion_form_ids" name="ga4_conversion_form_ids" 
-                                    value="<?php echo esc_attr($conversion_form_ids); ?>" class="regular-text" 
-                                    placeholder="1, 8, 9" />
-                                <p class="description">Your important conversion form IDs in comma-separated format (e.g., "1,2,3,4"). Only works with Gravity Forms.</p>
+                                <input type="text" id="ga4_conversion_form_selectors" name="ga4_conversion_form_selectors" 
+                                    value="<?php echo esc_attr($conversion_form_selectors); ?>" class="regular-text" 
+                                    placeholder="#gform_3, .wpcf7-form, #contact-form" />
+                                <p class="description">
+                                    <strong>CSS selectors for conversion forms</strong> in comma-separated format.<br>
+                                    <strong>Examples:</strong><br>
+                                    • <code>#gform_3</code> - Gravity Forms form with ID 3<br>
+                                    • <code>.wpcf7-form</code> - All Contact Form 7 forms<br>
+                                    • <code>#wpcf7-f123-p456-o1</code> - Specific Contact Form 7 form<br>
+                                    • <code>#contact-form, .lead-form</code> - Multiple custom forms<br>
+                                    <strong>Supports:</strong> Gravity Forms, Contact Form 7, and any custom forms.
+                                </p>
                             </td>
                         </tr>
                         <tr>

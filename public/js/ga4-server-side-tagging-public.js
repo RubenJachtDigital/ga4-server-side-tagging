@@ -61,7 +61,7 @@
 
       // Log initialization
       this.log(
-        "%c GA4 Server-Side Tagging initialized v1",
+        "%c GA4 Server-Side Tagging initialized v2",
         "background: #4CAF50; color: white; font-size: 16px; font-weight: bold; padding: 8px 12px; border-radius: 4px;"
       );
     },
@@ -1128,8 +1128,10 @@
       var baseExclusions = ".cart, .woocommerce-cart-form, .checkout, .woocommerce-checkout";
       var conversionExclusions = [];
       
-      if (self.config.conversionFormIds) {
-        conversionExclusions = self.config.conversionFormIds.split(",").map(id => `#gform_${id.trim()}`);
+      // Handle CSS selector format
+      if (self.config.conversionFormSelectors) {
+        var selectors = self.config.conversionFormSelectors.split(",").map(selector => selector.trim());
+        conversionExclusions = selectors;
       }
       
       if (self.config.quoteData && self.config.yithRaqFormId) {
@@ -1160,28 +1162,227 @@
         });
       });
 
-      // Track conversion form submissions
-      if (
-        typeof self.config.conversionFormIds !== "undefined" &&
-        self.config.conversionFormIds
-      ) {
-        var conversionIds = self.config.conversionFormIds.split(",");
+      // Setup conversion form tracking
+      self.setupConversionFormTracking();
+    },
 
-        conversionIds.forEach(function (id) {
-          var trimmedId = id.trim();
-          $(`#gform_${trimmedId}`).on("submit", function (event) {
-            var formId = $(this).attr("id") || "unknown";
-            var formAction = $(this).attr("action") || "unknown";
+    /**
+     * Generate unique conversion ID for form submissions (persistent for 5 minutes)
+     */
+    generateConversionId: function() {
+      var self = this;
+      
+      // Check for existing conversion ID that's still valid
+      var existingConversionData = sessionStorage.getItem('ga4_conversion_data');
+      var currentTime = Date.now();
+      
+      if (existingConversionData) {
+        try {
+          var conversionData = JSON.parse(existingConversionData);
+          var timeDiff = currentTime - conversionData.created;
+          
+          // If less than 5 minutes (300,000 ms), return existing ID
+          if (timeDiff < 300000) {
+            return conversionData.id;
+          }
+        } catch (e) {
+          // Invalid data, create new one
+        }
+      }
+      
+      // Get or create session ID
+      var sessionId = self.getSessionId();
+      
+      // Create timestamp
+      var timestamp = currentTime;
+      
+      // Generate random component
+      var random = Math.random().toString(36).substr(2, 6);
+      
+      // Combine: CONV_{sessionId}_{timestamp}_{random}
+      var conversionId = 'CONV_' + sessionId + '_' + timestamp + '_' + random;
+      
+      // Store with timestamp
+      var conversionData = {
+        id: conversionId,
+        created: timestamp
+      };
+      sessionStorage.setItem('ga4_conversion_data', JSON.stringify(conversionData));
+      
+      return conversionId;
+    },
+
+    /**
+     * Get or create session ID
+     */
+    getSessionId: function() {
+      var sessionId = sessionStorage.getItem('ga4_session_id');
+      
+      if (!sessionId) {
+        // Generate new session ID: timestamp + random
+        var timestamp = Date.now().toString();
+        var random = Math.random().toString(36).substr(2, 8);
+        sessionId = 'sess_' + timestamp + '_' + random;
+        sessionStorage.setItem('ga4_session_id', sessionId);
+      }
+      
+      return sessionId;
+    },
+
+    /**
+     * Setup conversion form tracking (supports Gravity Forms, Contact Form 7, and custom selectors)
+     */
+    setupConversionFormTracking: function () {
+      var self = this;
+
+      // CSS selector support (supports any form type including Contact Form 7)
+      if (self.config.conversionFormSelectors) {
+        var selectors = self.config.conversionFormSelectors.split(",").map(selector => selector.trim());
+        
+        selectors.forEach(function (selector) {
+          // Contact Form 7 specific handling
+          if (selector.includes('wpcf7') || $(selector).hasClass('wpcf7-form')) {
+            self.setupContactForm7Tracking(selector);
+          } 
+          // Gravity Forms selector handling
+          else if (selector.includes('gform')) {
+            self.setupGravityFormSelectorTracking(selector);
+          }
+          // Generic form tracking
+          else {
+            self.setupGenericFormTracking(selector);
+          }
+        });
+      }
+    },
+
+    /**
+     * Setup Contact Form 7 specific tracking
+     */
+    setupContactForm7Tracking: function (selector) {
+      var self = this;
+      
+      // Contact Form 7 success event
+      $(document).on('wpcf7mailsent', selector, function(event) {
+        self.log("Contact Form 7 conversion detected for selector: " + selector);
+        
+        var $form = $(event.target);
+        var formId = $form.attr("id") || selector;
+        var formAction = $form.attr("action") || "contact_form_7_conversion";
+        var conversionId = self.generateConversionId();
+        
+        var trackingData = {
+          form_id: formId,
+          form_action: formAction,
+          form_type: "contact_form_7",
+          form_selector: selector,
+          conversion_id: conversionId,
+          pageTitle: document.title,
+        };
+
+        self.trackEvent("form_conversion", trackingData);
+      });
+      
+      // Fallback to submit event if success event doesn't fire
+      $(document).on('submit', selector, function(event) {
+        var self = this;
+        // Add a delay to check if CF7 success event fires
+        setTimeout(function() {
+          var $form = $(event.target);
+          // Check if form has success class (CF7 adds this after successful submission)
+          if ($form.hasClass('sent') || $form.find('.wpcf7-mail-sent-ok').is(':visible')) {
+            self.log("Contact Form 7 conversion detected via fallback method");
+            
+            var formId = $form.attr("id") || selector;
+            var formAction = $form.attr("action") || "contact_form_7_conversion";
+            var conversionId = self.generateConversionId();
+            
             var trackingData = {
               form_id: formId,
               form_action: formAction,
+              form_type: "contact_form_7_fallback",
+              form_selector: selector,
+              conversion_id: conversionId,
               pageTitle: document.title,
             };
 
             self.trackEvent("form_conversion", trackingData);
-          });
-        });
-      }
+          }
+        }.bind(self), 1000); // 1 second delay to allow CF7 to process
+      });
+    },
+
+    /**
+     * Setup Gravity Forms selector-based tracking
+     */
+    setupGravityFormSelectorTracking: function (selector) {
+      var self = this;
+      
+      // Use submit event on the form selector directly
+      $(document).on('submit', selector, function(event) {
+        // Check for form validation errors before tracking
+        var $form = $(this);
+        
+        // Skip if Gravity Forms shows validation errors
+        if ($form.find('.gfield_error:visible, .validation_error:visible').length > 0) {
+          self.log("Gravity Forms has validation errors, skipping conversion tracking for: " + selector);
+          return;
+        }
+        
+        self.log("Gravity Forms conversion detected for selector: " + selector);
+        
+        var formId = $form.attr("id") || selector;
+        var formAction = $form.attr("action") || "gravity_forms_conversion";
+        var conversionId = self.generateConversionId();
+        
+        var trackingData = {
+          form_id: formId,
+          form_action: formAction,
+          form_type: "gravity_forms",
+          form_selector: selector,
+          conversion_id: conversionId,
+          pageTitle: document.title,
+        };
+
+        self.trackEvent("form_conversion", trackingData);
+      });
+    },
+
+    /**
+     * Setup generic form tracking for any CSS selector
+     */
+    setupGenericFormTracking: function (selector) {
+      var self = this;
+      
+      $(document).on('submit', selector, function(event) {
+        // Check for form validation errors before tracking
+        var $form = $(this);
+        
+        // Skip if form has visible validation errors
+        if ($form.find('.error:visible, .field-validation-error:visible, .invalid:visible').length > 0) {
+          self.log("Form has validation errors, skipping conversion tracking for: " + selector);
+          return;
+        }
+        
+        self.log("Generic form conversion detected for selector: " + selector);
+        
+        var formId = $form.attr("id") || selector.replace(/[^a-zA-Z0-9]/g, '_');
+        var formAction = $form.attr("action") || "generic_form_conversion";
+        var formMethod = $form.attr("method") || "post";
+        var conversionId = self.generateConversionId();
+        
+        var trackingData = {
+          form_id: formId,
+          form_action: formAction,
+          form_method: formMethod,
+          form_type: "generic_form",
+          form_selector: selector,
+          conversion_id: conversionId,
+          pageTitle: document.title,
+        };
+
+        self.trackEvent("form_conversion", trackingData);
+      });
     },
     /**
      * Setup file download tracking

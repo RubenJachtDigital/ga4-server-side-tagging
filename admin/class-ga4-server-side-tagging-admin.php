@@ -347,17 +347,6 @@ class GA4_Server_Side_Tagging_Admin
             )
         );
 
-        register_setting(
-            'ga4_server_side_tagging_settings',
-            'ga4_conversion_form_ids',
-            array(
-                'type' => 'string',
-                'description' => 'Conversion form id(s)',
-                'sanitize_callback' => 'sanitize_text_field',
-                'show_in_rest' => false,
-                'default' => '',
-            )
-        );
 
         // GDPR Consent Settings
         register_setting(
@@ -542,13 +531,14 @@ class GA4_Server_Side_Tagging_Admin
             )
         );
 
+
         register_setting(
             'ga4_server_side_tagging_settings',
-            'ga4_conversion_form_ids',
+            'ga4_conversion_form_selectors',
             array(
                 'type' => 'string',
-                'description' => 'Conversion Form IDs (comma-separated)',
-                'sanitize_callback' => array($this, 'sanitize_form_ids'),
+                'description' => 'Conversion Form CSS Selectors (comma-separated)',
+                'sanitize_callback' => array($this, 'sanitize_form_selectors'),
                 'show_in_rest' => false,
                 'default' => '',
             )
@@ -763,6 +753,35 @@ class GA4_Server_Side_Tagging_Admin
     }
 
     /**
+     * Sanitize form CSS selectors input
+     *
+     * @since 3.0.0
+     * @param string $input The input value to sanitize
+     * @return string Sanitized form selectors
+     */
+    public function sanitize_form_selectors($input)
+    {
+        if (empty($input)) {
+            return '';
+        }
+        
+        // Split by comma, trim whitespace
+        $selectors = array_map('trim', explode(',', $input));
+        $valid_selectors = array();
+        
+        foreach ($selectors as $selector) {
+            // Basic CSS selector validation - must start with . # or tag name
+            $selector = sanitize_text_field($selector);
+            
+            if (!empty($selector) && preg_match('/^[#.]?[\w\-]+[\w\-\s\.\#\[\]:]*$/', $selector)) {
+                $valid_selectors[] = $selector;
+            }
+        }
+        
+        return empty($valid_selectors) ? '' : implode(', ', $valid_selectors);
+    }
+
+    /**
      * Display the plugin admin page.
      *
      * @since    1.0.0
@@ -810,7 +829,6 @@ class GA4_Server_Side_Tagging_Admin
         $transmission_method = get_option('ga4_transmission_method', 'secure_wp_to_cf');
         
         $yith_raq_form_id = get_option('ga4_yith_raq_form_id', '');
-        $conversion_form_ids = get_option('ga4_conversion_form_ids', '');
         
         // GDPR Consent settings
         $use_iubenda = get_option('ga4_use_iubenda', false);
@@ -951,8 +969,8 @@ class GA4_Server_Side_Tagging_Admin
             update_option('ga4_yith_raq_form_id', absint($_POST['ga4_yith_raq_form_id']));
         }
 
-        if (isset($_POST['ga4_conversion_form_ids'])) {
-            update_option('ga4_conversion_form_ids', $this->sanitize_form_ids(wp_unslash($_POST['ga4_conversion_form_ids'])));
+        if (isset($_POST['ga4_conversion_form_selectors'])) {
+            update_option('ga4_conversion_form_selectors', $this->sanitize_form_selectors(wp_unslash($_POST['ga4_conversion_form_selectors'])));
         }
 
         if (isset($_POST['ga4_event_batch_size'])) {
