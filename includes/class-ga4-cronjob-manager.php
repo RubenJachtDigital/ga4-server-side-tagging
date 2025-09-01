@@ -141,11 +141,6 @@ class GA4_Cronjob_Manager
         foreach ($events as $event) {
             $event_data = $event->original_payload;
             
-            // Debug: Log raw event data structure
-            if ($this->logger && get_option('ga4_server_side_tagging_debug_mode')) {
-                $preview = is_string($event_data) ? substr($event_data, 0, 200) . '...' : wp_json_encode($event_data);
-                $this->logger->debug("🔍 Raw event data from DB (event {$event->id}): " . $preview);
-            }
             
             // ALWAYS decrypt first if marked as encrypted, before any JSON parsing attempts
             if ($event->is_encrypted) {
@@ -155,30 +150,12 @@ class GA4_Cronjob_Manager
                     continue;
                 }
                 
-                // Debug: Log decrypted data structure
-                if ($this->logger && get_option('ga4_server_side_tagging_debug_mode')) {
-                    if (is_string($event_data)) {
-                        $this->logger->debug("🔓 Decrypted event data (event {$event->id}) is string of length: " . strlen($event_data));
-                        // Check if it looks like valid JSON by testing the first/last chars
-                        $first_char = substr($event_data, 0, 1);
-                        $last_char = substr($event_data, -1, 1);
-                        $this->logger->debug("🔓 String starts with '$first_char' and ends with '$last_char'");
-                    } else {
-                        $this->logger->debug("🔓 Decrypted event data (event {$event->id}) is not a string: " . gettype($event_data));
-                    }
-                }
             } else {
                 // Even if not marked as encrypted, check if it looks like a JWT and try to decrypt
                 if (is_string($event_data) && $this->looks_like_jwt($event_data)) {
-                    if ($this->logger && get_option('ga4_server_side_tagging_debug_mode')) {
-                        $this->logger->debug("🔍 Data looks like JWT but not marked as encrypted, attempting to decrypt anyway (event {$event->id})");
-                    }
                     $decrypted = $this->decrypt_event_data($event_data);
                     if ($decrypted && $decrypted !== $event_data) {
                         $event_data = $decrypted;
-                        if ($this->logger && get_option('ga4_server_side_tagging_debug_mode')) {
-                            $this->logger->debug("🔓 Successfully decrypted unmarked JWT data (event {$event->id})");
-                        }
                     }
                 }
             }
@@ -188,35 +165,9 @@ class GA4_Cronjob_Manager
                 $parsed_data = json_decode($event_data, true);
                 if (json_last_error() === JSON_ERROR_NONE) {
                     $event_data = $parsed_data;
-                    if ($this->logger && get_option('ga4_server_side_tagging_debug_mode')) {
-                        $this->logger->debug("✅ Successfully parsed JSON for event {$event->id}");
-                    }
-                } else {
-                    if ($this->logger && get_option('ga4_server_side_tagging_debug_mode')) {
-                        $this->logger->debug("❌ JSON parse failed for event {$event->id}: " . json_last_error_msg());
-                        // Show a snippet of the problematic JSON
-                        $json_snippet = substr($event_data, 0, 100);
-                        $this->logger->debug("❌ Problematic JSON snippet: " . $json_snippet);
-                    }
                 }
             }
             
-            // Debug: Log final parsed event data structure
-            if ($this->logger && get_option('ga4_server_side_tagging_debug_mode')) {
-                if (is_array($event_data)) {
-                    $this->logger->debug("📋 Final event data structure (event {$event->id}): " . wp_json_encode(array_keys($event_data)));
-                    if (isset($event_data['consent'])) {
-                        $this->logger->debug("🔒 Event data contains consent: " . wp_json_encode($event_data['consent']));
-                    } else {
-                        $this->logger->debug("❌ Event data missing consent key. Keys available: " . implode(', ', array_keys($event_data)));
-                    }
-                } else {
-                    $this->logger->debug("⚠️ Event data is not an array after parsing (event {$event->id}). Type: " . gettype($event_data));
-                    if (is_string($event_data)) {
-                        $this->logger->debug("⚠️ Event data is string with length: " . strlen($event_data));
-                    }
-                }
-            }
 
             // Extract the actual event data (the event key contains the GA4 event)
             if (isset($event_data['event'])) {
@@ -242,9 +193,6 @@ class GA4_Cronjob_Manager
                 if (!$first_event_processed && isset($event_data['consent'])) {
                     $batch_consent = $event_data['consent'];
                     $first_event_processed = true;
-                    if ($this->logger && get_option('ga4_server_side_tagging_debug_mode')) {
-                        $this->logger->debug("🔒 Extracted batch consent from first event: " . wp_json_encode($batch_consent));
-                    }
                 }
             } else {
                 // Fallback for direct event data
@@ -267,9 +215,6 @@ class GA4_Cronjob_Manager
                 if (!$first_event_processed && isset($event_data['consent'])) {
                     $batch_consent = $event_data['consent'];
                     $first_event_processed = true;
-                    if ($this->logger && get_option('ga4_server_side_tagging_debug_mode')) {
-                        $this->logger->debug("🔒 Extracted batch consent from fallback event: " . wp_json_encode($batch_consent));
-                    }
                 }
             }
             
@@ -280,24 +225,6 @@ class GA4_Cronjob_Manager
             return;
         }
 
-        // Debug: Log the structure of batch_events to understand the encryption issue
-        if ($this->logger && get_option('ga4_server_side_tagging_debug_mode')) {
-            $this->logger->debug("🔒 Batch consent status: " . ($batch_consent ? "FOUND (" . wp_json_encode($batch_consent) . ")" : "NOT FOUND"));
-            $this->logger->debug("Batch events before sending to Cloudflare:");
-            foreach ($batch_events as $index => $event) {
-                if (is_array($event)) {
-                    $this->logger->debug("Event $index structure: " . wp_json_encode(array_keys($event)));
-                    if (isset($event['name'])) {
-                        $this->logger->debug("Event $index is correctly formatted with name: " . $event['name']);
-                    } elseif (isset($event['event'])) {
-                        $this->logger->debug("Event $index has nested 'event' structure - needs fixing");
-                    }
-                } else {
-                    $event_preview = is_string($event) ? substr($event, 0, 100) . '...' : wp_json_encode($event);
-                    $this->logger->debug("Event $index: " . $event_preview);
-                }
-            }
-        }
 
         
         // Check for test mode - if enabled, skip sending to external services
@@ -397,57 +324,32 @@ class GA4_Cronjob_Manager
         try {
             // Check if data is already decrypted JSON
             if (is_string($encrypted_data) && (substr($encrypted_data, 0, 1) === '{' || substr($encrypted_data, 0, 1) === '[')) {
-                // This is already JSON data, return it as-is
-                if ($this->logger && get_option('ga4_server_side_tagging_debug_mode')) {
-                    $this->logger->debug("🔓 Data is already JSON, returning as-is");
-                }
                 return $encrypted_data;
             }
             
             // Only attempt decryption if data looks like a JWT token
             if (!is_string($encrypted_data) || !$this->looks_like_jwt($encrypted_data)) {
-                // If it doesn't look like JWT, return as-is (might be plain data marked as encrypted)
-                if ($this->logger && get_option('ga4_server_side_tagging_debug_mode')) {
-                    $this->logger->debug("🔓 Data doesn't look like JWT, returning as-is");
-                }
                 return $encrypted_data;
             }
             
             // Check if encryption is enabled
             $encryption_enabled = get_option('ga4_jwt_encryption_enabled', false);
             if (!$encryption_enabled) {
-                if ($this->logger && get_option('ga4_server_side_tagging_debug_mode')) {
-                    $this->logger->debug("🔓 Encryption not enabled, returning as-is");
-                }
-                return $encrypted_data; // No encryption enabled, return as-is
+                return $encrypted_data;
             }
             
             // Get encryption key
             $encryption_key = GA4_Encryption_Util::retrieve_encrypted_key('ga4_jwt_encryption_key');
             if (!$encryption_key) {
-                if ($this->logger && get_option('ga4_server_side_tagging_debug_mode')) {
-                    $this->logger->debug("🔓 No encryption key available, returning as-is");
-                }
-                return $encrypted_data; // No encryption key available
-            }
-
-            if ($this->logger && get_option('ga4_server_side_tagging_debug_mode')) {
-                $this->logger->debug("🔓 Attempting to decrypt JWT token with key");
+                return $encrypted_data;
             }
 
             // Use the same decryption method as the event logger for consistency
             $decrypted = GA4_Encryption_Util::decrypt($encrypted_data, $encryption_key);
             if ($decrypted !== false) {
-                if ($this->logger && get_option('ga4_server_side_tagging_debug_mode')) {
-                    $decrypted_preview = substr($decrypted, 0, 200) . '...';
-                    $this->logger->debug("🔓 Successfully decrypted data: " . $decrypted_preview);
-                }
                 return $decrypted;
             }
 
-            if ($this->logger && get_option('ga4_server_side_tagging_debug_mode')) {
-                $this->logger->debug("🔓 Decryption failed, returning original encrypted data");
-            }
             // If general decrypt failed, return original data
             return $encrypted_data;
         } catch (\Exception $e) {
@@ -468,10 +370,6 @@ class GA4_Cronjob_Manager
      */
     private function send_batch_to_cloudflare($batch_events, $batch_consent = null, $events = null)
     {
-        // Debug: Log what consent data is received by this function
-        if ($this->logger && get_option('ga4_server_side_tagging_debug_mode')) {
-            $this->logger->debug("🔒 send_batch_to_cloudflare received batch_consent: " . ($batch_consent ? wp_json_encode($batch_consent) : "NULL"));
-        }
         
         $worker_url = get_option('ga4_cloudflare_worker_url');
 
@@ -576,19 +474,6 @@ class GA4_Cronjob_Manager
             }
         }
 
-        // Debug: Log final payload structure being sent to Cloudflare
-        if ($this->logger && get_option('ga4_server_side_tagging_debug_mode')) {
-            if (isset($payload['encrypted']) && $payload['encrypted']) {
-                $this->logger->debug("🚀 Final Encrypted Payload Sent to Cloudflare");
-            } else {
-                $this->logger->debug("🚀 Final Payload Sent to Cloudflare - Events: " . count($payload['events']) . ", Has Consent: " . (isset($payload['consent']) ? 'yes' : 'no'));
-                if (!empty($payload['events'])) {
-                    $first_event = $payload['events'][0];
-                    $first_event_keys = is_array($first_event) ? array_keys($first_event) : 'not-array';
-                    $this->logger->debug("First event structure: " . wp_json_encode($first_event_keys));
-                }
-            }
-        }
 
         // Send request to Cloudflare Worker
         $response = wp_remote_post($worker_url, array(
