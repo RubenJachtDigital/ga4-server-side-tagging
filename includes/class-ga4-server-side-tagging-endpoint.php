@@ -1133,6 +1133,7 @@ class GA4_Server_Side_Tagging_Endpoint
                                 'referrer' => $request->get_header('referer'),
                                 'session_id' => $session_id,
                                 'consent_given' => $this->extract_consent_status($request_data),
+                                'consent_data' => $request_data['consent'] ?? null,
                                 'bot_detection_rules' => array_merge($this->get_bot_detection_details($request), $bot_detection_result)
                             )
                         );
@@ -1217,6 +1218,7 @@ class GA4_Server_Side_Tagging_Endpoint
                                 'referrer' => $request->get_header('referer'),
                                 'session_id' => $session_id,
                                 'consent_given' => $this->extract_consent_status($request_data),
+                                'consent_data' => $request_data['consent'] ?? null,
                                 'batch_size' => count($request_data['events']),
                                 'duplicate_transaction_id' => $transaction_id
                             )
@@ -1256,6 +1258,7 @@ class GA4_Server_Side_Tagging_Endpoint
                                 'referrer' => $request->get_header('referer'),
                                 'session_id' => $session_id,
                                 'consent_given' => $this->extract_consent_status($request_data),
+                                'consent_data' => $request_data['consent'] ?? null,
                                 'batch_size' => count($request_data['events']),
                                 'duplicate_conversion_id' => $conversion_id
                             )
@@ -1295,6 +1298,7 @@ class GA4_Server_Side_Tagging_Endpoint
                                 'referrer' => $request->get_header('referer'),
                                 'session_id' => $session_id,
                                 'consent_given' => $this->extract_consent_status($request_data),
+                                'consent_data' => $request_data['consent'] ?? null,
                                 'batch_size' => count($request_data['events']),
                                 'duplicate_conversion_id' => $conversion_id
                             )
@@ -1337,6 +1341,7 @@ class GA4_Server_Side_Tagging_Endpoint
                         'referrer' => $request->get_header('referer'),
                         'session_id' => $session_id,
                         'consent_given' => $this->extract_consent_status($request_data),
+                        'consent_data' => $request_data['consent'] ?? null,
                         'batch_size' => count($request_data['events']),
                         'is_encrypted' => $should_encrypt
                     )
@@ -1448,6 +1453,7 @@ class GA4_Server_Side_Tagging_Endpoint
                             'referrer' => $request->get_header('referer'),
                             'session_id' => $session_id,
                             'consent_given' => $this->extract_consent_status($request_data),
+                            'consent_data' => $request_data['consent'] ?? null,
                             'duplicate_transaction_id' => $transaction_id
                         )
                     );
@@ -1486,6 +1492,7 @@ class GA4_Server_Side_Tagging_Endpoint
                             'referrer' => $request->get_header('referer'),
                             'session_id' => $session_id,
                             'consent_given' => $this->extract_consent_status($request_data),
+                            'consent_data' => $request_data['consent'] ?? null,
                             'duplicate_conversion_id' => $conversion_id
                         )
                     );
@@ -1524,6 +1531,7 @@ class GA4_Server_Side_Tagging_Endpoint
                             'referrer' => $request->get_header('referer'),
                             'session_id' => $session_id,
                             'consent_given' => $this->extract_consent_status($request_data),
+                            'consent_data' => $request_data['consent'] ?? null,
                             'duplicate_conversion_id' => $conversion_id
                         )
                     );

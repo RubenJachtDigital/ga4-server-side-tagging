@@ -96,6 +96,7 @@ class GA4_Event_Logger
             user_id bigint(20) NULL,
             session_id varchar(255) NULL,
             consent_given tinyint(1) DEFAULT NULL,
+            consent_data longtext NULL,
             
             -- Monitoring Data
             reason varchar(500) NULL,
@@ -165,6 +166,7 @@ class GA4_Event_Logger
             'user_id' => get_current_user_id() ?: null,
             'session_id' => $this->get_session_id(),
             'consent_given' => null,
+            'consent_data' => null,
             'bot_detection_rules' => null,
             'cloudflare_response' => null,
             'processing_time_ms' => null,
@@ -179,7 +181,7 @@ class GA4_Event_Logger
 
         $args = wp_parse_args($args, $defaults);
 
-        // Handle payload encryption for the 4 payload columns
+        // Handle payload encryption for the 4 payload columns (consent_data stored as plain JSON)
         foreach (['original_headers', 'original_payload', 'final_payload', 'final_headers'] as $field) {
             if (!empty($args[$field])) {
                 if (is_array($args[$field]) || is_object($args[$field])) {
@@ -190,6 +192,14 @@ class GA4_Event_Logger
                     $args[$field] = $this->ensure_payload_encrypted_for_storage($processed_data);
                 }
             }
+        }
+
+        // Handle consent_data as plain JSON (never encrypted)
+        if (!empty($args['consent_data'])) {
+            if (is_array($args['consent_data']) || is_object($args['consent_data'])) {
+                $args['consent_data'] = json_encode($args['consent_data'], JSON_PRETTY_PRINT);
+            }
+            // If it's already a string, leave as-is
         }
 
         if (is_array($args['bot_detection_rules']) || is_object($args['bot_detection_rules'])) {
@@ -216,6 +226,7 @@ class GA4_Event_Logger
                 'user_id' => intval($args['user_id']),
                 'session_id' => sanitize_text_field($args['session_id']),
                 'consent_given' => is_null($args['consent_given']) ? null : (bool) $args['consent_given'],
+                'consent_data' => $args['consent_data'],
                 'bot_detection_rules' => $args['bot_detection_rules'],
                 'cloudflare_response' => sanitize_textarea_field($args['cloudflare_response']),
                 'processing_time_ms' => is_numeric($args['processing_time_ms']) ? floatval($args['processing_time_ms']) : null,
@@ -615,6 +626,7 @@ class GA4_Event_Logger
             if (isset($result->bot_detection_rules) && !empty($result->bot_detection_rules)) {
                 $result->bot_detection_rules = $this->decrypt_payload_for_display($result->bot_detection_rules);
             }
+            // consent_data is stored as plain JSON, no decryption needed
             
             // Add backward compatibility fields for admin display
             $result->event_status = isset($result->monitor_status) ? $result->monitor_status : 'unknown';
@@ -1329,7 +1341,7 @@ class GA4_Event_Logger
      * @param    string    $payload    The payload data from database (may be encrypted).
      * @return   string               The decrypted payload for display.
      */
-    private function decrypt_payload_for_display($payload)
+    public function decrypt_payload_for_display($payload)
     {
         // Check if the encryption util class exists
         if (!class_exists('\GA4ServerSideTagging\Utilities\GA4_Encryption_Util')) {
@@ -1422,6 +1434,20 @@ class GA4_Event_Logger
      */
     public function queue_event($event_data, $is_encrypted = false, $original_headers = array(), $was_originally_encrypted = false)
     {
+        // Extract consent data if present
+        $consent_data = null;
+        if (is_array($event_data)) {
+            if (isset($event_data['consent'])) {
+                $consent_data = $event_data['consent'];
+            }
+        } elseif (is_string($event_data)) {
+            // Try to parse JSON to extract consent
+            $decoded = json_decode($event_data, true);
+            if (json_last_error() === JSON_ERROR_NONE && isset($decoded['consent'])) {
+                $consent_data = $decoded['consent'];
+            }
+        }
+
         // Encrypt the event data for storage if needed
         $encrypted_data = $event_data;
         if (is_array($event_data)) {
@@ -1433,15 +1459,22 @@ class GA4_Event_Logger
             $encrypted_data = $this->encrypt_sensitive_data_for_storage($encrypted_data);
         }
 
+        $additional_data = array(
+            'is_encrypted' => $is_encrypted || get_option('ga4_jwt_encryption_enabled', false),
+            'original_payload' => $encrypted_data  // Pass the encrypted data as original_payload
+        );
+
+        // Add consent data if extracted
+        if ($consent_data !== null) {
+            $additional_data['consent_data'] = $consent_data;
+        }
+
         return $this->create_event_record(
             $encrypted_data,
             'allowed', // Monitor status for queued events is always 'allowed'
             $original_headers,
             $was_originally_encrypted,
-            array(
-                'is_encrypted' => $is_encrypted || get_option('ga4_jwt_encryption_enabled', false),
-                'original_payload' => $encrypted_data  // Pass the encrypted data as original_payload
-            )
+            $additional_data
         );
     }
 
@@ -1727,6 +1760,7 @@ class GA4_Event_Logger
             if (isset($event->final_headers) && !empty($event->final_headers)) {
                 $event->final_headers = \GA4ServerSideTagging\Utilities\GA4_Encryption_Util::decrypt_headers_from_storage($event->final_headers);
             }
+            // consent_data is stored as plain JSON, no decryption needed
             
             // Add backward compatibility fields for cronjob admin display
             $event->event_status = isset($event->queue_status) ? $event->queue_status : 'unknown';

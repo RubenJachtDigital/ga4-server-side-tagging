@@ -1479,8 +1479,9 @@ async function handleBatchEvents(batchPayload, request) {
     if (DEBUG_MODE) {
       console.log("📦 Processing batch of events:", {
         eventCount: batchPayload.events.length,
-        hasConsent: !!batchPayload.consent,
-        consentData: batchPayload.consent,
+        hasBatchConsent: !!batchPayload.consent,
+        batchConsentData: batchPayload.consent,
+        eventsWithConsent: batchPayload.events.filter(e => e.consent).length,
         timestamp: batchPayload.timestamp
       });
     }
@@ -1507,7 +1508,7 @@ async function handleBatchEvents(batchPayload, request) {
           event_name: event.name,
           name: event.name,
           params: event.params || {},
-          consent: batchPayload.consent,
+          consent: event.consent || batchPayload.consent, // Use individual event consent first, fallback to batch consent
           timestamp: event.timestamp || batchPayload.timestamp,
           headers: event.headers || batchPayload.headers || {}
         };
@@ -1576,8 +1577,8 @@ async function handleBatchEvents(batchPayload, request) {
         }
 
         // Add consent data to the individual event params for GDPR processing
-        // In batch events, consent is at the batch level, not individual event level
-        singleEventPayload.params.consent = batchPayload.consent;
+        // Use individual event consent if available, fallback to batch consent
+        singleEventPayload.params.consent = event.consent || batchPayload.consent;
         
         
         // Use existing GDPR processing
@@ -1626,7 +1627,10 @@ async function handleBatchEvents(batchPayload, request) {
         });
 
         if (DEBUG_MODE) {
-          console.log(`✅ Processed event ${i + 1}/${batchPayload.events.length}: ${event.name}`);
+          console.log(`✅ Processed event ${i + 1}/${batchPayload.events.length}: ${event.name}`, {
+            hasIndividualConsent: !!event.consent,
+            consentMode: event.consent?.ad_user_data || (batchPayload.consent?.ad_user_data || 'not_set')
+          });
         }
 
       } catch (eventError) {
@@ -1646,8 +1650,9 @@ async function handleBatchEvents(batchPayload, request) {
       total_events: batchPayload.events.length,
       results: DEBUG_MODE ? results : undefined,
       errors: errors.length > 0 ? errors : undefined,
-      consent_applied: !!batchPayload.consent,
-      consent_mode: batchPayload.consent?.ad_user_data || 'unknown',
+      consent_applied: !!(batchPayload.consent || batchPayload.events.some(e => e.consent)),
+      events_with_individual_consent: batchPayload.events.filter(e => e.consent).length,
+      batch_consent_mode: batchPayload.consent?.ad_user_data || 'not_set',
       request_type: request.headers.get("X-Simple-request") === "true" ? "simple" : "regular"
     };
 

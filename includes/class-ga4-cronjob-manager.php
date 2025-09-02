@@ -399,6 +399,15 @@ class GA4_Cronjob_Manager
                 // Get original headers from the queued event
                 $original_headers = GA4_Encryption_Util::decrypt_headers_from_storage($original_event->original_headers);
           
+                // Get stored consent data if available (stored as plain JSON)
+                $stored_consent = null;
+                if (!empty($original_event->consent_data)) {
+                    // Parse stored consent data (no decryption needed)
+                    $stored_consent = json_decode($original_event->consent_data, true);
+                    if (json_last_error() !== JSON_ERROR_NONE) {
+                        $stored_consent = null;
+                    }
+                }
                 
                 // Ensure we have the correct event structure for Cloudflare
                 // $event_data should be the GA4 event with name, params, etc.
@@ -419,9 +428,11 @@ class GA4_Cronjob_Manager
                 // Add headers to the event
                 $final_event['headers'] = $original_headers;
                 
-                // Add force consent to the event at the same level as headers
+                // Add consent data to the event - priority: force_consent > stored_consent
                 if ($force_consent) {
                     $final_event['consent'] = $force_consent;
+                } elseif ($stored_consent) {
+                    $final_event['consent'] = $stored_consent;
                 }
                 
                 $payload['events'][] = $final_event;
@@ -529,8 +540,22 @@ class GA4_Cronjob_Manager
         // Send each event individually
         foreach ($batch_events as $index => $event_data) {
             $original_event = $events[$index];
+            
+            // Get stored consent data if available (stored as plain JSON)
+            $stored_consent = null;
+            if (!empty($original_event->consent_data)) {
+                // Parse stored consent data (no decryption needed)
+                $stored_consent = json_decode($original_event->consent_data, true);
+                if (json_last_error() !== JSON_ERROR_NONE) {
+                    $stored_consent = null;
+                }
+            }
+            
+            // Determine which consent to use - priority: force_consent > stored_consent
+            $consent_to_use = $force_consent ?: $stored_consent;
+            
             // Transform event data to match Google Analytics expected format
-            $final_payload = $this->transformer->transform_event_for_ga4($event_data, $events[$index], $force_consent);
+            $final_payload = $this->transformer->transform_event_for_ga4($event_data, $events[$index], $consent_to_use);
             
             // GA4 payload should NEVER be encrypted when sending directly to Google Analytics
             $payload_encrypted = false;
