@@ -135,8 +135,6 @@ class GA4_Cronjob_Manager
         // Group events for batch processing
         $batch_events = array();
         $event_ids = array();
-        $batch_consent = null;
-        $first_event_processed = false;
 
         foreach ($events as $event) {
             $event_data = $event->original_payload;
@@ -188,12 +186,6 @@ class GA4_Cronjob_Manager
                 }
                 
                 $batch_events[] = $individual_event;
-                
-                // Use consent from first event for the entire batch
-                if (!$first_event_processed && isset($event_data['consent'])) {
-                    $batch_consent = $event_data['consent'];
-                    $first_event_processed = true;
-                }
             } else {
                 // Fallback for direct event data
                 $individual_event = $event_data;
@@ -210,12 +202,6 @@ class GA4_Cronjob_Manager
                 }
                 
                 $batch_events[] = $individual_event;
-                
-                // Also check for consent in the fallback branch
-                if (!$first_event_processed && isset($event_data['consent'])) {
-                    $batch_consent = $event_data['consent'];
-                    $first_event_processed = true;
-                }
             }
             
             $event_ids[] = $event->id;
@@ -225,7 +211,20 @@ class GA4_Cronjob_Manager
             return;
         }
 
-
+        // Check if force consent override is enabled for individual event processing
+        $force_consent_enabled = get_option('ga4_force_consent_enabled', false);
+        $force_consent_data = null;
+        if ($force_consent_enabled) {
+            $force_consent_value = get_option('ga4_force_consent_value', 'GRANTED');
+            if ($this->logger) {
+                $this->logger->info("Batch processing: Force consent override enabled - will apply {$force_consent_value} to individual events");
+            }
+            $force_consent_data = array(
+                'ad_user_data' => $force_consent_value,
+                'ad_personalization' => $force_consent_value,
+                'consent_reason' => 'admin_override'
+            );
+        }
         
         // Check for test mode - if enabled, skip sending to external services
         $test_mode_enabled = get_option('ga4_test_mode_enabled', false);
@@ -257,10 +256,10 @@ class GA4_Cronjob_Manager
             
             if ($disable_cf_proxy) {
                 // Send events individually to GA4 (bypass Cloudflare) - NO FALLBACK
-                $success = $this->send_events_to_ga4($events, $batch_events, $batch_consent);
+                $success = $this->send_events_to_ga4($events, $batch_events, $force_consent_data);
                 $transmission_error_message = "Failed to send events directly to Google Analytics";
             } else {
-                $success = $this->send_batch_to_cloudflare($batch_events, $batch_consent, $events);
+                $success = $this->send_batch_to_cloudflare($batch_events, $force_consent_data, $events);
                 $transmission_error_message = "Failed to send events to Cloudflare Worker";
             }
         }
@@ -365,10 +364,10 @@ class GA4_Cronjob_Manager
      *
      * @since    2.0.0
      * @param    array    $batch_events    Array of GA4 events to send.
-     * @param    array    $batch_consent   Consent data for the batch.
+     * @param    array    $force_consent   Force consent data if enabled, null otherwise.
      * @return   boolean  True if successful, false otherwise.
      */
-    private function send_batch_to_cloudflare($batch_events, $batch_consent = null, $events = null)
+    private function send_batch_to_cloudflare($batch_events, $force_consent = null, $events = null)
     {
         
         $worker_url = get_option('ga4_cloudflare_worker_url');
@@ -387,9 +386,9 @@ class GA4_Cronjob_Manager
             'timestamp' => time()
         );
         
-        // Add consent data if available
-        if ($batch_consent) {
-            $payload['consent'] = $batch_consent;
+        // Add force consent data if enabled
+        if ($force_consent) {
+            $payload['consent'] = $force_consent;
         }
         
         // Add original headers to each event for Cloudflare worker to use
@@ -420,9 +419,9 @@ class GA4_Cronjob_Manager
                 // Add headers to the event
                 $final_event['headers'] = $original_headers;
                 
-                // Add consent to the event at the same level as headers
-                if ($batch_consent) {
-                    $final_event['consent'] = $batch_consent;
+                // Add force consent to the event at the same level as headers
+                if ($force_consent) {
+                    $final_event['consent'] = $force_consent;
                 }
                 
                 $payload['events'][] = $final_event;
@@ -509,10 +508,10 @@ class GA4_Cronjob_Manager
      * @since    3.0.0
      * @param    array    $events         The original event objects from database.
      * @param    array    $batch_events   The processed event data.
-     * @param    array    $batch_consent  Batch-level consent data.
+     * @param    array    $force_consent  Force consent data if enabled, null otherwise.
      * @return   bool     True if all events sent successfully, false otherwise.
      */
-    private function send_events_to_ga4($events, $batch_events, $batch_consent = null)
+    private function send_events_to_ga4($events, $batch_events, $force_consent = null)
     {
         $measurement_id = get_option('ga4_measurement_id', '');
         $api_secret = get_option('ga4_api_secret', '');
@@ -531,7 +530,7 @@ class GA4_Cronjob_Manager
         foreach ($batch_events as $index => $event_data) {
             $original_event = $events[$index];
             // Transform event data to match Google Analytics expected format
-            $final_payload = $this->transformer->transform_event_for_ga4($event_data, $events[$index], $batch_consent);
+            $final_payload = $this->transformer->transform_event_for_ga4($event_data, $events[$index], $force_consent);
             
             // GA4 payload should NEVER be encrypted when sending directly to Google Analytics
             $payload_encrypted = false;

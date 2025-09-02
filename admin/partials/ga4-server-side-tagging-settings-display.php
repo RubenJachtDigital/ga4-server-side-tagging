@@ -36,6 +36,8 @@ $yith_raq_form_id = get_option('ga4_yith_raq_form_id', '');
 $conversion_form_selectors = get_option('ga4_conversion_form_selectors', '');
 $disable_all_ip = get_option('ga4_disable_all_ip', false);
 $batch_size = get_option('ga4_event_batch_size', 1000);
+$force_consent_enabled = get_option('ga4_force_consent_enabled', false);
+$force_consent_value = get_option('ga4_force_consent_value', 'GRANTED');
 ?>
 
 <div class="wrap">
@@ -140,6 +142,37 @@ $batch_size = get_option('ga4_event_batch_size', 1000);
                                     </label>
                                 </fieldset>
                                 <p class="description">What action to take when the timeout expires. Users can still manually accept/deny after timeout.</p>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th scope="row">Force Consent</th>
+                            <td>
+                                <label for="ga4_force_consent_enabled">
+                                    <input type="checkbox" id="ga4_force_consent_enabled" name="ga4_force_consent_enabled" <?php checked($force_consent_enabled); ?> />
+                                    Force consent override
+                                </label>
+                                <p class="description">When enabled, overrides user consent choices with the value selected below.</p>
+                            </td>
+                        </tr>
+                        <tr id="force_consent_value_row" style="<?php echo $force_consent_enabled ? '' : 'display: none;'; ?>">
+                            <th scope="row">
+                                <label>Force Consent Value</label>
+                            </th>
+                            <td>
+                                <fieldset>
+                                    <label for="ga4_force_consent_value_granted">
+                                        <input type="radio" id="ga4_force_consent_value_granted" name="ga4_force_consent_value" 
+                                            value="GRANTED" <?php checked($force_consent_value, 'GRANTED'); ?> />
+                                        GRANTED - Force all consent to be granted
+                                    </label>
+                                    <br><br>
+                                    <label for="ga4_force_consent_value_denied">
+                                        <input type="radio" id="ga4_force_consent_value_denied" name="ga4_force_consent_value" 
+                                            value="DENIED" <?php checked($force_consent_value, 'DENIED'); ?> />
+                                        DENIED - Force all consent to be denied
+                                    </label>
+                                </fieldset>
+                                <p class="description">This will override the user's actual consent choice for all events sent to GA4.</p>
                             </td>
                         </tr>
                         <tr>
@@ -606,6 +639,15 @@ jQuery(document).ready(function($) {
 
     $('#ga4_consent_default_timeout').change(toggleTimeoutAction);
     toggleTimeoutAction(); // Initial state
+
+    // Toggle force consent value row based on force consent checkbox
+    $('#ga4_force_consent_enabled').change(function() {
+        if ($(this).is(':checked')) {
+            $('#force_consent_value_row').show();
+        } else {
+            $('#force_consent_value_row').hide();
+        }
+    });
 
     // Toggle encryption settings and worker API settings based on transmission method
     $('#ga4_transmission_method').change(function() {

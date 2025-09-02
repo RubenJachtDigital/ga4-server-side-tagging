@@ -1099,6 +1099,18 @@ class GA4_Server_Side_Tagging_Endpoint
                 );
             }
 
+            // Apply force consent override if enabled
+            $force_consent_enabled = get_option('ga4_force_consent_enabled', false);
+            if ($force_consent_enabled) {
+                $force_consent_value = get_option('ga4_force_consent_value', 'GRANTED');
+                $this->logger->info("Force consent override applied: overriding user consent with {$force_consent_value}");
+                $request_data['consent'] = array(
+                    'ad_user_data' => $force_consent_value,
+                    'ad_personalization' => $force_consent_value,
+                    'consent_reason' => 'admin_override'
+                );
+            }
+
             // WordPress-side bot detection (mirrors Cloudflare Worker logic)
             $bot_detection_result = $this->detect_bot_from_event_data($request, $request_data);
             if ($bot_detection_result['is_bot']) {
@@ -2492,7 +2504,14 @@ class GA4_Server_Side_Tagging_Endpoint
      */
     private function extract_consent_status($request_data)
     {
-   
+        // Check for force consent override setting
+        $force_consent_enabled = get_option('ga4_force_consent_enabled', false);
+        if ($force_consent_enabled) {
+            $force_consent_value = get_option('ga4_force_consent_value', 'GRANTED');
+            $override_result = $force_consent_value === 'GRANTED';
+            $this->logger->info('Force consent override active: ' . json_encode(array('force_value' => $force_consent_value, 'result' => $override_result)));
+            return $override_result;
+        }
         
         if (!isset($request_data['consent']) || !is_array($request_data['consent'])) {
             $this->logger->info('No consent data found or not array: ' . json_encode($request_data['consent'] ?? 'not_set'));

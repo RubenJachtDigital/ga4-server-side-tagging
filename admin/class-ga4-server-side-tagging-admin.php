@@ -423,6 +423,30 @@ class GA4_Server_Side_Tagging_Admin
 
         register_setting(
             'ga4_server_side_tagging_settings',
+            'ga4_force_consent_enabled',
+            array(
+                'type' => 'boolean',
+                'description' => 'Force consent override',
+                'sanitize_callback' => array($this, 'sanitize_checkbox'),
+                'show_in_rest' => false,
+                'default' => false,
+            )
+        );
+
+        register_setting(
+            'ga4_server_side_tagging_settings',
+            'ga4_force_consent_value',
+            array(
+                'type' => 'string',
+                'description' => 'Force consent value (GRANTED or DENIED)',
+                'sanitize_callback' => array($this, 'sanitize_force_consent_value'),
+                'show_in_rest' => false,
+                'default' => 'GRANTED',
+            )
+        );
+
+        register_setting(
+            'ga4_server_side_tagging_settings',
             'ga4_storage_expiration_hours',
             array(
                 'type' => 'integer',
@@ -433,17 +457,6 @@ class GA4_Server_Side_Tagging_Admin
             )
         );
 
-        register_setting(
-            'ga4_server_side_tagging_settings',
-            'ga4_consent_mode_enabled',
-            array(
-                'type' => 'boolean',
-                'description' => 'Enable Google Consent Mode v2',
-                'sanitize_callback' => array($this, 'sanitize_checkbox'),
-                'show_in_rest' => false,
-                'default' => true,
-            )
-        );
 
         // A/B Testing Settings
         register_setting(
@@ -680,6 +693,25 @@ class GA4_Server_Side_Tagging_Admin
         }
         
         return 'direct_to_cf'; // Default fallback
+    }
+
+    /**
+     * Sanitize force consent value.
+     *
+     * @since    3.0.0
+     * @param    mixed    $input    The input value.
+     * @return   string              The sanitized value.
+     */
+    public function sanitize_force_consent_value($input)
+    {
+        $valid_values = array('GRANTED', 'DENIED');
+        $input = sanitize_text_field($input);
+        
+        if (in_array($input, $valid_values)) {
+            return $input;
+        }
+        
+        return 'GRANTED'; // Default fallback
     }
 
     /**
@@ -998,8 +1030,7 @@ class GA4_Server_Side_Tagging_Admin
         // Disable Cloudflare Proxy setting
         update_option('ga4_disable_cf_proxy', isset($_POST['ga4_disable_cf_proxy']));
 
-        // GDPR Consent settings
-        update_option('ga4_consent_mode_enabled', isset($_POST['ga4_consent_mode_enabled']));
+        // GDPR Consent settings  
         update_option('ga4_use_iubenda', isset($_POST['ga4_use_iubenda']));
 
         if (isset($_POST['ga4_consent_accept_selector'])) {
@@ -1027,6 +1058,13 @@ class GA4_Server_Side_Tagging_Admin
 
         // Process new IP and storage settings
         update_option('ga4_disable_all_ip', isset($_POST['ga4_disable_all_ip']));
+
+        // Force consent settings
+        update_option('ga4_force_consent_enabled', isset($_POST['ga4_force_consent_enabled']));
+        if (isset($_POST['ga4_force_consent_value'])) {
+            $force_consent_value = $this->sanitize_force_consent_value($_POST['ga4_force_consent_value']);
+            update_option('ga4_force_consent_value', $force_consent_value);
+        }
 
         if (isset($_POST['ga4_storage_expiration_hours'])) {
             $hours = absint($_POST['ga4_storage_expiration_hours']);
