@@ -426,7 +426,7 @@ class GA4_Server_Side_Tagging_Admin
             'ga4_force_consent_enabled',
             array(
                 'type' => 'boolean',
-                'description' => 'Force consent override',
+                'description' => 'Admin override user consent',
                 'sanitize_callback' => array($this, 'sanitize_checkbox'),
                 'show_in_rest' => false,
                 'default' => false,
@@ -438,7 +438,7 @@ class GA4_Server_Side_Tagging_Admin
             'ga4_force_consent_value',
             array(
                 'type' => 'string',
-                'description' => 'Force consent value (GRANTED or DENIED)',
+                'description' => 'Admin consent override value (GRANTED or DENIED)',
                 'sanitize_callback' => array($this, 'sanitize_force_consent_value'),
                 'show_in_rest' => false,
                 'default' => 'GRANTED',
@@ -696,7 +696,7 @@ class GA4_Server_Side_Tagging_Admin
     }
 
     /**
-     * Sanitize force consent value.
+     * Sanitize admin consent override value.
      *
      * @since    3.0.0
      * @param    mixed    $input    The input value.
@@ -1059,7 +1059,7 @@ class GA4_Server_Side_Tagging_Admin
         // Process new IP and storage settings
         update_option('ga4_disable_all_ip', isset($_POST['ga4_disable_all_ip']));
 
-        // Force consent settings
+        // Admin consent override settings
         update_option('ga4_force_consent_enabled', isset($_POST['ga4_force_consent_enabled']));
         if (isset($_POST['ga4_force_consent_value'])) {
             $force_consent_value = $this->sanitize_force_consent_value($_POST['ga4_force_consent_value']);

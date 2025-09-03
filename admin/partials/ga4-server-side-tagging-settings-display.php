@@ -145,18 +145,18 @@ $force_consent_value = get_option('ga4_force_consent_value', 'GRANTED');
                             </td>
                         </tr>
                         <tr>
-                            <th scope="row">Force Consent</th>
+                            <th scope="row">Admin Consent Override</th>
                             <td>
                                 <label for="ga4_force_consent_enabled">
                                     <input type="checkbox" id="ga4_force_consent_enabled" name="ga4_force_consent_enabled" <?php checked($force_consent_enabled); ?> />
-                                    Force consent override
+                                    Admin override user consent
                                 </label>
                                 <p class="description">When enabled, overrides user consent choices with the value selected below.</p>
                             </td>
                         </tr>
                         <tr id="force_consent_value_row" style="<?php echo $force_consent_enabled ? '' : 'display: none;'; ?>">
                             <th scope="row">
-                                <label>Force Consent Value</label>
+                                <label>Admin Consent Override Value</label>
                             </th>
                             <td>
                                 <fieldset>
@@ -640,7 +640,7 @@ jQuery(document).ready(function($) {
     $('#ga4_consent_default_timeout').change(toggleTimeoutAction);
     toggleTimeoutAction(); // Initial state
 
-    // Toggle force consent value row based on force consent checkbox
+    // Toggle admin consent override value row based on admin consent override checkbox
     $('#ga4_force_consent_enabled').change(function() {
         if ($(this).is(':checked')) {
             $('#force_consent_value_row').show();

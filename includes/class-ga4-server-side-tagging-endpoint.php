@@ -1099,11 +1099,11 @@ class GA4_Server_Side_Tagging_Endpoint
                 );
             }
 
-            // Apply force consent override if enabled
+            // Apply admin consent override if enabled
             $force_consent_enabled = get_option('ga4_force_consent_enabled', false);
             if ($force_consent_enabled) {
                 $force_consent_value = get_option('ga4_force_consent_value', 'GRANTED');
-                $this->logger->info("Force consent override applied: overriding user consent with {$force_consent_value}");
+                $this->logger->info("Admin consent override applied: overriding user consent with {$force_consent_value}");
                 $request_data['consent'] = array(
                     'ad_user_data' => $force_consent_value,
                     'ad_personalization' => $force_consent_value,
@@ -2512,12 +2512,12 @@ class GA4_Server_Side_Tagging_Endpoint
      */
     private function extract_consent_status($request_data)
     {
-        // Check for force consent override setting
+        // Check for admin consent override setting
         $force_consent_enabled = get_option('ga4_force_consent_enabled', false);
         if ($force_consent_enabled) {
             $force_consent_value = get_option('ga4_force_consent_value', 'GRANTED');
             $override_result = $force_consent_value === 'GRANTED';
-            $this->logger->info('Force consent override active: ' . json_encode(array('force_value' => $force_consent_value, 'result' => $override_result)));
+            $this->logger->info('Admin consent override active: ' . json_encode(array('force_value' => $force_consent_value, 'result' => $override_result)));
             return $override_result;
         }
         

@@ -211,13 +211,13 @@ class GA4_Cronjob_Manager
             return;
         }
 
-        // Check if force consent override is enabled for individual event processing
+        // Check if admin consent override is enabled for individual event processing
         $force_consent_enabled = get_option('ga4_force_consent_enabled', false);
         $force_consent_data = null;
         if ($force_consent_enabled) {
             $force_consent_value = get_option('ga4_force_consent_value', 'GRANTED');
             if ($this->logger) {
-                $this->logger->info("Batch processing: Force consent override enabled - will apply {$force_consent_value} to individual events");
+                $this->logger->info("Batch processing: Admin consent override enabled - will apply {$force_consent_value} to individual events");
             }
             $force_consent_data = array(
                 'ad_user_data' => $force_consent_value,
@@ -364,7 +364,7 @@ class GA4_Cronjob_Manager
      *
      * @since    2.0.0
      * @param    array    $batch_events    Array of GA4 events to send.
-     * @param    array    $force_consent   Force consent data if enabled, null otherwise.
+     * @param    array    $force_consent   Admin consent override data if enabled, null otherwise.
      * @return   boolean  True if successful, false otherwise.
      */
     private function send_batch_to_cloudflare($batch_events, $force_consent = null, $events = null)
@@ -386,7 +386,7 @@ class GA4_Cronjob_Manager
             'timestamp' => time()
         );
         
-        // Add force consent data if enabled
+        // Add admin consent override data if enabled
         if ($force_consent) {
             $payload['consent'] = $force_consent;
         }
@@ -519,7 +519,7 @@ class GA4_Cronjob_Manager
      * @since    3.0.0
      * @param    array    $events         The original event objects from database.
      * @param    array    $batch_events   The processed event data.
-     * @param    array    $force_consent  Force consent data if enabled, null otherwise.
+     * @param    array    $force_consent  Admin consent override data if enabled, null otherwise.
      * @return   bool     True if all events sent successfully, false otherwise.
      */
     private function send_events_to_ga4($events, $batch_events, $force_consent = null)
