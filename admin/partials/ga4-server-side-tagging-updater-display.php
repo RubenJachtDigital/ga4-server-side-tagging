@@ -42,11 +42,46 @@ if (isset($_POST['check_updates']) && wp_verify_nonce($_POST['updater_nonce'], '
     delete_transient('ga4_github_updater_' . md5(plugin_basename(GA4_SERVER_SIDE_TAGGING_PLUGIN_DIR . 'ga4-server-side-tagging.php')) . '_version');
     delete_transient('ga4_github_updater_' . md5(plugin_basename(GA4_SERVER_SIDE_TAGGING_PLUGIN_DIR . 'ga4-server-side-tagging.php')) . '_changelog');
 
+    // Debug: Check what GitHub returns
+    $config = Updater_Config::load_config();
+    if ($config && !empty($config['username']) && !empty($config['repo'])) {
+        $api_url = "https://api.github.com/repos/{$config['username']}/{$config['repo']}/releases/latest";
+        $headers = array('User-Agent' => 'WordPress/' . get_bloginfo('version'));
+        if (!empty($config['token'])) {
+            $headers['Authorization'] = 'token ' . $config['token'];
+        }
+
+        $response = wp_remote_get($api_url, array('headers' => $headers, 'timeout' => 15));
+
+        if (!is_wp_error($response) && wp_remote_retrieve_response_code($response) === 200) {
+            $data = json_decode(wp_remote_retrieve_body($response), true);
+            $remote_version = isset($data['tag_name']) ? ltrim($data['tag_name'], 'v') : 'Unknown';
+            $current_version = GA4_SERVER_SIDE_TAGGING_VERSION;
+
+            $message = sprintf(
+                'Update check completed! Current: %s, Remote: %s. %s',
+                $current_version,
+                $remote_version,
+                version_compare($current_version, $remote_version, '<')
+                    ? 'Update available! Check the Plugins page.'
+                    : 'You have the latest version.'
+            );
+        } else {
+            $error_msg = is_wp_error($response) ? $response->get_error_message() : 'HTTP ' . wp_remote_retrieve_response_code($response);
+            $message = 'Update check failed: ' . $error_msg;
+            $message_type = 'error';
+        }
+    } else {
+        $message = 'Configuration incomplete. Please check your .env file.';
+        $message_type = 'error';
+    }
+
     // Trigger WordPress to check for plugin updates
     wp_update_plugins();
 
-    $message = 'Update check completed! If a new version is available, it will appear in the WordPress Plugins page.';
-    $message_type = 'success';
+    if (!isset($message_type)) {
+        $message_type = 'success';
+    }
 }
 
 // Load current configuration
