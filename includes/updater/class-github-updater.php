@@ -138,7 +138,9 @@ class GitHub_Updater {
             );
 
             // Log update available
-            error_log("GA4 GitHub Updater: Update available - Current: {$this->version}, Remote: {$remote_version}");
+            if (defined('WP_DEBUG') && WP_DEBUG) {
+                error_log("GA4 GitHub Updater: Update available - Current: {$this->version}, Remote: {$remote_version}");
+            }
         }
 
         return $transient;
@@ -219,7 +221,9 @@ class GitHub_Updater {
         $this->clear_cache();
 
         // Log successful update
-        error_log("GA4 GitHub Updater: Successfully updated plugin to version {$this->get_remote_version()}");
+        if (defined('WP_DEBUG') && WP_DEBUG) {
+            error_log("GA4 GitHub Updater: Successfully updated plugin to version {$this->get_remote_version()}");
+        }
 
         return $result;
     }
@@ -327,20 +331,24 @@ class GitHub_Updater {
         ));
 
         if (is_wp_error($request)) {
-            error_log('GA4 GitHub Updater Error: ' . $request->get_error_message());
+            if (defined('WP_DEBUG') && WP_DEBUG) {
+                error_log('GA4 GitHub Updater Error: ' . $request->get_error_message());
+            }
             return false;
         }
 
         $response_code = wp_remote_retrieve_response_code($request);
 
         if ($response_code !== 200) {
-            error_log("GA4 GitHub Updater Error: HTTP {$response_code} from GitHub API");
+            if (defined('WP_DEBUG') && WP_DEBUG) {
+                error_log("GA4 GitHub Updater Error: HTTP {$response_code} from GitHub API");
 
-            // Check for rate limiting
-            if ($response_code === 403) {
-                $rate_limit_remaining = wp_remote_retrieve_header($request, 'x-ratelimit-remaining');
-                if ($rate_limit_remaining === '0') {
-                    error_log('GA4 GitHub Updater: API rate limit exceeded. Consider adding a GitHub token.');
+                // Check for rate limiting
+                if ($response_code === 403) {
+                    $rate_limit_remaining = wp_remote_retrieve_header($request, 'x-ratelimit-remaining');
+                    if ($rate_limit_remaining === '0') {
+                        error_log('GA4 GitHub Updater: API rate limit exceeded. Consider adding a GitHub token.');
+                    }
                 }
             }
 
@@ -351,7 +359,9 @@ class GitHub_Updater {
         $data = json_decode($body, true);
 
         if (json_last_error() !== JSON_ERROR_NONE) {
-            error_log('GA4 GitHub Updater Error: Invalid JSON response from GitHub API');
+            if (defined('WP_DEBUG') && WP_DEBUG) {
+                error_log('GA4 GitHub Updater Error: Invalid JSON response from GitHub API');
+            }
             return false;
         }
 
