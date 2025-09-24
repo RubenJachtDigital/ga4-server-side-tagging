@@ -347,7 +347,9 @@ class GitHub_Updater {
                 if ($response_code === 403) {
                     $rate_limit_remaining = wp_remote_retrieve_header($request, 'x-ratelimit-remaining');
                     if ($rate_limit_remaining === '0') {
-                        error_log('GA4 GitHub Updater: API rate limit exceeded. Consider adding a GitHub token.');
+                        if (defined('WP_DEBUG') && WP_DEBUG) {
+                            error_log('GA4 GitHub Updater: API rate limit exceeded. Consider adding a GitHub token.');
+                        }
                     }
                 }
             }
