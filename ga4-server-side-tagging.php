@@ -11,7 +11,7 @@
  * Plugin Name:       GA4 Server-Side Tagging
  * Plugin URI:        https://jacht.digital/
  * Description:       Server-side tagging system for GA4 with multiple transmission methods, fully compatible with WordPress and WooCommerce.
- * Version:           2.3.5
+ * Version:           2.3.6
  * Requires at least: 5.2
  * Requires PHP:      7.2
  * Author:            Jacht Digital Marketing
@@ -28,7 +28,7 @@ if (! defined('WPINC')) {
 }
 
 // Define plugin version
-define('GA4_SERVER_SIDE_TAGGING_VERSION', '2.3.5');
+define('GA4_SERVER_SIDE_TAGGING_VERSION', '2.3.6');
 define('GA4_SERVER_SIDE_TAGGING_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('GA4_SERVER_SIDE_TAGGING_PLUGIN_URL', plugin_dir_url(__FILE__));
 
