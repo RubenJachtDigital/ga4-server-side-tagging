@@ -68,7 +68,7 @@ jobs:
             echo "Current version: $VERSION"
             echo "Previous version: $PREVIOUS_VERSION"
 
-            if [ "$CURRENT_VERSION" = "$PREVIOUS_VERSION" ]; then
+            if [ "$VERSION" = "$PREVIOUS_VERSION" ]; then
               echo "⏸️  Version not changed, skipping release"
               echo "should_release=false" >> $GITHUB_OUTPUT
               echo "reason=version_not_changed" >> $GITHUB_OUTPUT

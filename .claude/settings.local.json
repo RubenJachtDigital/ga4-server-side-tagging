@@ -37,7 +37,8 @@
       "Bash(timeout:*)",
       "Bash(gtimeout:*)",
       "Bash(git check-ignore:*)",
-      "Bash(/usr/bin/php:*)"
+      "Bash(/usr/bin/php:*)",
+      "Bash(git push:*)"
     ],
     "deny": []
   }
