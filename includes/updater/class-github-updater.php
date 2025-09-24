@@ -203,13 +203,23 @@ class GitHub_Updater {
         $plugin_directory = dirname($this->plugin_file);
         $remote_version = $this->get_remote_version();
 
-        // Handle GitHub's directory structure (repo-name-version format)
-        $expected_github_dir = $result['destination'] . basename($plugin_directory) . '-' . $remote_version . '/';
+        // The GitHub Actions workflow creates a proper plugin zip structure
+        // so we should find the plugin directory directly
+        $expected_plugin_dir = $result['destination'] . 'ga4-server-side-tagging/';
 
-        if ($wp_filesystem->is_dir($expected_github_dir)) {
-            // GitHub zip extracted with version suffix - move contents
+        if (defined('WP_DEBUG') && WP_DEBUG) {
+            $dirs = $wp_filesystem->dirlist($result['destination']);
+            if ($dirs) {
+                $dir_list = implode(', ', array_keys($dirs));
+                error_log("GA4 GitHub Updater: Available directories: " . $dir_list);
+            }
+            error_log("GA4 GitHub Updater: Looking for plugin directory at: " . $expected_plugin_dir);
+        }
+
+        if ($wp_filesystem->is_dir($expected_plugin_dir)) {
+            // Found the correct plugin directory structure
             if (defined('WP_DEBUG') && WP_DEBUG) {
-                error_log("GA4 GitHub Updater: Found GitHub directory structure at: " . $expected_github_dir);
+                error_log("GA4 GitHub Updater: Found correct plugin directory structure");
             }
 
             // Remove old plugin files first
@@ -217,18 +227,53 @@ class GitHub_Updater {
                 $wp_filesystem->delete($plugin_directory, true);
             }
 
-            // Move the versioned directory to correct location
-            $wp_filesystem->move($expected_github_dir, $plugin_directory);
+            // Move the plugin directory to correct location
+            $wp_filesystem->move($expected_plugin_dir, $plugin_directory);
             $result['destination'] = $plugin_directory;
 
         } else {
-            // Standard directory structure - just move normally
+            // Fallback: try to find any directory that looks like our plugin
             if (defined('WP_DEBUG') && WP_DEBUG) {
-                error_log("GA4 GitHub Updater: Using standard directory structure");
+                error_log("GA4 GitHub Updater: Plugin directory not found, trying fallback detection");
             }
 
-            $wp_filesystem->move($result['destination'], $plugin_directory);
-            $result['destination'] = $plugin_directory;
+            $dirs = $wp_filesystem->dirlist($result['destination']);
+            if ($dirs) {
+                foreach ($dirs as $dirname => $dir_data) {
+                    if ($dir_data['type'] === 'd') {
+                        $found_dir = $result['destination'] . $dirname . '/';
+                        if (defined('WP_DEBUG') && WP_DEBUG) {
+                            error_log("GA4 GitHub Updater: Trying directory: " . $found_dir);
+                        }
+
+                        // Check if this directory contains the main plugin file
+                        if ($wp_filesystem->exists($found_dir . 'ga4-server-side-tagging.php')) {
+                            if (defined('WP_DEBUG') && WP_DEBUG) {
+                                error_log("GA4 GitHub Updater: Found plugin files in: " . $found_dir);
+                            }
+
+                            // Remove old plugin files first
+                            if ($wp_filesystem->is_dir($plugin_directory)) {
+                                $wp_filesystem->delete($plugin_directory, true);
+                            }
+
+                            // Move the directory to correct location
+                            $wp_filesystem->move($found_dir, $plugin_directory);
+                            $result['destination'] = $plugin_directory;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // Last resort
+            if (!$wp_filesystem->is_dir($plugin_directory)) {
+                if (defined('WP_DEBUG') && WP_DEBUG) {
+                    error_log("GA4 GitHub Updater: Using last resort - moving entire destination");
+                }
+                $wp_filesystem->move($result['destination'], $plugin_directory);
+                $result['destination'] = $plugin_directory;
+            }
         }
 
         // Clean up any remaining extraction directory
@@ -495,7 +540,25 @@ class GitHub_Updater {
      * @return string Download URL
      */
     private function get_download_url($version) {
-        return "https://github.com/{$this->config['username']}/{$this->config['repo']}/archive/refs/tags/v{$version}.zip";
+        // Try to get the release asset URL from GitHub Actions created release
+        $release_data = $this->get_remote_release_data();
+        if ($release_data && isset($release_data['assets']) && !empty($release_data['assets'])) {
+            foreach ($release_data['assets'] as $asset) {
+                if (isset($asset['browser_download_url']) && strpos($asset['name'], '.zip') !== false) {
+                    if (defined('WP_DEBUG') && WP_DEBUG) {
+                        error_log("GA4 GitHub Updater: Using release asset URL: " . $asset['browser_download_url']);
+                    }
+                    return $asset['browser_download_url'];
+                }
+            }
+        }
+
+        // Fallback to expected GitHub Actions release format
+        $release_url = "https://github.com/{$this->config['username']}/{$this->config['repo']}/releases/download/v{$version}/ga4-server-side-tagging-v{$version}.zip";
+        if (defined('WP_DEBUG') && WP_DEBUG) {
+            error_log("GA4 GitHub Updater: Using expected release URL: " . $release_url);
+        }
+        return $release_url;
     }
 
     /**
