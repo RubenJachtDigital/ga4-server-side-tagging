@@ -212,11 +212,6 @@ class GitHub_Updater {
 
         if (defined('WP_DEBUG') && WP_DEBUG) {
             $dirs = $wp_filesystem->dirlist($result['destination']);
-            if ($dirs) {
-                $dir_list = implode(', ', array_keys($dirs));
-                error_log("GA4 GitHub Updater: Available directories: " . $dir_list);
-            }
-            error_log("GA4 GitHub Updater: Looking for plugin directory at: " . $expected_plugin_dir);
         }
 
         if ($wp_filesystem->is_dir($expected_plugin_dir)) {
