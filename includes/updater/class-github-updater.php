@@ -200,15 +200,40 @@ class GitHub_Updater {
             return $result;
         }
 
-        $install_directory = plugin_dir_path($this->plugin_file);
+        $plugin_directory = dirname($this->plugin_file);
+        $remote_version = $this->get_remote_version();
 
-        // Move files to correct directory
-        $wp_filesystem->move($result['destination'], $install_directory);
-        $result['destination'] = $install_directory;
+        // Handle GitHub's directory structure (repo-name-version format)
+        $expected_github_dir = $result['destination'] . basename($plugin_directory) . '-' . $remote_version . '/';
 
-        // Clean up
-        if (isset($result['destination_name'])) {
-            $wp_filesystem->delete($result['destination_name']);
+        if ($wp_filesystem->is_dir($expected_github_dir)) {
+            // GitHub zip extracted with version suffix - move contents
+            if (defined('WP_DEBUG') && WP_DEBUG) {
+                error_log("GA4 GitHub Updater: Found GitHub directory structure at: " . $expected_github_dir);
+            }
+
+            // Remove old plugin files first
+            if ($wp_filesystem->is_dir($plugin_directory)) {
+                $wp_filesystem->delete($plugin_directory, true);
+            }
+
+            // Move the versioned directory to correct location
+            $wp_filesystem->move($expected_github_dir, $plugin_directory);
+            $result['destination'] = $plugin_directory;
+
+        } else {
+            // Standard directory structure - just move normally
+            if (defined('WP_DEBUG') && WP_DEBUG) {
+                error_log("GA4 GitHub Updater: Using standard directory structure");
+            }
+
+            $wp_filesystem->move($result['destination'], $plugin_directory);
+            $result['destination'] = $plugin_directory;
+        }
+
+        // Clean up any remaining extraction directory
+        if (isset($result['destination_name']) && $wp_filesystem->is_dir($result['destination_name'])) {
+            $wp_filesystem->delete($result['destination_name'], true);
         }
 
         // Reactivate plugin if it was active
@@ -222,7 +247,7 @@ class GitHub_Updater {
 
         // Log successful update
         if (defined('WP_DEBUG') && WP_DEBUG) {
-            error_log("GA4 GitHub Updater: Successfully updated plugin to version {$this->get_remote_version()}");
+            error_log("GA4 GitHub Updater: Successfully updated plugin to version " . $remote_version);
         }
 
         return $result;
