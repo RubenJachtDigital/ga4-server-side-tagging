@@ -137,6 +137,9 @@ class GitHub_Updater {
                 'compatibility' => new \stdClass()
             );
 
+            // Add download authentication hook for private repositories
+            add_filter('upgrader_pre_download', array($this, 'authenticate_download'), 10, 3);
+
             // Log update available
             if (defined('WP_DEBUG') && WP_DEBUG) {
                 error_log("GA4 GitHub Updater: Update available - Current: {$this->version}, Remote: {$remote_version}");
@@ -605,6 +608,96 @@ class GitHub_Updater {
 
         $this->clear_cache();
         return $this->get_remote_version(true);
+    }
+
+    /**
+     * Authenticate download requests for private GitHub repositories
+     *
+     * @param mixed  $reply     Existing reply
+     * @param string $package   Package URL
+     * @param mixed  $upgrader  WP_Upgrader instance
+     * @return mixed Reply or WP_Error
+     */
+    public function authenticate_download($reply, $package, $upgrader) {
+        // Only handle our plugin downloads
+        if (strpos($package, $this->config['username'] . '/' . $this->config['repo']) === false) {
+            return $reply;
+        }
+
+        if (defined('WP_DEBUG') && WP_DEBUG) {
+            error_log("GA4 GitHub Updater: Attempting authenticated download from: " . $package);
+        }
+
+        // Only add authentication if we have a token
+        if (empty($this->config['token'])) {
+            if (defined('WP_DEBUG') && WP_DEBUG) {
+                error_log("GA4 GitHub Updater: No GitHub token available for authentication");
+            }
+            return $reply;
+        }
+
+        // Prepare authentication headers
+        $headers = array(
+            'Accept' => 'application/vnd.github.v3.raw',
+            'User-Agent' => 'WordPress/' . get_bloginfo('version') . '; ' . get_bloginfo('url'),
+            'Authorization' => 'token ' . $this->config['token']
+        );
+
+        // Download with authentication
+        $response = wp_remote_get($package, array(
+            'timeout' => 300, // 5 minutes for large files
+            'headers' => $headers
+        ));
+
+        if (is_wp_error($response)) {
+            if (defined('WP_DEBUG') && WP_DEBUG) {
+                error_log("GA4 GitHub Updater: Download failed - " . $response->get_error_message());
+            }
+            return $response;
+        }
+
+        $response_code = wp_remote_retrieve_response_code($response);
+        if ($response_code !== 200) {
+            if (defined('WP_DEBUG') && WP_DEBUG) {
+                error_log("GA4 GitHub Updater: Download failed with HTTP {$response_code}");
+            }
+            return new \WP_Error('download_failed', "Download failed with HTTP {$response_code}");
+        }
+
+        // Get the file content
+        $body = wp_remote_retrieve_body($response);
+        if (empty($body)) {
+            if (defined('WP_DEBUG') && WP_DEBUG) {
+                error_log("GA4 GitHub Updater: Downloaded file is empty");
+            }
+            return new \WP_Error('download_failed', 'Downloaded file is empty');
+        }
+
+        // Create temporary file
+        $temp_file = wp_tempnam($package);
+        if (!$temp_file) {
+            return new \WP_Error('temp_file_failed', 'Could not create temporary file');
+        }
+
+        // Write content to temporary file
+        global $wp_filesystem;
+        if (empty($wp_filesystem)) {
+            require_once ABSPATH . 'wp-admin/includes/file.php';
+            WP_Filesystem();
+        }
+
+        if (!$wp_filesystem->put_contents($temp_file, $body)) {
+            if (defined('WP_DEBUG') && WP_DEBUG) {
+                error_log("GA4 GitHub Updater: Failed to write to temporary file");
+            }
+            return new \WP_Error('temp_file_failed', 'Could not write to temporary file');
+        }
+
+        if (defined('WP_DEBUG') && WP_DEBUG) {
+            error_log("GA4 GitHub Updater: Successfully downloaded and saved to: " . $temp_file);
+        }
+
+        return $temp_file;
     }
 
     /**
