@@ -28,7 +28,7 @@ if (! defined('WPINC')) {
 }
 
 // Define plugin version
-define('GA4_SERVER_SIDE_TAGGING_VERSION', '2.2.4');
+define('GA4_SERVER_SIDE_TAGGING_VERSION', '2.2.5');
 define('GA4_SERVER_SIDE_TAGGING_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('GA4_SERVER_SIDE_TAGGING_PLUGIN_URL', plugin_dir_url(__FILE__));
 
@@ -90,12 +90,31 @@ function ga4_server_side_tagging_deactivate()
 }
 
 /**
+ * Initialize GitHub updater if configured
+ */
+function init_ga4_github_updater() {
+    // Include updater classes
+    require_once GA4_SERVER_SIDE_TAGGING_PLUGIN_DIR . 'includes/updater/class-updater-config.php';
+    require_once GA4_SERVER_SIDE_TAGGING_PLUGIN_DIR . 'includes/updater/class-github-updater.php';
+
+    // Initialize updater
+    new GA4ServerSideTagging\Updater\GitHub_Updater(
+        __FILE__,
+        GA4_SERVER_SIDE_TAGGING_VERSION,
+        'GA4 Server-Side Tagging'
+    );
+}
+
+/**
  * Begins execution of the plugin.
  */
 function run_ga4_server_side_tagging()
 {
     $plugin = new GA4_Server_Side_Tagging();
     $plugin->run();
+
+    // Initialize GitHub updater
+    init_ga4_github_updater();
 }
 
 run_ga4_server_side_tagging();

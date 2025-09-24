@@ -180,6 +180,16 @@ class GA4_Server_Side_Tagging_Admin
             'ga4-server-side-tagging-events',
             array($this, 'display_events_page')
         );
+
+        // Add submenu for auto-updater configuration
+        add_submenu_page(
+            'ga4-server-side-tagging',
+            'Auto-Updates',
+            'Auto-Updates',
+            'manage_options',
+            'ga4-server-side-tagging-updater',
+            array($this, 'display_updater_page')
+        );
     }
 
     /**
@@ -1724,6 +1734,21 @@ class GA4_Server_Side_Tagging_Admin
         }
 
         include_once 'partials/ga4-server-side-tagging-events-display.php';
+    }
+
+    /**
+     * Display the auto-updater configuration page.
+     *
+     * @since    3.0.0
+     */
+    public function display_updater_page()
+    {
+        // Check user capabilities
+        if (!current_user_can('manage_options')) {
+            return;
+        }
+
+        include_once 'partials/ga4-server-side-tagging-updater-display.php';
     }
 
 

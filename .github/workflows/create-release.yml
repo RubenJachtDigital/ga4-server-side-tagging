@@ -1,0 +1,216 @@
+name: Create Release and Notify Client Sites
+
+on:
+  push:
+    branches: [ master, main ]
+    paths:
+      - 'ga4-server-side-tagging.php'
+    # Only trigger when the main plugin file is changed
+
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g., 3.0.1)'
+        required: true
+        type: string
+      release_type:
+        description: 'Type of release'
+        required: true
+        default: 'patch'
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
+jobs:
+  check-version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      should_release: ${{ steps.version.outputs.should_release }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine version and check if release needed
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+            echo "Using manual version: $VERSION"
+            echo "should_release=true" >> $GITHUB_OUTPUT
+          else
+            # Extract current version from plugin file
+            CURRENT_VERSION=$(grep "define('GA4_SERVER_SIDE_TAGGING_VERSION'" ga4-server-side-tagging.php | grep -o "'[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*'" | tr -d "'")
+            HEADER_VERSION=$(grep "Version:" ga4-server-side-tagging.php | grep -o "[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*")
+
+            if [ "$CURRENT_VERSION" != "$HEADER_VERSION" ]; then
+              echo "❌ Version mismatch: define=$CURRENT_VERSION, header=$HEADER_VERSION"
+              echo "Please update both version numbers in ga4-server-side-tagging.php:"
+              echo "  Line ~14: * Version: $CURRENT_VERSION"
+              echo "  Line ~31: define('GA4_SERVER_SIDE_TAGGING_VERSION', '$CURRENT_VERSION');"
+              exit 1
+            fi
+
+            VERSION="$CURRENT_VERSION"
+            echo "✅ Detected version: $VERSION"
+
+            # Check if this version was changed in this commit
+            PREVIOUS_VERSION=""
+            if git rev-parse HEAD~1 >/dev/null 2>&1; then
+              PREVIOUS_VERSION=$(git show HEAD~1:ga4-server-side-tagging.php | grep "define('GA4_SERVER_SIDE_TAGGING_VERSION'" | grep -o "'[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*'" | tr -d "'")
+            fi
+
+            echo "Current version: $VERSION"
+            echo "Previous version: $PREVIOUS_VERSION"
+
+            if [ "$CURRENT_VERSION" = "$PREVIOUS_VERSION" ]; then
+              echo "⏸️  Version not changed, skipping release"
+              echo "should_release=false" >> $GITHUB_OUTPUT
+              echo "reason=version_not_changed" >> $GITHUB_OUTPUT
+            else
+              # Check if tag already exists
+              if git tag -l | grep -q "^v$VERSION$"; then
+                echo "⚠️  Tag v$VERSION already exists, skipping release"
+                echo "should_release=false" >> $GITHUB_OUTPUT
+                echo "reason=tag_exists" >> $GITHUB_OUTPUT
+              else
+                echo "🚀 Version changed from $PREVIOUS_VERSION to $VERSION, creating release"
+                echo "should_release=true" >> $GITHUB_OUTPUT
+              fi
+            fi
+          fi
+
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+  create-release:
+    needs: check-version
+    if: needs.check-version.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Create plugin zip
+        run: |
+          VERSION="${{ needs.check-version.outputs.version }}"
+
+          # Create temporary directory
+          mkdir -p /tmp/ga4-server-side-tagging
+
+          # Copy plugin files (exclude development files)
+          rsync -av --exclude-from='.github/workflows/exclude-files.txt' \
+            --exclude='.git*' \
+            --exclude='.env*' \
+            --exclude='node_modules' \
+            --exclude='*.log' \
+            --exclude='.DS_Store' \
+            . /tmp/ga4-server-side-tagging/
+
+          # Create zip file
+          cd /tmp
+          zip -r "ga4-server-side-tagging-v${VERSION}.zip" ga4-server-side-tagging/
+
+          # Move back to workspace
+          mv "ga4-server-side-tagging-v${VERSION}.zip" $GITHUB_WORKSPACE/
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          VERSION="${{ needs.check-version.outputs.version }}"
+
+          # Get commits since last tag
+          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+
+          if [ -n "$LAST_TAG" ]; then
+            COMMITS=$(git log ${LAST_TAG}..HEAD --oneline --pretty=format:"- %s" | head -20)
+          else
+            COMMITS=$(git log --oneline --pretty=format:"- %s" | head -10)
+          fi
+
+          # Create changelog
+          cat > changelog.md << EOF
+          ## What's Changed
+
+          $COMMITS
+
+          ## Installation
+
+          1. Download the plugin zip file below
+          2. Upload to WordPress admin > Plugins > Add New > Upload Plugin
+          3. Activate the plugin
+          4. Configure your settings in GA4 Server-Side Tagging menu
+
+          ## Auto-Update Setup
+
+          To receive automatic updates on client sites:
+          1. Configure GitHub repository details in the plugin's Auto-Updates tab
+          2. Enable auto-updates
+          3. Future releases will appear as WordPress plugin updates
+
+          **Full Changelog**: https://github.com/\${{ github.repository }}/compare/${LAST_TAG}...v${VERSION}
+          EOF
+
+          echo "changelog<<EOF" >> $GITHUB_OUTPUT
+          cat changelog.md >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ needs.check-version.outputs.version }}
+          name: "GA4 Server-Side Tagging v${{ needs.check-version.outputs.version }}"
+          body: ${{ steps.changelog.outputs.changelog }}
+          files: |
+            ga4-server-side-tagging-v${{ needs.check-version.outputs.version }}.zip
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Trigger update checks (optional)
+        if: ${{ vars.WEBHOOK_URL }}
+        run: |
+          # Optional: Trigger immediate update checks on client sites
+          # You can set WEBHOOK_URL as a repository variable
+          curl -X POST "${{ vars.WEBHOOK_URL }}" \
+            -H "Content-Type: application/json" \
+            -d '{"version": "${{ needs.check-version.outputs.version }}", "repository": "${{ github.repository }}"}' \
+            || echo "Webhook notification failed (non-critical)"
+
+  notify-success:
+    needs: [check-version, create-release]
+    if: success() && needs.check-version.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Success notification
+        run: |
+          echo "✅ Successfully created release v${{ needs.check-version.outputs.version }}"
+          echo "🔗 Release URL: https://github.com/${{ github.repository }}/releases/tag/v${{ needs.check-version.outputs.version }}"
+          echo "📦 Client sites with auto-updates enabled will receive this update within 12 hours"
+
+  notify-skipped:
+    needs: [check-version]
+    if: needs.check-version.outputs.should_release == 'false'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Skipped notification
+        run: |
+          if [ "${{ needs.check-version.outputs.reason }}" = "version_not_changed" ]; then
+            echo "⏸️ Release skipped: Version not changed in ga4-server-side-tagging.php"
+            echo "💡 To create a release, update the version number in:"
+            echo "   - Line ~14: * Version: [NEW_VERSION]"
+            echo "   - Line ~31: define('GA4_SERVER_SIDE_TAGGING_VERSION', '[NEW_VERSION]');"
+          elif [ "${{ needs.check-version.outputs.reason }}" = "tag_exists" ]; then
+            echo "⚠️ Release skipped: Tag v${{ needs.check-version.outputs.version }} already exists"
+            echo "💡 To create a release, increment the version number"
+          else
+            echo "⏸️ Release skipped: Unknown reason"
+          fi

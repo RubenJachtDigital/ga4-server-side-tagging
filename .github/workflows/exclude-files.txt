@@ -1,0 +1,20 @@
+# Files to exclude from plugin distribution
+.git/
+.github/
+.gitignore
+.env
+.env.*
+node_modules/
+*.log
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.tmp
+*.bak
+tests/
+phpunit.xml
+composer.lock
+package-lock.json
+webpack.config.js
+gulpfile.js
