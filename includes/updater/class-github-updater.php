@@ -631,17 +631,113 @@ class GitHub_Updater {
             return $reply;
         }
 
-        // Prepare authentication headers
+        // Try different approaches to download the file
+        $temp_file = $this->download_with_github_api($package);
+
+        if (is_wp_error($temp_file)) {
+            // Fallback: try direct download with authentication
+            $temp_file = $this->download_direct_with_auth($package);
+        }
+
+        return $temp_file;
+    }
+
+    /**
+     * Download using GitHub API asset endpoint
+     *
+     * @param string $package Package URL
+     * @return string|WP_Error Temporary file path or error
+     */
+    private function download_with_github_api($package) {
+        // Extract version from package URL
+        if (preg_match('/\/releases\/download\/v([^\/]+)\//', $package, $matches)) {
+            $version = $matches[1];
+        } else {
+            return new \WP_Error('version_parse_failed', 'Could not parse version from URL');
+        }
+
+        // Get release data to find asset ID
+        $api_url = "https://api.github.com/repos/{$this->config['username']}/{$this->config['repo']}/releases/tags/v{$version}";
         $headers = array(
-            'Accept' => 'application/vnd.github.v3.raw',
+            'Accept' => 'application/vnd.github.v3+json',
             'User-Agent' => 'WordPress/' . get_bloginfo('version') . '; ' . get_bloginfo('url'),
             'Authorization' => 'token ' . $this->config['token']
         );
 
-        // Download with authentication
-        $response = wp_remote_get($package, array(
-            'timeout' => 300, // 5 minutes for large files
+        $response = wp_remote_get($api_url, array(
+            'timeout' => 30,
             'headers' => $headers
+        ));
+
+        if (is_wp_error($response) || wp_remote_retrieve_response_code($response) !== 200) {
+            if (defined('WP_DEBUG') && WP_DEBUG) {
+                $error_msg = is_wp_error($response) ? $response->get_error_message() : 'HTTP ' . wp_remote_retrieve_response_code($response);
+                error_log("GA4 GitHub Updater: Failed to get release data - " . $error_msg);
+            }
+            return new \WP_Error('api_failed', 'Failed to get release data');
+        }
+
+        $release_data = json_decode(wp_remote_retrieve_body($response), true);
+
+        // Find the zip asset
+        $asset_id = null;
+        if (isset($release_data['assets'])) {
+            foreach ($release_data['assets'] as $asset) {
+                if (strpos($asset['name'], '.zip') !== false) {
+                    $asset_id = $asset['id'];
+                    break;
+                }
+            }
+        }
+
+        if (!$asset_id) {
+            return new \WP_Error('asset_not_found', 'Could not find zip asset in release');
+        }
+
+        // Download using asset API endpoint
+        $asset_url = "https://api.github.com/repos/{$this->config['username']}/{$this->config['repo']}/releases/assets/{$asset_id}";
+        $headers['Accept'] = 'application/octet-stream';
+
+        if (defined('WP_DEBUG') && WP_DEBUG) {
+            error_log("GA4 GitHub Updater: Downloading from asset API: " . $asset_url);
+        }
+
+        return $this->download_and_save($asset_url, $headers);
+    }
+
+    /**
+     * Download directly with authentication headers
+     *
+     * @param string $package Package URL
+     * @return string|WP_Error Temporary file path or error
+     */
+    private function download_direct_with_auth($package) {
+        $headers = array(
+            'Accept' => 'application/octet-stream',
+            'User-Agent' => 'WordPress/' . get_bloginfo('version') . '; ' . get_bloginfo('url'),
+            'Authorization' => 'token ' . $this->config['token']
+        );
+
+        if (defined('WP_DEBUG') && WP_DEBUG) {
+            error_log("GA4 GitHub Updater: Trying direct download with auth: " . $package);
+        }
+
+        return $this->download_and_save($package, $headers);
+    }
+
+    /**
+     * Download file and save to temporary location
+     *
+     * @param string $url URL to download from
+     * @param array $headers HTTP headers
+     * @return string|WP_Error Temporary file path or error
+     */
+    private function download_and_save($url, $headers) {
+        $response = wp_remote_get($url, array(
+            'timeout' => 300,
+            'redirection' => 5,
+            'headers' => $headers,
+            'sslverify' => true
         ));
 
         if (is_wp_error($response)) {
@@ -669,7 +765,7 @@ class GitHub_Updater {
         }
 
         // Create temporary file
-        $temp_file = wp_tempnam($package);
+        $temp_file = wp_tempnam($url);
         if (!$temp_file) {
             return new \WP_Error('temp_file_failed', 'Could not create temporary file');
         }
@@ -689,7 +785,7 @@ class GitHub_Updater {
         }
 
         if (defined('WP_DEBUG') && WP_DEBUG) {
-            error_log("GA4 GitHub Updater: Successfully downloaded and saved to: " . $temp_file);
+            error_log("GA4 GitHub Updater: Successfully downloaded and saved to: " . $temp_file . " (Size: " . filesize($temp_file) . " bytes)");
         }
 
         return $temp_file;
